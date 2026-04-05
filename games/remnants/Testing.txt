@@ -1,0 +1,245 @@
+✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
+claude --resume 4f9470c6-7519-4c6c-bbb8-c48bfffa3a38
+
+
+● Remnants — Comprehensive Test Walkthrough
+
+*Healing staff description says "no attack until you find one" - player will ask "one what"?
+*
+
+
+  ---
+  1. TITLE SCREEN
+
+  - Open the game. Should say REMNANTS — The world remembers ✅
+  - If first time: goes straight to character creator ✅
+  - If save exists: Continue / New Game / Reset World menu ✅
+    - Test all three: Continue loads game, New Game erases save but keeps legacy, Reset World erases everything ✅
+  - Press H — first help page should be THE VOID explaining corruption/obelisk/legacy ✅
+
+✅ Recommend doing a few levels of the dungeon first to get spells and gear
+
+  2. CHARACTER CREATOR
+
+  - Up/Down to select options, Left/Right to change ✅
+  - Options: Outfit, Hair Color, Hair Style, Skin, Eyes, Body (broad/narrow), Height, Frame, Weapon ✅
+  - Verify Body says "broad" or "narrow" (not masculine/feminine) ✅
+  - Choose different weapon types (Sword/Wand/Staff) — preview on left should update ✅
+  - Press Enter to start ✅
+
+  3. ACTIVATE DEBUG
+
+  - Press ` (backtick) — purple DEBUG bar appears below stats panel (top-left) ✅
+  - Verify it shows: F1:kit F2:+6h F3:heart F4:heal F5:info F6:N F7:E F8:S F9:W ✅
+  - Verify F1 text is NOT hidden behind DEBUG label ✅
+  - Press F1 — starter kit granted (browser should NOT open help tab) ✅
+  - Press F5 — stats dump in log ✅
+
+  4. IMMEDIATE CHECKS
+
+  - No NPCs nearby — wilderness should be empty at start ✅
+  - Time display at top-center shows Day/Season/Time ✅
+  - Weapon shows correctly in top-right — NOT "Unarmed" ✅
+  - Ability bar at bottom-left shows weapon ability name (e.g. "Sword Strike" not "Sword +1") ✅
+  - [P] indicator in top-right shows next consumable by name and colour ✅
+  - No overlapping text anywhere on the HUD ✅
+
+  5. INVENTORY (press I)
+
+  - Three tabs: Equip / Skills / Bag — switch with Tab or Q ✅
+  - Equip tab:
+    - Weapon row with "[E] Stash" right-aligned INSIDE the highlight box 
+    - Press E to stash weapon — weapon disappears, ability removed from bar
+    - Slot shows stashed weapon name, "◀▶ browse [E] Equip (1 stashed)"
+    - Left/Right to browse if multiple stashed items
+    - Press E to re-equip — weapon returns, ability reappears in bar
+    - Armor row works the same way
+    - Wardrobe row — "[E] Open" inside the box, NOT extending outside
+  - Skills tab:
+    - Two-column grid layout
+    - Skill names truncated if long, level right-aligned to column edge
+    - XP bars span full column width
+    - Should handle 8+ skills without overflow
+  - Bag tab:
+    - Scrollable list with category headers
+    - Up/Down to scroll, shows position indicator
+    - Text is readable (NOT microscopic)
+    - Category headers don't overlap items
+  - Debug toggle — press backtick while in inventory — should toggle debug on/off
+  - Close with I or Escape
+
+  6. WARDROBE (from Inventory → Equip → Wardrobe row → E)
+
+  - Character preview centred in purple box — head NOT clipped at top
+  - All options work: change hair style, body type, colours
+  - Hair style visible on preview (spiky/long/mohawk etc.)
+  - Escape to return to inventory
+
+  7. CRAFTING (press C)
+
+  - Recipe list on left, detail on right
+  - Detail box sizes dynamically (NOT fixed height overflowing)
+  - Prerequisite chain visible: "PREREQUISITE: ✓ Stone Axe"
+  - Craft Bread (cooking, wheat x3) — verify it appears
+  - Craft Carrot Stew (farming, carrot x2 + wheat) — verify it exists
+  - No duplicate Bread recipe between farming and cooking
+  - Press P after crafting food — should show the food name in the [P] indicator
+  - Escape to close
+
+  8. BUILDING (press B)
+
+  - Six category tabs: Paths / Homes / Commerce / Production / Decoration / Special
+  - Up/Down switches category, Left/Right selects item
+  - Green/red placement preview in world space
+  - Build a Campfire, Small Home, Food Store
+  - In Special tab: Obelisk should be listed
+  - Escape to close
+
+  9. FOOD STORE
+
+  - Walk next to food store interior, press E toward it
+  - Should stock half your food items with count logged
+  - Village reputation indicator should appear (bottom-left when not in overlay)
+
+  10. GATHERING & TOOLS
+
+  - Chop a tree (E toward it) — verify axe durability decreases
+  - Mine ore if near mountains (E toward vein)
+  - Pick up herbs/rocks/insects by standing on them and pressing E
+  - Fallen branches — pick up without tool
+  - Spear: craft Wooden Spear (4 branch + 2 flint, gathering level 1)
+    - Should auto-add weapon to equipment stash
+    - Works as fishing tool (alternative to rod)
+
+  11. SWIMMING
+
+  - Walk into shallows (lighter blue tiles) — character should wade (legs clipped, slower movement)
+  - Walk into deep water (dark blue):
+    - Press Left or Right — character rotates 90° horizontal, legs kicking, half submerged
+    - Press Up — bird's eye view, back of head (hair matches your hairstyle), arms stroking
+    - Press Down — bird's eye view, back of head (hair only, no face), legs kicking at top
+    - Takes 1 HP per turn, logged periodically
+    - Ripple effect around player
+  - Walk onto a pond (small water with reeds) — should trigger shallows wading
+  - Walk onto a fishing spot — should also trigger wading
+  - No trail wear marks should form on water/pond/fishing tiles
+  - Exit water — character returns to normal immediately
+
+  12. ANIMALS
+
+  - Walk around grassland — animals should appear nearby (within view)
+  - Labels show within 5 tiles: "Rabbit" (grey), "Wolf" (red), "Horse" (grey)
+  - Passive animals (rabbit, deer, fox) flee when you approach
+  - Hostile animals (wolf, boar, bear) attack you
+  - Walk into a hostile animal to melee attack
+  - Press 1-4 to use ability on them — targeting overlay should highlight tiles
+  - Defeating wolves/boars/bears drops leather
+  - Taming: have a carrot, walk next to rabbit, press E toward it — 50% tame chance
+  - Riding: tame a horse with wheat, press E to mount — move 2 tiles per turn
+
+  13. NPCs
+
+  - With no buildings: travellers are rare (~every 500 turns)
+  - Press F2 several times to advance time
+  - Eventually "A hunter approaches from the east" (or similar)
+  - Walk next to NPC, press E — dialogue box opens
+    - All text INSIDE the box, no overflow
+    - Skills shown with star ratings
+    - If you built a home: "[Y] Would you like to live here?"
+  - Attack NPC: walk into them — damages them, HP bar appears
+    - All other NPCs lose 30 relationship
+    - Residents with relationship <= -50 flee
+    - Dead NPCs drop loot based on type (hunter: leather, trader: gold, etc.)
+    - Abilities (1-4) also work on NPCs
+  - Debug toggle during dialogue — backtick should work
+
+  14. DUNGEON
+
+  - Find stone ruins entrance (within 8-25 tiles of spawn)
+  - Walk onto entrance to descend
+  - Floor 1: Upper Crypts — Zombies, Giant Spiders, Bat Swarms
+  - Walk into enemies to melee attack
+  - Press 1-4 for abilities — targeting overlay highlights affected tiles
+  - Loot drops: resources/scrolls auto-collect, weapons/armor show equip prompt
+    - Potions should NOT show "replace armor?" prompt
+  - Find up-stairs (blue) at spawn point — can retreat on every floor
+  - Go deeper via down-stairs (gold) — enemies get harder
+  - Night entry (press F2 to advance to night before entering): "The ruins stir with nightfall" — 50% more enemies
+  - Kill a boss — drops Dungeon Heart, entrance marked as cleared
+
+  15. OVERWORLD COMBAT
+
+  - Night spawns: skeletons appear near uncleared dungeon entrances at night
+  - Walk into them to attack — same as dungeon combat
+  - Abilities work on them too
+  - Defeating them gives combat XP and leather
+
+  16. CORRUPTION & OBELISK
+
+  - Press F2 repeatedly — purple corrupted tiles should spread from uncleared dungeons
+  - Corrupted tiles damage player 1 HP per turn
+  - Clear a dungeon → corruption from that entrance slowly recedes
+  - Build the Obelisk (Special tab in build mode)
+  - Walk next to it, press E — shows tier and requirements
+  - Press F3 for hearts, upgrade through tiers — obelisk colour changes
+  - Each tier purifies corruption in growing radius
+
+  17. TRADING TOWNS
+
+  - Press F7 (teleport east 50 tiles) — look for a trading town
+  - "You see Stonegate in the distance" message at ~15 tiles
+  - Town: stone walls, cobblestone, market stall, merchant NPCs
+  - Talk to merchant — dialogue shows buy/sell options
+    - "[Y] Sell my goods" — sells matching items for gold
+    - "[1] Buy Health Potion (20g)" — can purchase if you have gold
+    - Dialogue stays open after transactions (refreshes)
+    - Can attack merchants too (drops 15-35 gold)
+
+  18. TRAILS
+
+  - Walk back and forth over the same natural ground tiles
+  - After ~3 passes: faint darkening visible
+  - After ~6 passes: worn trail tile (with footprints)
+  - After many passes: permanent dirt path
+  - Trails do NOT form on: buildings, roads, water, ponds, fishing spots, ruins, farms
+  - Actively used trails don't decay (100-turn grace period)
+
+  19. CARAVAN (if you have saddle + materials)
+
+  - Craft Caravan Kit (C menu, gathering level 4)
+  - Stand near tamed horse, press E with no other target → deploys caravan
+  - E toward caravan → hitches
+  - E again → loads goods / E again → unloads / E again → unhitches
+
+  20. LEGACY (requires death)
+
+  - Note your village location and equipment
+  - Die (enter a tough dungeon or let wolves kill you)
+  - Death screen: skills shown in rows of 3 (not overflowing box)
+  - Press any key → title screen
+  - "X past lives" stats shown
+  - Start New Game (same world seed)
+  - Walk to old village → should be ruins
+  - Find ghost NPCs (translucent blue) → talk → they remember fragments
+  - Find death marker (skeleton with weapon) → E toward it → loot old gear + dungeon hearts
+  - Reset World → completely fresh, no legacy
+
+  21. SAVE & CONTINUE
+
+  - Play for a moment, then refresh browser
+  - Title should show Continue (save happens immediately on game start)
+  - Continue → resumes exactly where you left off
+
+  22. HELP PAGES (press H)
+
+  - All pages should display ALL text — nothing cut off at the bottom
+  - Browse with Left/Right arrows
+  - Pages: The Void, Controls, Gathering, Crafting & Building, Village & NPCs, Farming & Food, Animals & Pets, Dungeons & Combat, World & Weather
+
+  ---
+  Watch for throughout:
+  - Text overlapping boxes or other text
+  - Elements invisible or off-screen
+  - Menus that can't be exited (softlock)
+  - Console errors (F12 → Console)
+  - Debug toggle (backtick) should work in ALL states except aim mode

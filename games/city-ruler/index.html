@@ -1,0 +1,1910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>City Ruler</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; font-family: 'Segoe UI', Arial, sans-serif; color: #e0d8c8; }
+
+#game { width: 100vw; height: 100vh; display: flex; flex-direction: column; }
+
+/* Top bar - resources */
+#top-bar {
+  background: linear-gradient(to bottom, #2a1a0a, #1e1408);
+  padding: 6px 12px;
+  display: flex; align-items: center; justify-content: center; gap: 18px;
+  border-bottom: 2px solid #4a3520; flex-shrink: 0; flex-wrap: wrap;
+  min-height: 44px;
+}
+.res { text-align: center; min-width: 60px; }
+.res .label { font-size: 10px; color: #8a7a60; text-transform: uppercase; letter-spacing: 1px; }
+.res .val { font-size: 18px; font-weight: bold; }
+.res-gold .val { color: #ffd700; }
+.res-pop .val { color: #88ccff; }
+.res-happy .val { color: #88ff88; }
+.res-year .val { color: #cc99ff; }
+
+/* City view */
+#city-view {
+  flex: 1; min-height: 0; position: relative; overflow: hidden;
+  background: linear-gradient(to bottom, #87CEEB 0%, #87CEEB 40%, #4a8f3f 40%, #3a7a30 100%);
+}
+#city-canvas { width: 100%; height: 100%; display: block; }
+
+/* Event log */
+#event-log {
+  position: absolute; top: 8px; left: 8px; right: 8px;
+  pointer-events: none; z-index: 4;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.event-msg {
+  background: rgba(0,0,0,0.7); color: #ddd; padding: 4px 10px;
+  border-radius: 4px; font-size: 12px; line-height: 1.3;
+  animation: eventFade 3s forwards; width: fit-content;
+}
+.event-msg.bad { border-left: 3px solid #c44; }
+.event-msg.good { border-left: 3px solid #4c4; }
+.event-msg.crisis { border-left: 3px solid #ca4; background: rgba(40,20,0,0.8); }
+@keyframes eventFade { 0%,70% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Proposal panel */
+#proposal-panel {
+  background: linear-gradient(to bottom, #2a1a0a, #1e1408);
+  border-top: 2px solid #4a3520;
+  padding: 12px 16px;
+  flex-shrink: 0;
+  min-height: 150px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+#citizen-line {
+  font-size: 12px; color: #8a7a60; margin-bottom: 4px;
+  font-style: italic;
+}
+#proposal-text {
+  font-size: 16px; text-align: center; margin-bottom: 4px;
+  max-width: 600px; line-height: 1.4;
+}
+#proposal-effects {
+  font-size: 12px; color: #aa9970; margin-bottom: 4px; text-align: center;
+}
+#proposal-warning {
+  font-size: 11px; color: #aa7744; margin-bottom: 6px; font-style: italic;
+}
+.eff-pos { color: #6c6; }
+.eff-neg { color: #c66; }
+.eff-unknown { color: #ca6; }
+#buttons { display: flex; gap: 16px; }
+.btn {
+  padding: 10px 36px; border: 2px solid; border-radius: 8px;
+  font-size: 18px; font-weight: bold; cursor: pointer;
+  transition: all 0.15s; font-family: inherit;
+  min-width: 120px; touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent; user-select: none;
+}
+#btn-yes {
+  background: linear-gradient(to bottom, #2a5a2a, #1a4a1a);
+  border-color: #4a8a4a; color: #8f8;
+}
+#btn-yes:hover { background: linear-gradient(to bottom, #3a7a3a, #2a6a2a); box-shadow: 0 0 15px rgba(100,255,100,0.3); }
+#btn-no {
+  background: linear-gradient(to bottom, #5a2a2a, #4a1a1a);
+  border-color: #8a4a4a; color: #f88;
+}
+#btn-no:hover { background: linear-gradient(to bottom, #7a3a3a, #6a2a2a); box-shadow: 0 0 15px rgba(255,100,100,0.3); }
+
+/* Title screen */
+#title-screen {
+  position: absolute; inset: 0; z-index: 10;
+  background: linear-gradient(to bottom, #1a1a2e, #0a0a1a);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+#title-screen h1 {
+  font-size: 48px; color: #ffd700; text-shadow: 0 2px 8px rgba(255,215,0,0.3);
+  margin-bottom: 8px;
+}
+#title-screen .subtitle { color: #8a7a60; font-size: 16px; margin-bottom: 30px; }
+#title-screen .start-btn {
+  padding: 14px 48px; background: linear-gradient(to bottom, #3a5a3a, #2a4a2a);
+  border: 2px solid #4a8a4a; border-radius: 10px; color: #8f8;
+  font-size: 20px; font-weight: bold; cursor: pointer; font-family: inherit;
+  transition: all 0.2s;
+}
+#title-screen .start-btn:hover { box-shadow: 0 0 20px rgba(100,255,100,0.3); }
+#title-screen .instructions {
+  margin-top: 24px; color: #666; font-size: 13px; text-align: center; line-height: 1.8; max-width: 420px;
+}
+
+/* Game over */
+#gameover-screen {
+  position: absolute; inset: 0; z-index: 10;
+  background: rgba(0,0,0,0.85);
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+}
+#gameover-screen h1 { font-size: 36px; color: #ff6644; margin-bottom: 8px; }
+#gameover-reason { color: #aa8866; font-size: 14px; margin-bottom: 16px; text-align: center; max-width: 400px; }
+#gameover-stats { color: #ccc; font-size: 14px; margin-bottom: 20px; text-align: center; line-height: 1.8; }
+#gameover-screen .start-btn {
+  padding: 12px 40px; background: linear-gradient(to bottom, #3a5a3a, #2a4a2a);
+  border: 2px solid #4a8a4a; border-radius: 10px; color: #8f8;
+  font-size: 18px; font-weight: bold; cursor: pointer; font-family: inherit;
+}
+
+/* Result flash */
+#result-flash {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  font-size: 28px; font-weight: bold; pointer-events: none;
+  opacity: 0; transition: opacity 0.3s;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  z-index: 5;
+}
+
+/* Mobile adjustments */
+@media (max-width: 600px) {
+  #title-screen h1 { font-size: 32px; }
+  #proposal-text { font-size: 14px; }
+  .btn { padding: 8px 28px; font-size: 16px; min-width: 100px; }
+  .res .val { font-size: 15px; }
+  #top-bar { gap: 12px; }
+}
+</style>
+</head>
+<body>
+<div id="game">
+  <div id="top-bar">
+    <div class="res res-gold"><div class="label">Gold</div><div class="val" id="gold-val">100</div></div>
+    <div class="res res-pop"><div class="label">Population</div><div class="val" id="pop-val">50</div></div>
+    <div class="res res-happy"><div class="label">Happiness</div><div class="val" id="happy-val">70%</div></div>
+    <div class="res res-year"><div class="label">Year</div><div class="val" id="year-val">1</div></div>
+  </div>
+  <div id="city-view">
+    <canvas id="city-canvas"></canvas>
+    <div id="event-log"></div>
+    <div id="result-flash"></div>
+  </div>
+  <div id="proposal-panel">
+    <div id="citizen-line"></div>
+    <div id="proposal-text"></div>
+    <div id="proposal-effects"></div>
+    <div id="proposal-warning"></div>
+    <div id="buttons">
+      <button class="btn" id="btn-yes">YES</button>
+      <button class="btn" id="btn-no">NO</button>
+    </div>
+  </div>
+</div>
+
+<div id="title-screen">
+  <h1>City Ruler</h1>
+  <div class="subtitle">Every decision shapes your kingdom</div>
+  <button class="start-btn" id="start-btn">BEGIN YOUR REIGN</button>
+  <div class="instructions">
+    Citizens bring proposals. You say Yes or No.<br>
+    Balance gold, population, and happiness.<br>
+    Your city costs upkeep each year — grow wisely.<br>
+    Not every proposal is what it seems.<br>
+    Some choices have consequences down the road.<br>
+    If any resource hits zero, your reign ends.
+  </div>
+</div>
+
+<div id="gameover-screen">
+  <h1 id="gameover-title">Reign Over</h1>
+  <div id="gameover-reason"></div>
+  <div id="gameover-stats"></div>
+  <button class="start-btn" id="restart-btn">RULE AGAIN</button>
+</div>
+
+<script>
+(function() {
+'use strict';
+
+// ============================================================
+// SOUND
+// ============================================================
+var SFX = (function() {
+  var ctx = null, muted = false;
+  function getCtx() {
+    if (!ctx) try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return null; }
+    if (ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+  function play(fn) { if (muted) return; var c = getCtx(); if (c) fn(c); }
+  return {
+    get muted() { return muted }, set muted(v) { muted = v; },
+    approve: function() {
+      play(function(c) {
+        var o = c.createOscillator(), g = c.createGain();
+        o.type = 'sine'; o.frequency.value = 600;
+        o.frequency.linearRampToValueAtTime(900, c.currentTime + 0.1);
+        g.gain.setValueAtTime(0.1, c.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.15);
+        o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + 0.15);
+      });
+    },
+    reject: function() {
+      play(function(c) {
+        var o = c.createOscillator(), g = c.createGain();
+        o.type = 'square'; o.frequency.value = 300;
+        o.frequency.linearRampToValueAtTime(150, c.currentTime + 0.15);
+        g.gain.setValueAtTime(0.08, c.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.15);
+        o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + 0.15);
+      });
+    },
+    build: function() {
+      play(function(c) {
+        var o = c.createOscillator(), g = c.createGain();
+        o.type = 'triangle'; o.frequency.value = 400;
+        o.frequency.linearRampToValueAtTime(800, c.currentTime + 0.2);
+        g.gain.setValueAtTime(0.08, c.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.25);
+        o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + 0.25);
+      });
+    },
+    crisis: function() {
+      play(function(c) {
+        var o = c.createOscillator(), g = c.createGain();
+        o.type = 'sawtooth'; o.frequency.value = 200;
+        o.frequency.linearRampToValueAtTime(100, c.currentTime + 0.4);
+        g.gain.setValueAtTime(0.1, c.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.4);
+        o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + 0.4);
+      });
+    },
+    gameover: function() {
+      play(function(c) {
+        [400, 350, 300, 200].forEach(function(f, i) {
+          var o = c.createOscillator(), g = c.createGain();
+          o.type = 'sawtooth'; o.frequency.value = f;
+          g.gain.setValueAtTime(0.08, c.currentTime + i * 0.15);
+          g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + i * 0.15 + 0.2);
+          o.connect(g); g.connect(c.destination);
+          o.start(c.currentTime + i * 0.15); o.stop(c.currentTime + i * 0.15 + 0.2);
+        });
+      });
+    }
+  };
+})();
+
+// ============================================================
+// GAME STATE
+// ============================================================
+var state = {};
+
+function resetState() {
+  state = {
+    gold: 100,
+    population: 50,
+    happiness: 70,
+    year: 1,
+    decisions: 0,
+    approved: 0,
+    rejected: 0,
+    buildings: [],       // { type, x, y, colorIdx }
+    tags: {},            // string flags for chain logic: { 'has_tavern': true, ... }
+    pendingEvents: [],   // { turnsLeft, text, effects, type }
+    gameOver: false
+  };
+}
+
+// ============================================================
+// BUILDING TYPES
+// ============================================================
+var BUILDING_TYPES = {
+  house:     { w: 20, h: 22, colors: ['#8B7355', '#A0896C', '#9C8060'], upkeep: 1, income: 0 },
+  market:    { w: 28, h: 20, colors: ['#B8860B', '#DAA520', '#CD950C'], upkeep: 2, income: 8 },
+  tower:     { w: 14, h: 34, colors: ['#696969', '#808080', '#778899'], upkeep: 3, income: 0 },
+  farm:      { w: 30, h: 16, colors: ['#8B4513', '#A0522D', '#6B3410'], upkeep: 1, income: 5 },
+  temple:    { w: 26, h: 30, colors: ['#DDD', '#CCC', '#BBB'], upkeep: 3, income: 0 },
+  tavern:    { w: 24, h: 20, colors: ['#8B6914', '#A07828', '#917030'], upkeep: 1, income: 5 },
+  barracks:  { w: 26, h: 22, colors: ['#555', '#666', '#5A5A5A'], upkeep: 4, income: 0 },
+  workshop:  { w: 22, h: 20, colors: ['#7A5C3A', '#8B6844', '#6A4C2A'], upkeep: 2, income: 6 },
+  garden:    { w: 26, h: 14, colors: ['#2E8B57', '#3CB371', '#228B22'], upkeep: 1, income: 0 },
+  wall:      { w: 30, h: 26, colors: ['#808080', '#999', '#707070'], upkeep: 2, income: 0 },
+  dock:      { w: 28, h: 16, colors: ['#5A3A1A', '#6B4B2B', '#4A2A0A'], upkeep: 2, income: 6 },
+  monument:  { w: 16, h: 32, colors: ['#C0C0C0', '#D4D4D4', '#A9A9A9'], upkeep: 2, income: 0 },
+};
+
+// ============================================================
+// CITIZENS
+// ============================================================
+var CITIZENS = [
+  { name: 'The Merchant Guild', title: 'Merchant' },
+  { name: 'The Farmers\' Council', title: 'Farmer' },
+  { name: 'A Traveling Engineer', title: 'Engineer' },
+  { name: 'The Town Guard Captain', title: 'Guard' },
+  { name: 'A Wealthy Noble', title: 'Noble' },
+  { name: 'The Temple Priestess', title: 'Priestess' },
+  { name: 'A Band of Refugees', title: 'Refugee' },
+  { name: 'The Miners\' Union', title: 'Miner' },
+  { name: 'A Court Jester', title: 'Jester' },
+  { name: 'The Royal Architect', title: 'Architect' },
+  { name: 'A Foreign Diplomat', title: 'Diplomat' },
+  { name: 'The Dockworkers', title: 'Dockworker' },
+  { name: 'An Old Hermit', title: 'Hermit' },
+  { name: 'The Blacksmith', title: 'Blacksmith' },
+  { name: 'A Troupe of Bards', title: 'Bard' },
+  { name: 'The Alchemist', title: 'Alchemist' },
+  { name: 'A Shady Stranger', title: 'Stranger' },
+  { name: 'The Tax Collector', title: 'Tax Collector' },
+];
+
+// ============================================================
+// PROPOSALS
+// ============================================================
+// Each proposal:
+//   text          - what the citizen says
+//   citizen       - index into CITIZENS
+//   shown         - effects shown to player { gold, pop, happy } (may be partial/misleading)
+//   actual        - real effects applied on YES. If omitted, same as shown.
+//   rejectBonus   - effects applied on NO (if rejecting is the smart move)
+//   building      - building type added on YES (optional)
+//   consequence   - delayed event on YES: { delay: turns, text, effects }
+//   requireTag    - only appears if state.tags[tag] is truthy
+//   addTag        - sets state.tags[tag] = true on YES
+//   removeTag     - deletes state.tags[tag] on YES
+//   warning       - hint text shown below effects (optional)
+//   trap          - if true, this is a bad deal (rejecting is wise)
+
+var PROPOSALS = [
+  // ── ECONOMY (honest, straightforward) ───────────────────────
+  {
+    text: '"We propose a grand marketplace in the town square. Trade will flourish!"',
+    citizen: 0, shown: { gold: -15, pop: 5, happy: 5 }, building: 'market', addTag: 'has_market',
+    consequence: { delay: 3, text: 'The marketplace draws merchants from afar. Trade revenue increases.', effects: { gold: 15 }, type: 'good' }
+  },
+  {
+    text: '"A trading post on the river would bring fortune from distant lands."',
+    citizen: 0, shown: { gold: -25, pop: 5, happy: 5 }, building: 'dock', addTag: 'has_dock',
+    consequence: { delay: 4, text: 'River trade routes are now established. Ships bring steady income.', effects: { gold: 20 }, type: 'good' }
+  },
+  {
+    text: '"I\'ve invented a new plow! Fund mass production."',
+    citizen: 2, shown: { gold: -20, pop: 5, happy: 5 }, building: 'farm',
+    consequence: { delay: 3, text: 'The new plows doubled crop yields! Food surplus boosts the economy.', effects: { gold: 15, happy: 5 }, type: 'good' }
+  },
+  {
+    text: '"A forge and workshop would let our craftsmen sell their wares."',
+    citizen: 13, shown: { gold: -15, pop: 5, happy: 5 }, building: 'workshop', addTag: 'has_workshop',
+  },
+  {
+    text: '"Let me build a tavern. Workers need somewhere to unwind after a hard day."',
+    citizen: 0, shown: { gold: -10, pop: 0, happy: 10 }, building: 'tavern', addTag: 'has_tavern',
+    consequence: { delay: 4, text: 'Bar fights are becoming a nightly problem. The tavern attracts trouble.', effects: { happy: -8 }, type: 'bad' },
+    warning: 'Taverns can attract trouble...'
+  },
+
+  // ── PURE INCOME (no building cost, generate gold) ────────────
+  {
+    text: '"The annual tax collection is due. Shall I proceed, my liege?"',
+    citizen: 17, shown: { gold: 15, pop: 0, happy: -3 },
+  },
+  {
+    text: '"A trade caravan has arrived! They offer gold for safe passage through our lands."',
+    citizen: 0, shown: { gold: 12, pop: 0, happy: 0 },
+  },
+  {
+    text: '"The harvest was bountiful this season. We can sell the surplus."',
+    citizen: 1, shown: { gold: 10, pop: 0, happy: 3 },
+  },
+  {
+    text: '"A wealthy merchant wants to set up shop here. He\'ll pay a handsome licensing fee."',
+    citizen: 0, shown: { gold: 18, pop: 3, happy: 0 },
+    rejectBonus: { gold: 0 },
+  },
+  {
+    text: '"Neighboring villages want to buy our craftwork. A quick trade deal, your approval?"',
+    citizen: 13, shown: { gold: 10, pop: 0, happy: 2 },
+    requireTag: 'has_workshop',
+  },
+
+  // ── POPULATION / HOUSING ────────────────────────────────────
+  {
+    text: '"Our families need homes! Please approve new housing on the hillside."',
+    citizen: 1, shown: { gold: -20, pop: 15, happy: 10 }, building: 'house',
+  },
+  {
+    text: '"Let the refugees settle here. They bring skills and willing hands."',
+    citizen: 6, shown: { gold: 0, pop: 20, happy: -5 },
+    consequence: { delay: 3, text: 'The refugees have settled in well. Their craftsmanship enriches the city.', effects: { gold: 10, happy: 8 }, type: 'good' },
+    warning: 'More mouths to feed increases upkeep.'
+  },
+  {
+    text: '"More farmland to feed the growing population. Hungry people are angry people."',
+    citizen: 1, shown: { gold: -15, pop: 5, happy: 5 }, building: 'farm',
+  },
+
+  // ── MILITARY / DEFENSE ──────────────────────────────────────
+  {
+    text: '"Bandits threaten our roads. Fund a proper garrison!"',
+    citizen: 3, shown: { gold: -20, pop: 0, happy: 5 }, building: 'barracks', addTag: 'has_barracks',
+    consequence: { delay: 3, text: 'The garrison patrols have made the roads safe. Merchants travel freely.', effects: { gold: 10, happy: 5 }, type: 'good' }
+  },
+  {
+    text: '"A watchtower on the north hill will warn us of approaching threats."',
+    citizen: 3, shown: { gold: -15, pop: 0, happy: 5 }, building: 'tower', addTag: 'has_tower',
+  },
+  {
+    text: '"Fortify the city walls! Enemies gather beyond the forest."',
+    citizen: 3, shown: { gold: -30, pop: 0, happy: 10 }, building: 'wall', addTag: 'has_walls',
+  },
+
+  // ── HAPPINESS / CULTURE ─────────────────────────────────────
+  {
+    text: '"The people need a festival! Music, food, and merriment!"',
+    citizen: 14, shown: { gold: -15, pop: 0, happy: 15 },
+    consequence: { delay: 2, text: 'The festival was a great success! People still talk about it fondly.', effects: { happy: 5, pop: 5 }, type: 'good' }
+  },
+  {
+    text: '"Build a grand temple to lift the people\'s spirits."',
+    citizen: 5, shown: { gold: -25, pop: 0, happy: 15 }, building: 'temple', addTag: 'has_temple',
+  },
+  {
+    text: '"A public garden would bring beauty and peace to the city."',
+    citizen: 9, shown: { gold: -8, pop: 0, happy: 10 }, building: 'garden',
+  },
+  {
+    text: '"Let me perform for the court! Laughter is the best medicine."',
+    citizen: 8, shown: { gold: -3, pop: 0, happy: 8 },
+  },
+  {
+    text: '"Build a school for the children. Education breeds loyalty."',
+    citizen: 5, shown: { gold: -15, pop: 0, happy: 8 },
+    consequence: { delay: 5, text: 'A generation of educated citizens enters the workforce. Productivity soars.', effects: { gold: 15, pop: 10, happy: 5 }, type: 'good' }
+  },
+
+  // ── CHAIN: TAVERN CONSEQUENCES ──────────────────────────────
+  {
+    text: '"The tavern brawls are out of control. Station guards there — for a price."',
+    citizen: 3, shown: { gold: -10, pop: 0, happy: 8 },
+    requireTag: 'has_tavern',
+    rejectBonus: { happy: -5 },
+  },
+  {
+    text: '"The priestess demands you close the tavern. It corrupts the faithful."',
+    citizen: 5, shown: { gold: 0, pop: 0, happy: -5 },
+    requireTag: 'has_tavern',
+    actual: { gold: 0, pop: 0, happy: 5 }, // closing it actually pleases the devout
+    removeTag: 'has_tavern',
+    warning: 'The temple and tavern have never coexisted peacefully.',
+    consequence: { delay: 2, text: 'With the tavern closed, temple attendance soars. The faithful are pleased.', effects: { happy: 10 }, type: 'good' }
+  },
+
+  // ── CHAIN: DOCK EXPANSION ───────────────────────────────────
+  {
+    text: '"Foreign pirates target our docks. We need a harbor patrol!"',
+    citizen: 11, shown: { gold: -15, pop: 0, happy: 5 },
+    requireTag: 'has_dock',
+    rejectBonus: { gold: 0 },
+    consequence: { delay: 3, text: 'Pirates raided the undefended docks! Goods were stolen.', effects: { gold: -20 }, type: 'bad' },
+    // Consequence only fires if you reject (handled in code via trap on reject)
+  },
+
+  // ── TRAPS (saying NO is the right move) ─────────────────────
+  {
+    text: '"I\'ve discovered a gold vein in the mountains! Fund my expedition — guaranteed riches!"',
+    citizen: 16, shown: { gold: -25, pop: 0, happy: 0 }, trap: true,
+    actual: { gold: -25, pop: -10, happy: -5 },
+    consequence: { delay: 3, text: 'The "gold vein" was a scam. The miners found nothing but rock.', effects: { gold: -10, happy: -10 }, type: 'bad' },
+    warning: 'This stranger seems... overly confident.',
+    rejectBonus: { happy: 3 },
+  },
+  {
+    text: '"Commission a grand statue of yourself, my liege! Your people DEMAND it!"',
+    citizen: 4, shown: { gold: -35, pop: 0, happy: 15 }, building: 'monument', trap: true,
+    actual: { gold: -35, pop: 0, happy: -5 },
+    consequence: { delay: 2, text: 'The people mock the vain statue. "Our ruler wastes gold on vanity!"', effects: { happy: -10 }, type: 'bad' },
+    rejectBonus: { happy: 5 },
+    warning: 'The nobles always have ulterior motives...'
+  },
+  {
+    text: '"Raise an army and conquer the neighboring village! Glory awaits!"',
+    citizen: 3, shown: { gold: -15, pop: 0, happy: 10 }, trap: true,
+    actual: { gold: -15, pop: -20, happy: -10 },
+    consequence: { delay: 2, text: 'The war was a disaster. Many soldiers did not return. Families grieve.', effects: { pop: -10, happy: -15 }, type: 'bad' },
+    warning: 'War is always costly...',
+    rejectBonus: { happy: 5, pop: 3 },
+  },
+  {
+    text: '"Exile the troublemakers! Remove the dissenters and order will follow."',
+    citizen: 4, shown: { gold: 0, pop: -5, happy: 10 }, trap: true,
+    actual: { gold: 0, pop: -15, happy: -10 },
+    consequence: { delay: 3, text: 'Fear spreads. Families flee, worried they\'ll be next.', effects: { pop: -15, happy: -10 }, type: 'bad' },
+    rejectBonus: { happy: 8 },
+    warning: 'The people are watching how you treat dissent.'
+  },
+  {
+    text: '"I can brew a miracle elixir that cures all disease! I just need funding..."',
+    citizen: 15, shown: { gold: -20, pop: 10, happy: 10 }, trap: true,
+    actual: { gold: -20, pop: 0, happy: 0 },
+    consequence: { delay: 2, text: 'The "miracle elixir" was colored water. The alchemist has fled town.', effects: { gold: -5, happy: -10 }, type: 'bad' },
+    warning: 'No one has verified these claims...',
+    rejectBonus: { happy: 3 },
+  },
+  {
+    text: '"Conscript the farmers into the army. War is surely coming!"',
+    citizen: 3, shown: { gold: 0, pop: 0, happy: -5 }, trap: true,
+    actual: { gold: 0, pop: -10, happy: -15 },
+    consequence: { delay: 3, text: 'With no farmers, crops rotted in the fields. Famine grips the city.', effects: { pop: -10, happy: -10, gold: -15 }, type: 'bad' },
+    rejectBonus: { happy: 5, pop: 5 },
+    warning: 'Who will tend the fields?'
+  },
+
+  // ── RISKY BUT HONEST (tradeoffs) ───────────────────────────
+  {
+    text: '"Tax the nobles more heavily. The poor are starving and the rich feast."',
+    citizen: 1, shown: { gold: 25, pop: 0, happy: -10 },
+    rejectBonus: { happy: -3 }, // doing nothing also upsets the poor
+  },
+  {
+    text: '"Lower trade tariffs! Merchants will flock here, but local crafters may suffer."',
+    citizen: 0, shown: { gold: 15, pop: 5, happy: -5 },
+    consequence: { delay: 4, text: 'Cheap foreign goods have undercut local craftsmen. Some workshops close.', effects: { pop: -5, happy: -5 }, type: 'bad' },
+    warning: 'Local artisans are worried about competition.'
+  },
+  {
+    text: '"Raise taxes on luxury goods. The wealthy can afford it."',
+    citizen: 17, shown: { gold: 20, pop: 0, happy: -8 },
+    rejectBonus: { gold: -5 }, // treasury still needs filling somehow
+  },
+  {
+    text: '"Open the granary reserves. The people hunger!"',
+    citizen: 1, shown: { gold: -20, pop: 5, happy: 15 },
+    rejectBonus: { happy: -10, pop: -5 }, // refusing to feed the hungry has consequences
+  },
+  {
+    text: '"Forgive all debts. Start fresh. The people will love you."',
+    citizen: 6, shown: { gold: -35, pop: 5, happy: 20 },
+    consequence: { delay: 3, text: 'Creditors have fled to other cities, taking their wealth. Trade suffers.', effects: { gold: -10 }, type: 'bad' },
+    warning: 'The merchants look uneasy at this suggestion.'
+  },
+  {
+    text: '"Allow free speech in the square. The people want a voice."',
+    citizen: 10, shown: { gold: 0, pop: 3, happy: 10 },
+    consequence: { delay: 4, text: 'Public debates have become productive. Citizens propose better ideas.', effects: { happy: 5 }, type: 'good' }
+  },
+  {
+    text: '"Sign a peace treaty with our neighbors. It will cost tribute, but prevent war."',
+    citizen: 10, shown: { gold: -20, pop: 0, happy: 10 }, addTag: 'has_treaty',
+    consequence: { delay: 5, text: 'The peace holds. Border villages thrive without the threat of conflict.', effects: { pop: 10, gold: 10 }, type: 'good' }
+  },
+  {
+    text: '"Host a grand tournament! Knights from across the land will compete."',
+    citizen: 4, shown: { gold: -25, pop: 0, happy: 15 },
+    consequence: { delay: 2, text: 'The tournament drew visitors who spent lavishly. The innkeepers are thrilled.', effects: { gold: 20 }, type: 'good' }
+  },
+  {
+    text: '"Build a lighthouse at the harbor. Ships keep crashing on the rocks!"',
+    citizen: 11, shown: { gold: -15, pop: 0, happy: 5 }, building: 'tower',
+    requireTag: 'has_dock',
+  },
+  {
+    text: '"Hire foreign scholars. Their knowledge could transform this city."',
+    citizen: 10, shown: { gold: -15, pop: 5, happy: 5 },
+    consequence: { delay: 4, text: 'The scholars have improved farming techniques and medical knowledge.', effects: { pop: 10, happy: 5 }, type: 'good' }
+  },
+  {
+    text: '"The rats are everywhere! Fund an extermination campaign before plague spreads."',
+    citizen: 1, shown: { gold: -10, pop: 0, happy: 5 },
+    rejectBonus: { pop: 0 }, // ignoring rats has consequences handled by crisis system
+    consequence: { delay: 3, text: 'The rat problem is under control. Disease risk has dropped.', effects: { happy: 5 }, type: 'good' },
+  },
+  {
+    text: '"A canal through the city would improve sanitation and speed up trade."',
+    citizen: 2, shown: { gold: -30, pop: 5, happy: 5 }, building: 'dock',
+    consequence: { delay: 4, text: 'The canal is a marvel of engineering. Citizens bathe more. Everyone\'s happier.', effects: { happy: 10, gold: 10 }, type: 'good' }
+  },
+  {
+    text: '"Build a great bathhouse! Clean citizens are happy citizens."',
+    citizen: 9, shown: { gold: -20, pop: 0, happy: 12 }, building: 'house',
+    consequence: { delay: 3, text: 'The bathhouse has become the city\'s social hub. People love it.', effects: { happy: 5, pop: 5 }, type: 'good' }
+  },
+  {
+    text: '"Double the guards\' pay. They\'re threatening to quit."',
+    citizen: 3, shown: { gold: -15, pop: 0, happy: 5 },
+    requireTag: 'has_barracks',
+    rejectBonus: { happy: -8 }, // guards become resentful
+    consequence: { delay: 2, text: 'Well-paid guards patrol diligently. Crime has dropped significantly.', effects: { happy: 8, gold: 5 }, type: 'good' }
+  },
+  {
+    text: '"The hermit on the hill offers wisdom. He asks only for a small shrine."',
+    citizen: 12, shown: { gold: -8, pop: 0, happy: 5 },
+    consequence: { delay: 3, text: 'Pilgrims visit the hermit\'s shrine, bringing offerings and trade.', effects: { gold: 10, pop: 5 }, type: 'good' }
+  },
+
+  // ── MORE TRAPS ──────────────────────────────────────────────
+  {
+    text: '"Ban all alcohol! It corrupts the youth and drains productivity!"',
+    citizen: 5, shown: { gold: 5, pop: 0, happy: -5 }, trap: true,
+    actual: { gold: 5, pop: -5, happy: -15 },
+    consequence: { delay: 2, text: 'A black market for drink has formed. Crime is rampant.', effects: { happy: -10, gold: -10 }, type: 'bad' },
+    rejectBonus: { happy: 3 },
+    warning: 'People don\'t like being told what to do.'
+  },
+  {
+    text: '"Demolish the old quarter. It\'s an eyesore! I\'ll rebuild it beautifully."',
+    citizen: 9, shown: { gold: -20, pop: 0, happy: 10 }, trap: true,
+    actual: { gold: -20, pop: -15, happy: -10 },
+    consequence: { delay: 2, text: 'Hundreds of families were displaced. The promised rebuild hasn\'t started.', effects: { pop: -5, happy: -10 }, type: 'bad' },
+    rejectBonus: { happy: 5 },
+    warning: 'People live in the old quarter...'
+  },
+];
+
+// ============================================================
+// CRISIS EVENTS — test what you've built
+// ============================================================
+var CRISES = [
+  {
+    name: 'Bandit Raid',
+    text: 'Bandits attack the city!',
+    mitigatedBy: 'has_barracks',
+    unmitigated: { gold: -20, pop: -10, happy: -10, msg: 'With no garrison, the bandits pillaged freely.' },
+    mitigated: { gold: -5, pop: 0, happy: 0, msg: 'The garrison repelled the bandits with ease.' },
+  },
+  {
+    name: 'Famine',
+    text: 'A drought has struck! Crops are failing.',
+    mitigatedBy: 'farm', // checks building count
+    mitigateCount: 2,
+    unmitigated: { gold: -10, pop: -10, happy: -15, msg: 'Without enough farms, the people starve.' },
+    mitigated: { gold: -5, pop: 0, happy: -5, msg: 'Your farms had stored enough surplus to weather the drought.' },
+  },
+  {
+    name: 'Plague',
+    text: 'A mysterious illness sweeps through the city!',
+    mitigatedBy: 'has_temple',
+    unmitigated: { gold: -10, pop: -15, happy: -15, msg: 'With no temple or healers, the plague ravages the population.' },
+    mitigated: { gold: -5, pop: -5, happy: -5, msg: 'The temple priests organized care for the sick. Losses were minimal.' },
+  },
+  {
+    name: 'Enemy Siege',
+    text: 'An enemy army approaches the gates!',
+    mitigatedBy: 'has_walls',
+    unmitigated: { gold: -25, pop: -15, happy: -15, msg: 'Without walls, the enemy marched right in.' },
+    mitigated: { gold: -10, pop: -5, happy: 0, msg: 'The walls held. The enemy retreated after a failed siege.' },
+  },
+  {
+    name: 'Fire',
+    text: 'A great fire breaks out in the city!',
+    mitigatedBy: 'has_tower', // watchtowers provide early warning
+    unmitigated: { gold: -15, pop: -10, happy: -10, msg: 'The fire spread unchecked. Whole blocks were destroyed.' },
+    mitigated: { gold: -5, pop: 0, happy: -3, msg: 'Watchtower guards spotted the fire early. Damage was contained.' },
+  },
+  {
+    name: 'Trade Collapse',
+    text: 'A major trade partner has gone bankrupt!',
+    mitigatedBy: 'has_market',
+    unmitigated: { gold: -20, pop: 0, happy: -10, msg: 'With no local market, the city depended entirely on outside trade.' },
+    mitigated: { gold: -8, pop: 0, happy: -3, msg: 'Your market\'s diverse trade connections cushioned the blow.' },
+  },
+  {
+    name: 'Unrest',
+    text: 'Citizens riot in the streets!',
+    mitigatedBy: 'has_barracks',
+    unmitigated: { gold: -10, pop: -5, happy: -15, msg: 'Without guards, the riots spiraled out of control.' },
+    mitigated: { gold: -5, pop: 0, happy: -8, msg: 'The garrison restored order before serious damage was done.' },
+  },
+];
+
+// ============================================================
+// PROPOSAL QUEUE
+// ============================================================
+var proposalQueue = [];
+
+function shuffle(arr) {
+  for (var i = arr.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  }
+  return arr;
+}
+
+function getNextProposal() {
+  // Try to find an eligible proposal
+  for (var attempt = 0; attempt < 3; attempt++) {
+    if (proposalQueue.length === 0) {
+      proposalQueue = shuffle(PROPOSALS.slice());
+    }
+    var p = proposalQueue.pop();
+    if (p.requireTag && !state.tags[p.requireTag]) continue;
+    return p;
+  }
+  // Fallback: just return whatever we have
+  if (proposalQueue.length === 0) proposalQueue = shuffle(PROPOSALS.slice());
+  return proposalQueue.pop();
+}
+
+// ============================================================
+// UPKEEP CALCULATION
+// ============================================================
+function calcYearlyUpkeep() {
+  var upkeep = 0;
+  var income = 0;
+  state.buildings.forEach(function(b) {
+    var bt = BUILDING_TYPES[b.type];
+    if (bt) { upkeep += bt.upkeep; income += bt.income; }
+  });
+  // Population tax: 1 gold per 10 people (citizens pay taxes)
+  income += Math.floor(state.population / 10);
+  // Population upkeep: 1 gold per 25 people (feeding/services)
+  upkeep += Math.floor(state.population / 25);
+  return { upkeep: upkeep, income: income, net: income - upkeep };
+}
+
+// ============================================================
+// CITY RENDERING
+// ============================================================
+var canvas = document.getElementById('city-canvas');
+var ctx = canvas.getContext('2d');
+
+// Seeded random for consistent scenery across redraws
+var _sceneSeed = 1;
+function srand(s) { _sceneSeed = s; }
+function srandNext() {
+  _sceneSeed = (_sceneSeed * 16807 + 0) % 2147483647;
+  return (_sceneSeed & 0x7fffffff) / 2147483647;
+}
+
+function resizeCanvas() {
+  var rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  drawCity();
+}
+
+// Color utilities
+function parseHex(hex) {
+  if (hex.charAt(0) === '#') {
+    var h6 = hex.length < 7 ? hex[1]+hex[1]+hex[2]+hex[2]+hex[3]+hex[3] : hex.slice(1);
+    return [parseInt(h6.slice(0,2),16), parseInt(h6.slice(2,4),16), parseInt(h6.slice(4,6),16)];
+  }
+  return [128,128,128];
+}
+function darken(hex, amt) {
+  var c = parseHex(hex);
+  return 'rgb('+Math.max(0,Math.floor(c[0]*(1-amt)))+','+Math.max(0,Math.floor(c[1]*(1-amt)))+','+Math.max(0,Math.floor(c[2]*(1-amt)))+')';
+}
+function lighten(hex, amt) {
+  var c = parseHex(hex);
+  return 'rgb('+Math.min(255,Math.floor(c[0]+(255-c[0])*amt))+','+Math.min(255,Math.floor(c[1]+(255-c[1])*amt))+','+Math.min(255,Math.floor(c[2]+(255-c[2])*amt))+')';
+}
+
+// ── SKY ──────────────────────────────────────────────────────
+function drawSky(w, h) {
+  var skyH = h * 0.42;
+  var grad = ctx.createLinearGradient(0, 0, 0, skyH);
+  grad.addColorStop(0, '#2868A8');
+  grad.addColorStop(0.4, '#5A9ED6');
+  grad.addColorStop(0.75, '#8EC8E8');
+  grad.addColorStop(1, '#C8E8F0');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, skyH + 10);
+
+  // Sun with glow
+  var sunX = w * 0.82, sunY = h * 0.1, sunR = Math.min(w, h) * 0.035;
+  var sunGlow = ctx.createRadialGradient(sunX, sunY, sunR * 0.3, sunX, sunY, sunR * 3);
+  sunGlow.addColorStop(0, 'rgba(255,240,180,0.6)');
+  sunGlow.addColorStop(0.5, 'rgba(255,220,120,0.15)');
+  sunGlow.addColorStop(1, 'rgba(255,200,80,0)');
+  ctx.fillStyle = sunGlow;
+  ctx.fillRect(sunX - sunR * 3, sunY - sunR * 3, sunR * 6, sunR * 6);
+  ctx.fillStyle = '#FFF0B0';
+  ctx.beginPath(); ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#FFFBE0';
+  ctx.beginPath(); ctx.arc(sunX - sunR * 0.15, sunY - sunR * 0.15, sunR * 0.6, 0, Math.PI * 2); ctx.fill();
+
+  // Clouds with depth
+  srand(42);
+  for (var ci = 0; ci < 5; ci++) {
+    var cx = srandNext() * w;
+    var cy = h * 0.04 + srandNext() * h * 0.14;
+    var cs = w * 0.03 + srandNext() * w * 0.05;
+    var alpha = 0.4 + srandNext() * 0.3;
+    drawCloud(cx, cy, cs, alpha);
+  }
+}
+
+function drawCloud(x, y, size, alpha) {
+  ctx.fillStyle = 'rgba(255,255,255,' + alpha + ')';
+  ctx.beginPath();
+  ctx.arc(x, y, size, 0, Math.PI * 2);
+  ctx.arc(x + size * 0.7, y - size * 0.35, size * 0.75, 0, Math.PI * 2);
+  ctx.arc(x + size * 1.3, y - size * 0.1, size * 0.85, 0, Math.PI * 2);
+  ctx.arc(x + size * 1.9, y + size * 0.05, size * 0.65, 0, Math.PI * 2);
+  ctx.fill();
+  // Highlight on top
+  ctx.fillStyle = 'rgba(255,255,255,' + (alpha * 0.4) + ')';
+  ctx.beginPath();
+  ctx.arc(x + size * 0.7, y - size * 0.5, size * 0.45, 0, Math.PI * 2);
+  ctx.arc(x + size * 1.3, y - size * 0.35, size * 0.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ── MOUNTAINS ────────────────────────────────────────────────
+function drawMountains(w, h) {
+  var baseY = h * 0.42;
+  // Far mountains (hazy blue)
+  srand(101);
+  ctx.fillStyle = '#7BA4C4';
+  ctx.beginPath(); ctx.moveTo(0, baseY);
+  for (var mx = 0; mx <= w; mx += w * 0.08) {
+    var mh = srandNext() * h * 0.12 + h * 0.04;
+    ctx.lineTo(mx, baseY - mh);
+  }
+  ctx.lineTo(w, baseY); ctx.fill();
+  // Snow caps
+  ctx.fillStyle = 'rgba(230,240,255,0.5)';
+  srand(101);
+  ctx.beginPath(); ctx.moveTo(0, baseY);
+  for (var mx = 0; mx <= w; mx += w * 0.08) {
+    var mh = srandNext() * h * 0.12 + h * 0.04;
+    ctx.lineTo(mx, baseY - mh);
+  }
+  ctx.lineTo(w, baseY - h * 0.02); ctx.lineTo(w, baseY); ctx.closePath();
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = 'rgba(230,240,255,0.45)';
+  ctx.fillRect(0, baseY - h * 0.18, w, h * 0.06);
+  ctx.restore();
+
+  // Near mountains (darker green-brown)
+  srand(202);
+  ctx.fillStyle = '#5A7A55';
+  ctx.beginPath(); ctx.moveTo(0, baseY);
+  for (var mx = 0; mx <= w; mx += w * 0.06) {
+    var mh = srandNext() * h * 0.08 + h * 0.02;
+    ctx.lineTo(mx, baseY - mh);
+  }
+  ctx.lineTo(w, baseY); ctx.fill();
+}
+
+// ── GROUND WITH ROLLING HILLS ────────────────────────────────
+function drawGround(w, h) {
+  var groundY = h * 0.42;
+
+  // Main grass with gentle hills
+  var grad = ctx.createLinearGradient(0, groundY, 0, h);
+  grad.addColorStop(0, '#5DAE45');
+  grad.addColorStop(0.15, '#4D9A38');
+  grad.addColorStop(0.4, '#408530');
+  grad.addColorStop(1, '#2D6620');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, groundY, w, h - groundY);
+
+  // Rolling hill contours
+  srand(303);
+  for (var hi = 0; hi < 3; hi++) {
+    var hillAlpha = 0.08 + hi * 0.04;
+    var hillColor = hi % 2 === 0 ? '60,120,40' : '30,80,20';
+    ctx.fillStyle = 'rgba(' + hillColor + ',' + hillAlpha + ')';
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    for (var hx = 0; hx <= w; hx += 4) {
+      var hy = groundY + h * 0.05 + Math.sin(hx * 0.008 + hi * 2) * h * 0.03 + Math.sin(hx * 0.003 + hi) * h * 0.04;
+      ctx.lineTo(hx, hy);
+    }
+    ctx.lineTo(w, h);
+    ctx.fill();
+  }
+
+  // River winding through
+  drawRiver(w, h);
+
+  // Road
+  var roadY = h * 0.73;
+  // Road shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.1)';
+  ctx.fillRect(0, roadY + h * 0.002, w, h * 0.045);
+  // Road body
+  var roadGrad = ctx.createLinearGradient(0, roadY, 0, roadY + h * 0.04);
+  roadGrad.addColorStop(0, '#A08868');
+  roadGrad.addColorStop(0.5, '#8B7355');
+  roadGrad.addColorStop(1, '#7A6348');
+  ctx.fillStyle = roadGrad;
+  ctx.fillRect(0, roadY, w, h * 0.04);
+  // Road edges
+  ctx.fillStyle = '#6A5338';
+  ctx.fillRect(0, roadY, w, 1.5);
+  ctx.fillRect(0, roadY + h * 0.04, w, 1.5);
+  // Cobblestone pattern
+  ctx.fillStyle = 'rgba(160,140,110,0.3)';
+  srand(404);
+  for (var dx = 0; dx < w; dx += 12) {
+    var sy = roadY + 3 + srandNext() * h * 0.025;
+    ctx.fillRect(dx + srandNext() * 4, sy, 6 + srandNext() * 4, 2);
+  }
+
+  // Grass tufts along road edges
+  ctx.fillStyle = '#5CAA40';
+  srand(505);
+  for (var gx = 0; gx < w; gx += 15 + srandNext() * 10) {
+    var gy = roadY - 1;
+    var gw = 3 + srandNext() * 4;
+    ctx.fillRect(gx, gy - gw, 1.5, gw);
+    ctx.fillRect(gx + 3, gy - gw * 0.7, 1.5, gw * 0.7);
+  }
+}
+
+function drawRiver(w, h) {
+  var riverY = h * 0.83;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(0, riverY + h * 0.01);
+  for (var rx = 0; rx <= w; rx += 3) {
+    var ry = riverY + Math.sin(rx * 0.01) * h * 0.015 + Math.sin(rx * 0.025) * h * 0.008;
+    ctx.lineTo(rx, ry);
+  }
+  for (var rx = w; rx >= 0; rx -= 3) {
+    var ry = riverY + h * 0.05 + Math.sin(rx * 0.01 + 1) * h * 0.01;
+    ctx.lineTo(rx, ry);
+  }
+  ctx.closePath();
+
+  var riverGrad = ctx.createLinearGradient(0, riverY, 0, riverY + h * 0.05);
+  riverGrad.addColorStop(0, '#3A7AB8');
+  riverGrad.addColorStop(0.5, '#4A8AC8');
+  riverGrad.addColorStop(1, '#3A75B0');
+  ctx.fillStyle = riverGrad;
+  ctx.fill();
+
+  // Water shimmer
+  ctx.strokeStyle = 'rgba(180,220,255,0.3)';
+  ctx.lineWidth = 1;
+  srand(606);
+  for (var si = 0; si < 8; si++) {
+    var sx = srandNext() * w;
+    var sy = riverY + h * 0.01 + srandNext() * h * 0.03;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + 8 + srandNext() * 12, sy); ctx.stroke();
+  }
+
+  // Riverbank
+  ctx.strokeStyle = '#3A6530';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (var rx = 0; rx <= w; rx += 3) {
+    var ry = riverY + Math.sin(rx * 0.01) * h * 0.015 + Math.sin(rx * 0.025) * h * 0.008;
+    if (rx === 0) ctx.moveTo(rx, ry); else ctx.lineTo(rx, ry);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ── TREES ────────────────────────────────────────────────────
+function drawTree(x, y, size, type) {
+  var s = size;
+  // Trunk
+  ctx.fillStyle = type === 'pine' ? '#4A3520' : '#5A3A1A';
+  var tw = s * 0.15, th = s * 0.5;
+  ctx.fillRect(x - tw / 2, y - th, tw, th);
+  // Trunk highlight
+  ctx.fillStyle = type === 'pine' ? '#5A4530' : '#6A4A2A';
+  ctx.fillRect(x - tw / 2, y - th, tw * 0.4, th);
+
+  if (type === 'pine') {
+    // Three triangle layers
+    for (var li = 0; li < 3; li++) {
+      var layerY = y - th - li * s * 0.25;
+      var layerW = s * (0.5 - li * 0.1);
+      ctx.fillStyle = li === 0 ? '#1A5A20' : li === 1 ? '#1E6625' : '#22722A';
+      ctx.beginPath();
+      ctx.moveTo(x - layerW, layerY);
+      ctx.lineTo(x, layerY - s * 0.35);
+      ctx.lineTo(x + layerW, layerY);
+      ctx.fill();
+      // Snow/highlight on left side
+      ctx.fillStyle = 'rgba(180,220,180,0.2)';
+      ctx.beginPath();
+      ctx.moveTo(x - layerW * 0.8, layerY - s * 0.02);
+      ctx.lineTo(x - layerW * 0.1, layerY - s * 0.3);
+      ctx.lineTo(x, layerY);
+      ctx.fill();
+    }
+  } else if (type === 'oak') {
+    // Round leafy canopy with multiple circles
+    var canopyY = y - th - s * 0.15;
+    ctx.fillStyle = '#2D7A22';
+    ctx.beginPath();
+    ctx.arc(x - s * 0.15, canopyY, s * 0.28, 0, Math.PI * 2);
+    ctx.arc(x + s * 0.18, canopyY - s * 0.05, s * 0.25, 0, Math.PI * 2);
+    ctx.arc(x, canopyY - s * 0.2, s * 0.3, 0, Math.PI * 2);
+    ctx.arc(x + s * 0.05, canopyY + s * 0.1, s * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+    // Light spots
+    ctx.fillStyle = '#3A9A30';
+    ctx.beginPath();
+    ctx.arc(x - s * 0.08, canopyY - s * 0.22, s * 0.15, 0, Math.PI * 2);
+    ctx.arc(x + s * 0.12, canopyY - s * 0.1, s * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+  } else { // willow
+    var canopyY = y - th;
+    ctx.fillStyle = '#3A8A30';
+    ctx.beginPath();
+    ctx.arc(x, canopyY - s * 0.2, s * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    // Drooping branches
+    ctx.strokeStyle = '#2A7520';
+    ctx.lineWidth = 1.5;
+    for (var bi = 0; bi < 6; bi++) {
+      var angle = -0.8 + bi * 0.32;
+      var bx = x + Math.cos(angle) * s * 0.25;
+      var by = canopyY - s * 0.2 + Math.sin(angle) * s * 0.2;
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.quadraticCurveTo(bx + Math.cos(angle) * s * 0.15, by + s * 0.35, bx + Math.cos(angle) * s * 0.05, by + s * 0.5);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawSceneryTrees(w, h) {
+  var treeTypes = ['oak', 'pine', 'oak', 'pine', 'willow', 'oak', 'pine'];
+  srand(707);
+  // Background trees (smaller, hazier)
+  for (var ti = 0; ti < 8; ti++) {
+    var tx = srandNext() * w;
+    var ty = h * 0.43 + srandNext() * h * 0.08;
+    var ts = 12 + srandNext() * 10;
+    ctx.globalAlpha = 0.5;
+    drawTree(tx, ty, ts, treeTypes[ti % treeTypes.length]);
+    ctx.globalAlpha = 1;
+  }
+  // Foreground trees (edges of scene)
+  srand(808);
+  for (var ti = 0; ti < 4; ti++) {
+    var tx = ti < 2 ? srandNext() * w * 0.12 : w * 0.88 + srandNext() * w * 0.12;
+    var ty = h * 0.55 + srandNext() * h * 0.15;
+    var ts = 18 + srandNext() * 14;
+    drawTree(tx, ty, ts, treeTypes[(ti + 3) % treeTypes.length]);
+  }
+}
+
+// ── BUILDINGS (detailed) ─────────────────────────────────────
+function drawBuilding(b) {
+  var type = BUILDING_TYPES[b.type];
+  if (!type) return;
+  var scale = Math.min(canvas.width, canvas.height) / 400;
+  var w = type.w * scale * 1.1, h = type.h * scale * 1.1;
+  var x = b.x * canvas.width, y = b.y * canvas.height - h;
+  var color = type.colors[b.colorIdx || 0];
+
+  // Ground shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.beginPath();
+  ctx.ellipse(x + w * 0.5, b.y * canvas.height + 2, w * 0.6, h * 0.08, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (b.type === 'garden') { drawGarden(x, y, w, h, scale); return; }
+  if (b.type === 'farm') { drawFarm(x, y, w, h, scale, color); return; }
+  if (b.type === 'dock') { drawDock(x, y, w, h, scale, color); return; }
+
+  // ── MAIN BODY ──
+  // Side shading (fake 3D)
+  ctx.fillStyle = darken(color, 0.15);
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, w * 0.85, h);
+  // Top highlight
+  ctx.fillStyle = lighten(color, 0.1);
+  ctx.fillRect(x + 1, y + 1, w * 0.83, h * 0.1);
+
+  // ── TYPE-SPECIFIC DETAILS ──
+  if (b.type === 'tower' || b.type === 'monument') {
+    drawTower(x, y, w, h, scale, color, b.type);
+  } else if (b.type === 'temple') {
+    drawTemple(x, y, w, h, scale, color);
+  } else if (b.type === 'wall') {
+    drawWall(x, y, w, h, scale, color);
+  } else if (b.type === 'barracks') {
+    drawBarracks(x, y, w, h, scale, color);
+  } else if (b.type === 'tavern') {
+    drawTavern(x, y, w, h, scale, color);
+  } else if (b.type === 'market') {
+    drawMarket(x, y, w, h, scale, color);
+  } else {
+    drawHouse(x, y, w, h, scale, color);
+  }
+}
+
+function drawHouse(x, y, w, h, scale, color) {
+  // Roof
+  var roofColor = darken(color, 0.35);
+  ctx.fillStyle = roofColor;
+  ctx.beginPath();
+  ctx.moveTo(x - w * 0.08, y); ctx.lineTo(x + w * 0.5, y - h * 0.35); ctx.lineTo(x + w * 1.08, y);
+  ctx.fill();
+  // Roof highlight
+  ctx.fillStyle = darken(color, 0.2);
+  ctx.beginPath();
+  ctx.moveTo(x - w * 0.08, y); ctx.lineTo(x + w * 0.5, y - h * 0.35); ctx.lineTo(x + w * 0.5, y);
+  ctx.fill();
+
+  // Timber framing
+  ctx.strokeStyle = darken(color, 0.4);
+  ctx.lineWidth = scale * 0.8;
+  ctx.strokeRect(x + 1, y, w - 2, h);
+  // Horizontal beam
+  ctx.beginPath(); ctx.moveTo(x, y + h * 0.45); ctx.lineTo(x + w, y + h * 0.45); ctx.stroke();
+  // Cross beams
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + w * 0.5, y + h * 0.45); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + w, y); ctx.lineTo(x + w * 0.5, y + h * 0.45); ctx.stroke();
+
+  // Windows with shutters
+  drawWindow(x + w * 0.12, y + h * 0.15, w * 0.18, h * 0.2, scale, color);
+  drawWindow(x + w * 0.62, y + h * 0.15, w * 0.18, h * 0.2, scale, color);
+
+  // Door
+  ctx.fillStyle = '#5A3018';
+  var dw = w * 0.22, dh = h * 0.38;
+  ctx.fillRect(x + w * 0.39, y + h - dh, dw, dh);
+  ctx.fillStyle = '#4A2010';
+  ctx.fillRect(x + w * 0.39, y + h - dh, dw * 0.5, dh);
+  // Door handle
+  ctx.fillStyle = '#C8A840';
+  ctx.beginPath(); ctx.arc(x + w * 0.55, y + h - dh * 0.4, scale * 0.8, 0, Math.PI * 2); ctx.fill();
+
+  // Chimney
+  ctx.fillStyle = '#7A6050';
+  ctx.fillRect(x + w * 0.7, y - h * 0.25, w * 0.12, h * 0.28);
+  ctx.fillStyle = '#6A5040';
+  ctx.fillRect(x + w * 0.68, y - h * 0.28, w * 0.16, h * 0.04);
+  // Smoke
+  ctx.fillStyle = 'rgba(180,180,180,0.25)';
+  ctx.beginPath(); ctx.arc(x + w * 0.76, y - h * 0.34, scale * 2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(180,180,180,0.15)';
+  ctx.beginPath(); ctx.arc(x + w * 0.78, y - h * 0.42, scale * 2.5, 0, Math.PI * 2); ctx.fill();
+
+  // Flower box under first window
+  ctx.fillStyle = '#6A4020';
+  ctx.fillRect(x + w * 0.1, y + h * 0.37, w * 0.22, h * 0.04);
+  ctx.fillStyle = '#E85080';
+  ctx.beginPath();
+  ctx.arc(x + w * 0.15, y + h * 0.36, scale * 1.2, 0, Math.PI * 2);
+  ctx.arc(x + w * 0.21, y + h * 0.35, scale * 1.2, 0, Math.PI * 2);
+  ctx.arc(x + w * 0.27, y + h * 0.36, scale * 1.2, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawWindow(x, y, w, h, scale, wallColor) {
+  // Shutters
+  ctx.fillStyle = darken(wallColor, 0.45);
+  ctx.fillRect(x - w * 0.15, y, w * 0.15, h);
+  ctx.fillRect(x + w, y, w * 0.15, h);
+  // Window frame
+  ctx.fillStyle = '#3A2A1A';
+  ctx.fillRect(x, y, w, h);
+  // Glass (warm light)
+  ctx.fillStyle = '#FFE8A0';
+  ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
+  // Cross pane
+  ctx.fillStyle = '#3A2A1A';
+  ctx.fillRect(x + w * 0.45, y, w * 0.1, h);
+  ctx.fillRect(x, y + h * 0.45, w, h * 0.1);
+}
+
+function drawTower(x, y, w, h, scale, color, type) {
+  // Pointed roof
+  var roofColor = type === 'monument' ? '#8888AA' : '#6A4A2A';
+  ctx.fillStyle = roofColor;
+  ctx.beginPath();
+  ctx.moveTo(x - w * 0.1, y); ctx.lineTo(x + w * 0.5, y - h * 0.45); ctx.lineTo(x + w * 1.1, y);
+  ctx.fill();
+  ctx.fillStyle = lighten(roofColor, 0.15);
+  ctx.beginPath();
+  ctx.moveTo(x - w * 0.1, y); ctx.lineTo(x + w * 0.5, y - h * 0.45); ctx.lineTo(x + w * 0.5, y);
+  ctx.fill();
+
+  // Flag on top
+  ctx.fillStyle = '#5A3A1A';
+  ctx.fillRect(x + w * 0.47, y - h * 0.55, scale * 0.8, h * 0.15);
+  ctx.fillStyle = type === 'monument' ? '#FFD700' : '#CC2222';
+  ctx.beginPath();
+  ctx.moveTo(x + w * 0.5, y - h * 0.55);
+  ctx.lineTo(x + w * 0.5 + w * 0.3, y - h * 0.5);
+  ctx.lineTo(x + w * 0.5, y - h * 0.45);
+  ctx.fill();
+
+  // Windows stacked
+  drawWindow(x + w * 0.25, y + h * 0.15, w * 0.3, h * 0.1, scale, color);
+  drawWindow(x + w * 0.25, y + h * 0.4, w * 0.3, h * 0.1, scale, color);
+  drawWindow(x + w * 0.25, y + h * 0.65, w * 0.3, h * 0.1, scale, color);
+
+  // Stone texture lines
+  ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+  ctx.lineWidth = 0.5;
+  for (var ly = y; ly < y + h; ly += h * 0.08) {
+    ctx.beginPath(); ctx.moveTo(x, ly); ctx.lineTo(x + w, ly); ctx.stroke();
+  }
+}
+
+function drawTemple(x, y, w, h, scale, color) {
+  // Grand triangular roof
+  ctx.fillStyle = '#8A2020';
+  ctx.beginPath();
+  ctx.moveTo(x - w * 0.12, y); ctx.lineTo(x + w * 0.5, y - h * 0.38); ctx.lineTo(x + w * 1.12, y);
+  ctx.fill();
+  ctx.fillStyle = '#AA3030';
+  ctx.beginPath();
+  ctx.moveTo(x - w * 0.12, y); ctx.lineTo(x + w * 0.5, y - h * 0.38); ctx.lineTo(x + w * 0.5, y);
+  ctx.fill();
+
+  // Pillars
+  ctx.fillStyle = '#E8E0D0';
+  for (var pi = 0; pi < 4; pi++) {
+    var px = x + w * (0.08 + pi * 0.28);
+    ctx.fillRect(px, y, w * 0.06, h);
+    ctx.fillStyle = '#D8D0C0';
+    ctx.fillRect(px + w * 0.03, y, w * 0.03, h);
+    ctx.fillStyle = '#E8E0D0';
+  }
+
+  // Cross/spire
+  ctx.fillStyle = '#FFD700';
+  var spX = x + w * 0.48;
+  ctx.fillRect(spX, y - h * 0.55, w * 0.04, h * 0.2);
+  ctx.fillRect(spX - w * 0.06, y - h * 0.5, w * 0.16, h * 0.04);
+
+  // Stained glass window
+  ctx.fillStyle = '#2A1A40';
+  ctx.beginPath(); ctx.arc(x + w * 0.5, y + h * 0.3, w * 0.12, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#6040A0';
+  ctx.beginPath(); ctx.arc(x + w * 0.5, y + h * 0.3, w * 0.09, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#A070E0';
+  ctx.beginPath(); ctx.arc(x + w * 0.48, y + h * 0.28, w * 0.04, 0, Math.PI * 2); ctx.fill();
+
+  // Door
+  ctx.fillStyle = '#4A2818';
+  ctx.beginPath();
+  ctx.arc(x + w * 0.5, y + h * 0.65, w * 0.13, Math.PI, 0);
+  ctx.fillRect(x + w * 0.37, y + h * 0.65, w * 0.26, h * 0.35);
+  ctx.fill();
+}
+
+function drawWall(x, y, w, h, scale, color) {
+  // Crenellations
+  var crenW = w * 0.14;
+  for (var ci = 0; ci < 5; ci++) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x + ci * w * 0.21, y - h * 0.12, crenW, h * 0.14);
+    ctx.fillStyle = darken(color, 0.15);
+    ctx.fillRect(x + ci * w * 0.21 + crenW * 0.6, y - h * 0.12, crenW * 0.4, h * 0.14);
+  }
+  // Stone texture
+  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+  ctx.lineWidth = 0.5;
+  for (var ly = y; ly < y + h; ly += h * 0.12) {
+    ctx.beginPath(); ctx.moveTo(x, ly); ctx.lineTo(x + w, ly); ctx.stroke();
+    var offset = (Math.floor((ly - y) / (h * 0.12)) % 2) * w * 0.15;
+    for (var lx = x + offset; lx < x + w; lx += w * 0.25) {
+      ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx, ly + h * 0.12); ctx.stroke();
+    }
+  }
+  // Torch
+  ctx.fillStyle = '#5A3A1A';
+  ctx.fillRect(x + w * 0.45, y + h * 0.2, w * 0.04, h * 0.2);
+  ctx.fillStyle = '#FF8800';
+  ctx.beginPath(); ctx.arc(x + w * 0.47, y + h * 0.18, scale * 2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#FFCC00';
+  ctx.beginPath(); ctx.arc(x + w * 0.47, y + h * 0.16, scale * 1.2, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawBarracks(x, y, w, h, scale, color) {
+  // Flat military roof
+  ctx.fillStyle = darken(color, 0.25);
+  ctx.fillRect(x - w * 0.04, y - h * 0.08, w * 1.08, h * 0.1);
+  // Banner
+  ctx.fillStyle = '#CC2222';
+  ctx.fillRect(x + w * 0.85, y - h * 0.4, scale * 0.8, h * 0.35);
+  ctx.fillRect(x + w * 0.88, y - h * 0.4, w * 0.2, h * 0.12);
+  // Windows (narrow slits)
+  ctx.fillStyle = '#2A2A2A';
+  for (var si = 0; si < 3; si++) {
+    ctx.fillRect(x + w * (0.15 + si * 0.28), y + h * 0.2, w * 0.04, h * 0.25);
+  }
+  // Heavy door
+  ctx.fillStyle = '#3A2A1A';
+  ctx.fillRect(x + w * 0.33, y + h * 0.55, w * 0.28, h * 0.45);
+  ctx.fillStyle = '#C8A840';
+  ctx.fillRect(x + w * 0.35, y + h * 0.6, w * 0.24, h * 0.03);
+  ctx.fillRect(x + w * 0.35, y + h * 0.75, w * 0.24, h * 0.03);
+  // Shield emblem
+  ctx.fillStyle = '#888';
+  ctx.beginPath();
+  ctx.moveTo(x + w * 0.43, y + h * 0.25); ctx.lineTo(x + w * 0.57, y + h * 0.25);
+  ctx.lineTo(x + w * 0.57, y + h * 0.4); ctx.lineTo(x + w * 0.5, y + h * 0.48);
+  ctx.lineTo(x + w * 0.43, y + h * 0.4);
+  ctx.fill();
+  ctx.fillStyle = '#CC2222';
+  ctx.beginPath(); ctx.arc(x + w * 0.5, y + h * 0.35, w * 0.04, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawTavern(x, y, w, h, scale, color) {
+  // Sloped roof
+  ctx.fillStyle = '#5A3A1A';
+  ctx.beginPath();
+  ctx.moveTo(x - w * 0.06, y); ctx.lineTo(x + w * 0.5, y - h * 0.3); ctx.lineTo(x + w * 1.06, y);
+  ctx.fill();
+  ctx.fillStyle = '#6A4A2A';
+  ctx.beginPath();
+  ctx.moveTo(x - w * 0.06, y); ctx.lineTo(x + w * 0.5, y - h * 0.3); ctx.lineTo(x + w * 0.5, y);
+  ctx.fill();
+
+  // Sign hanging
+  ctx.fillStyle = '#3A2A1A';
+  ctx.fillRect(x + w * 0.8, y - h * 0.05, scale * 0.5, h * 0.15);
+  ctx.fillStyle = '#8B6914';
+  ctx.fillRect(x + w * 0.72, y + h * 0.05, w * 0.25, h * 0.12);
+  ctx.fillStyle = '#FFA500';
+  ctx.beginPath(); ctx.arc(x + w * 0.845, y + h * 0.11, scale * 1.5, 0, Math.PI * 2); ctx.fill();
+
+  // Big windows (warm glow)
+  drawWindow(x + w * 0.08, y + h * 0.2, w * 0.22, h * 0.25, scale, color);
+  drawWindow(x + w * 0.62, y + h * 0.2, w * 0.22, h * 0.25, scale, color);
+
+  // Wide door
+  ctx.fillStyle = '#5A3018';
+  ctx.fillRect(x + w * 0.35, y + h * 0.55, w * 0.3, h * 0.45);
+  ctx.fillStyle = '#4A2010';
+  ctx.fillRect(x + w * 0.35, y + h * 0.55, w * 0.15, h * 0.45);
+
+  // Chimney with smoke
+  ctx.fillStyle = '#6A5040';
+  ctx.fillRect(x + w * 0.15, y - h * 0.22, w * 0.1, h * 0.25);
+  ctx.fillStyle = 'rgba(160,160,160,0.3)';
+  ctx.beginPath(); ctx.arc(x + w * 0.2, y - h * 0.28, scale * 2.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(160,160,160,0.18)';
+  ctx.beginPath(); ctx.arc(x + w * 0.22, y - h * 0.38, scale * 3, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(160,160,160,0.1)';
+  ctx.beginPath(); ctx.arc(x + w * 0.18, y - h * 0.48, scale * 3.5, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawMarket(x, y, w, h, scale, color) {
+  // Canvas awning roof with stripes
+  for (var si = 0; si < 6; si++) {
+    ctx.fillStyle = si % 2 === 0 ? '#CC3030' : '#EECC88';
+    var sx = x + si * w / 6;
+    ctx.beginPath();
+    ctx.moveTo(sx, y); ctx.lineTo(sx + w / 12, y - h * 0.25); ctx.lineTo(sx + w / 6, y);
+    ctx.fill();
+  }
+  // Awning scalloped edge
+  ctx.fillStyle = '#AA2020';
+  for (var si = 0; si < 8; si++) {
+    ctx.beginPath();
+    ctx.arc(x + si * w / 8 + w / 16, y + h * 0.02, w / 16, 0, Math.PI);
+    ctx.fill();
+  }
+
+  // Market stalls / goods
+  ctx.fillStyle = '#DAA520';
+  ctx.fillRect(x + w * 0.05, y + h * 0.4, w * 0.25, h * 0.15);
+  ctx.fillRect(x + w * 0.65, y + h * 0.4, w * 0.25, h * 0.15);
+  // Goods (colored circles = fruit/goods)
+  var goodsColors = ['#E84040', '#40A040', '#E8A020', '#8040C0', '#E08060'];
+  for (var gi = 0; gi < 5; gi++) {
+    ctx.fillStyle = goodsColors[gi];
+    ctx.beginPath(); ctx.arc(x + w * (0.1 + gi * 0.05), y + h * 0.38, scale * 1.3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + w * (0.7 + gi * 0.04), y + h * 0.38, scale * 1, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Counter
+  ctx.fillStyle = '#6A4A2A';
+  ctx.fillRect(x + w * 0.1, y + h * 0.6, w * 0.8, h * 0.08);
+
+  // Open front (no door - it's a market)
+  ctx.fillStyle = darken(color, 0.3);
+  ctx.fillRect(x + w * 0.3, y + h * 0.7, w * 0.4, h * 0.3);
+}
+
+function drawFarm(x, y, w, h, scale, color) {
+  // Barn
+  var bw = w * 0.45, bh = h * 1.1;
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y - bh * 0.1, bw, bh);
+  ctx.fillStyle = lighten(color, 0.1);
+  ctx.fillRect(x, y - bh * 0.1, bw * 0.7, bh);
+  // Barn roof
+  ctx.fillStyle = darken(color, 0.3);
+  ctx.beginPath();
+  ctx.moveTo(x - bw * 0.08, y - bh * 0.1); ctx.lineTo(x + bw * 0.5, y - bh * 0.45);
+  ctx.lineTo(x + bw * 1.08, y - bh * 0.1); ctx.fill();
+  // Barn door
+  ctx.fillStyle = darken(color, 0.4);
+  ctx.fillRect(x + bw * 0.25, y + bh * 0.35, bw * 0.5, bh * 0.55);
+  ctx.fillStyle = '#C8A840';
+  ctx.fillRect(x + bw * 0.47, y + bh * 0.35, bw * 0.06, bh * 0.55);
+
+  // Crop fields with rows
+  var fieldX = x + bw + w * 0.08;
+  var fieldY = y + h * 0.2;
+  ctx.fillStyle = '#6A5A20';
+  ctx.fillRect(fieldX, fieldY, w * 0.5, h * 0.8);
+  // Crop rows
+  var cropColors = ['#7A9A20', '#8AAA30', '#6A8A18'];
+  for (var row = 0; row < 4; row++) {
+    ctx.fillStyle = cropColors[row % cropColors.length];
+    for (var col = 0; col < 6; col++) {
+      var cx = fieldX + col * w * 0.08 + 2;
+      var cy = fieldY + row * h * 0.2 + 3;
+      ctx.fillRect(cx, cy, w * 0.06, h * 0.05);
+      ctx.beginPath(); ctx.arc(cx + w * 0.03, cy, scale * 1.5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  // Fence
+  ctx.strokeStyle = '#8A7040';
+  ctx.lineWidth = scale * 0.6;
+  ctx.strokeRect(fieldX - 1, fieldY - 1, w * 0.5 + 2, h * 0.82);
+}
+
+function drawGarden(x, y, w, h, scale) {
+  // Garden path
+  ctx.fillStyle = '#A09070';
+  ctx.fillRect(x + w * 0.4, y + h * 0.2, w * 0.2, h * 0.8);
+
+  // Hedge border
+  ctx.fillStyle = '#1A6A18';
+  ctx.fillRect(x, y + h * 0.1, w, h * 0.15);
+  ctx.fillRect(x, y + h * 0.75, w, h * 0.15);
+  ctx.fillStyle = '#228B22';
+  ctx.fillRect(x + 1, y + h * 0.12, w - 2, h * 0.1);
+  ctx.fillRect(x + 1, y + h * 0.77, w - 2, h * 0.1);
+
+  // Flower beds (left and right of path)
+  var flowerColors = ['#E84080', '#FFD700', '#FF6040', '#A040E0', '#40A0FF', '#FF80C0'];
+  srand(Math.floor(x * 100));
+  for (var fi = 0; fi < 12; fi++) {
+    var fx = fi < 6 ? x + w * 0.05 + srandNext() * w * 0.3 : x + w * 0.62 + srandNext() * w * 0.3;
+    var fy = y + h * 0.3 + srandNext() * h * 0.4;
+    ctx.fillStyle = flowerColors[fi % flowerColors.length];
+    ctx.beginPath(); ctx.arc(fx, fy, scale * 1.5 + srandNext() * scale, 0, Math.PI * 2); ctx.fill();
+    // Stem
+    ctx.fillStyle = '#2A7A20';
+    ctx.fillRect(fx - 0.5, fy, 1, scale * 3);
+  }
+
+  // Trees
+  ctx.fillStyle = '#3A8A30';
+  ctx.beginPath();
+  ctx.arc(x + w * 0.15, y + h * 0.05, w * 0.12, 0, Math.PI * 2);
+  ctx.arc(x + w * 0.85, y + h * 0.05, w * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#4A2A10';
+  ctx.fillRect(x + w * 0.14, y + h * 0.1, w * 0.03, h * 0.1);
+  ctx.fillRect(x + w * 0.84, y + h * 0.1, w * 0.03, h * 0.1);
+
+  // Fountain in center
+  ctx.fillStyle = '#888';
+  ctx.beginPath(); ctx.arc(x + w * 0.5, y + h * 0.5, w * 0.08, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#5A9ACA';
+  ctx.beginPath(); ctx.arc(x + w * 0.5, y + h * 0.5, w * 0.05, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawDock(x, y, w, h, scale, color) {
+  // Water area
+  ctx.fillStyle = '#3A75B0';
+  ctx.fillRect(x - w * 0.15, y + h * 0.3, w * 1.3, h * 0.8);
+  ctx.fillStyle = 'rgba(100,160,220,0.3)';
+  for (var wi = 0; wi < 4; wi++) {
+    ctx.beginPath(); ctx.moveTo(x - w * 0.1, y + h * 0.45 + wi * h * 0.15);
+    ctx.lineTo(x + w * 1.1, y + h * 0.5 + wi * h * 0.15); ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(150,200,240,0.3)'; ctx.stroke();
+  }
+
+  // Wooden pier
+  ctx.fillStyle = '#6A4A20';
+  ctx.fillRect(x + w * 0.1, y, w * 0.8, h * 0.55);
+  // Planks
+  ctx.strokeStyle = '#5A3A10';
+  ctx.lineWidth = 0.5;
+  for (var pi = 0; pi < 6; pi++) {
+    var py = y + pi * h * 0.09;
+    ctx.beginPath(); ctx.moveTo(x + w * 0.1, py); ctx.lineTo(x + w * 0.9, py); ctx.stroke();
+  }
+  // Support posts
+  ctx.fillStyle = '#5A3A10';
+  ctx.fillRect(x + w * 0.12, y + h * 0.5, w * 0.06, h * 0.3);
+  ctx.fillRect(x + w * 0.82, y + h * 0.5, w * 0.06, h * 0.3);
+
+  // Boat
+  ctx.fillStyle = '#8B6834';
+  ctx.beginPath();
+  ctx.moveTo(x + w * 0.15, y + h * 0.6);
+  ctx.quadraticCurveTo(x + w * 0.35, y + h * 0.85, x + w * 0.55, y + h * 0.6);
+  ctx.fill();
+  // Mast
+  ctx.fillStyle = '#5A3A1A';
+  ctx.fillRect(x + w * 0.34, y + h * 0.15, scale * 0.6, h * 0.45);
+  // Sail
+  ctx.fillStyle = '#EEE8D8';
+  ctx.beginPath();
+  ctx.moveTo(x + w * 0.36, y + h * 0.18);
+  ctx.lineTo(x + w * 0.55, y + h * 0.35);
+  ctx.lineTo(x + w * 0.36, y + h * 0.5);
+  ctx.fill();
+}
+
+// ── BUILDING PLACEMENT ───────────────────────────────────────
+function placeBuildingPosition(type) {
+  var numBuildings = state.buildings.length;
+  var rows = [0.68, 0.58, 0.50, 0.76];
+  var row = rows[numBuildings % rows.length];
+  var segment = 1.0 / Math.max(8, Math.ceil(numBuildings / rows.length) + 2);
+  var col = Math.floor(numBuildings / rows.length);
+  var x = 0.06 + col * segment + Math.random() * segment * 0.4;
+  if (x > 0.88) x = 0.06 + Math.random() * 0.85;
+  var colorIdx = Math.floor(Math.random() * (BUILDING_TYPES[type] ? BUILDING_TYPES[type].colors.length : 1));
+  return { type: type, x: x, y: row + (Math.random() - 0.5) * 0.02, colorIdx: colorIdx };
+}
+
+// ── MAIN DRAW ────────────────────────────────────────────────
+function drawCity() {
+  if (!canvas.width) return;
+  var w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  drawSky(w, h);
+  drawMountains(w, h);
+  drawGround(w, h);
+  drawSceneryTrees(w, h);
+
+  // Sort buildings by y (further back drawn first)
+  var sorted = state.buildings.slice().sort(function(a, b) { return a.y - b.y; });
+  sorted.forEach(drawBuilding);
+
+  // Foreground grass tufts
+  ctx.fillStyle = '#4A9A30';
+  srand(909);
+  for (var gi = 0; gi < 15; gi++) {
+    var gx = srandNext() * w;
+    var gy = h * 0.88 + srandNext() * h * 0.1;
+    for (var blade = 0; blade < 3; blade++) {
+      ctx.fillRect(gx + blade * 2, gy - 3 - srandNext() * 4, 1.2, 3 + srandNext() * 4);
+    }
+  }
+}
+
+// ============================================================
+// UI
+// ============================================================
+var elGold = document.getElementById('gold-val');
+var elPop = document.getElementById('pop-val');
+var elHappy = document.getElementById('happy-val');
+var elYear = document.getElementById('year-val');
+var elCitizen = document.getElementById('citizen-line');
+var elProposal = document.getElementById('proposal-text');
+var elEffects = document.getElementById('proposal-effects');
+var elWarning = document.getElementById('proposal-warning');
+var elFlash = document.getElementById('result-flash');
+var elEventLog = document.getElementById('event-log');
+var titleScreen = document.getElementById('title-screen');
+var gameoverScreen = document.getElementById('gameover-screen');
+
+function updateUI() {
+  elGold.textContent = state.gold;
+  elPop.textContent = state.population;
+  elHappy.textContent = Math.max(0, Math.min(100, state.happiness)) + '%';
+  elYear.textContent = state.year;
+  elGold.style.color = state.gold <= 15 ? '#ff4444' : '#ffd700';
+  elPop.style.color = state.population <= 10 ? '#ff4444' : '#88ccff';
+  elHappy.style.color = state.happiness <= 15 ? '#ff4444' : '#88ff88';
+}
+
+function logEvent(text, type) {
+  var el = document.createElement('div');
+  el.className = 'event-msg ' + (type || '');
+  el.textContent = text;
+  elEventLog.appendChild(el);
+  setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 3200);
+}
+
+var currentProposal = null;
+
+function showProposal() {
+  var p = getNextProposal();
+  currentProposal = p;
+  var citizen = CITIZENS[p.citizen];
+  elCitizen.textContent = citizen.name + ' approaches the throne...';
+  elProposal.textContent = p.text;
+
+  // Show the "advertised" effects (which may differ from actual)
+  var shown = p.shown;
+  var parts = [];
+  if (shown.gold) parts.push('<span class="' + (shown.gold > 0 ? 'eff-pos' : 'eff-neg') + '">Gold ' + (shown.gold > 0 ? '+' : '') + shown.gold + '</span>');
+  if (shown.pop) parts.push('<span class="' + (shown.pop > 0 ? 'eff-pos' : 'eff-neg') + '">Pop ' + (shown.pop > 0 ? '+' : '') + shown.pop + '</span>');
+  if (shown.happy) parts.push('<span class="' + (shown.happy > 0 ? 'eff-pos' : 'eff-neg') + '">Happy ' + (shown.happy > 0 ? '+' : '') + shown.happy + '%</span>');
+  if (p.consequence) parts.push('<span class="eff-unknown">+ future effects</span>');
+  elEffects.innerHTML = parts.join(' &nbsp; ');
+
+  elWarning.textContent = p.warning || '';
+}
+
+function flash(text, color) {
+  elFlash.textContent = text;
+  elFlash.style.color = color;
+  elFlash.style.opacity = '1';
+  setTimeout(function() { elFlash.style.opacity = '0'; }, 800);
+}
+
+function applyEffects(eff) {
+  state.gold += eff.gold || 0;
+  state.population += eff.pop || 0;
+  state.happiness += eff.happy || 0;
+}
+
+function clampState() {
+  state.happiness = Math.max(0, Math.min(100, state.happiness));
+  state.population = Math.max(0, state.population);
+  state.gold = Math.max(0, state.gold);
+}
+
+// ============================================================
+// YEAR-END: upkeep, consequences, crises
+// ============================================================
+function processYearEnd() {
+  state.year++;
+
+  // 1. Upkeep
+  var econ = calcYearlyUpkeep();
+  state.gold += econ.net;
+  if (econ.net >= 0) {
+    logEvent('Year ' + state.year + ': income +' + econ.income + ', upkeep -' + econ.upkeep + ' (net +' + econ.net + ' gold)', 'good');
+  } else {
+    logEvent('Year ' + state.year + ': income +' + econ.income + ', upkeep -' + econ.upkeep + ' (net ' + econ.net + ' gold)', 'bad');
+  }
+
+  // 2. Pending consequences tick down
+  var stillPending = [];
+  state.pendingEvents.forEach(function(ev) {
+    ev.turnsLeft--;
+    if (ev.turnsLeft <= 0) {
+      applyEffects(ev.effects);
+      logEvent(ev.text, ev.type || 'bad');
+      if (ev.type === 'bad') SFX.crisis();
+    } else {
+      stillPending.push(ev);
+    }
+  });
+  state.pendingEvents = stillPending;
+
+  // 3. Crisis chance starting from year 5, scaling with time
+  if (state.year >= 5 && Math.random() < 0.20 + (state.year - 5) * 0.02) {
+    triggerCrisis();
+  }
+
+  // 4. Population happiness drift — large unhappy populations leave
+  if (state.happiness < 30 && state.population > 30) {
+    var leaving = Math.floor(state.population * 0.05);
+    state.population -= leaving;
+    if (leaving > 0) logEvent(leaving + ' citizens left the city seeking better lives.', 'bad');
+  }
+
+  // 5. Happy cities attract newcomers
+  if (state.happiness > 70 && state.population > 0) {
+    var newcomers = Math.floor(Math.random() * 5) + 1;
+    state.population += newcomers;
+    logEvent(newcomers + ' newcomers settle in your thriving city.', 'good');
+  }
+
+  clampState();
+}
+
+function triggerCrisis() {
+  var crisis = CRISES[Math.floor(Math.random() * CRISES.length)];
+  SFX.crisis();
+
+  var mitigated = false;
+  if (crisis.mitigateCount) {
+    // Check building count of this type
+    var count = state.buildings.filter(function(b) { return b.type === crisis.mitigatedBy; }).length;
+    mitigated = count >= crisis.mitigateCount;
+  } else {
+    mitigated = !!state.tags[crisis.mitigatedBy];
+  }
+
+  var result = mitigated ? crisis.mitigated : crisis.unmitigated;
+  applyEffects(result);
+  logEvent(crisis.text + ' ' + result.msg, 'crisis');
+}
+
+// ============================================================
+// DECISION LOGIC
+// ============================================================
+function applyDecision(approved) {
+  var p = currentProposal;
+  if (!p || state.gameOver) return;
+
+  state.decisions++;
+
+  if (approved) {
+    // Use actual effects if they differ from shown (traps!)
+    var eff = p.actual || p.shown;
+
+    // Affordability check on the real cost
+    if ((eff.gold || 0) < 0 && state.gold + (eff.gold || 0) < 0) {
+      flash('Not enough gold!', '#ff4444');
+      SFX.reject();
+      state.decisions--; // don't count failed attempts
+      return;
+    }
+
+    applyEffects(eff);
+    state.approved++;
+
+    // Building
+    if (p.building) {
+      state.buildings.push(placeBuildingPosition(p.building));
+      SFX.build();
+    } else {
+      SFX.approve();
+    }
+
+    // Tags
+    if (p.addTag) state.tags[p.addTag] = true;
+    if (p.removeTag) delete state.tags[p.removeTag];
+
+    // Queue consequence
+    if (p.consequence) {
+      state.pendingEvents.push({
+        turnsLeft: p.consequence.delay,
+        text: p.consequence.text,
+        effects: p.consequence.effects,
+        type: p.consequence.type || 'bad'
+      });
+    }
+
+    // If actual differs from shown, hint that something's off
+    if (p.actual) {
+      flash('Approved... but something feels off', '#ccaa44');
+    } else {
+      flash('Approved!', '#88ff88');
+    }
+  } else {
+    // REJECT
+    state.rejected++;
+    SFX.reject();
+
+    if (p.rejectBonus) {
+      applyEffects(p.rejectBonus);
+      if ((p.rejectBonus.happy || 0) > 0) {
+        flash('Wise decision', '#88ccff');
+      } else if ((p.rejectBonus.happy || 0) < 0 || (p.rejectBonus.pop || 0) < 0 || (p.rejectBonus.gold || 0) < 0) {
+        flash('The people are disappointed', '#ff8888');
+      } else {
+        flash('Rejected', '#ff8888');
+      }
+    } else if (p.trap) {
+      // Rejecting a trap with no explicit rejectBonus is neutral-positive
+      flash('You saw through it', '#88ccff');
+    } else {
+      // No reject bonus defined — mild disappointment
+      state.happiness -= 2;
+      flash('Rejected', '#ff8888');
+    }
+  }
+
+  clampState();
+
+  // Year-end every 3 decisions
+  if (state.decisions % 3 === 0) {
+    processYearEnd();
+    clampState();
+  }
+
+  updateUI();
+  drawCity();
+
+  // Check game over
+  if (state.gold <= 0) return endGame('Your treasury is empty. The kingdom has gone bankrupt.');
+  if (state.population <= 0) return endGame('Everyone has left. Your city is a ghost town.');
+  if (state.happiness <= 0) return endGame('The people revolted! Your reign has been overthrown.');
+
+  showProposal();
+}
+
+// ============================================================
+// GAME OVER
+// ============================================================
+function endGame(reason) {
+  state.gameOver = true;
+  SFX.gameover();
+  document.getElementById('gameover-reason').textContent = reason;
+
+  var title = 'A Brief Reign';
+  if (state.year >= 50) title = 'A Legendary Reign';
+  else if (state.year >= 30) title = 'A Great Reign';
+  else if (state.year >= 15) title = 'A Decent Reign';
+  else if (state.year >= 8) title = 'A Troubled Reign';
+  else if (state.year >= 4) title = 'A Short Reign';
+  document.getElementById('gameover-title').textContent = title;
+
+  var econ = calcYearlyUpkeep();
+  var statsHtml = 'Years Ruled: <b>' + state.year + '</b><br>' +
+    'Decisions Made: <b>' + state.decisions + '</b><br>' +
+    'Approved: <b>' + state.approved + '</b> / Rejected: <b>' + state.rejected + '</b><br>' +
+    'Buildings: <b>' + state.buildings.length + '</b> (upkeep: ' + econ.upkeep + '/yr, income: ' + econ.income + '/yr)';
+
+  var best = parseInt(localStorage.getItem('cityruler_best') || '0', 10);
+  if (state.year > best) {
+    localStorage.setItem('cityruler_best', String(state.year));
+    statsHtml += '<br><span style="color:#ffd700">New Record!</span>';
+  }
+  statsHtml += '<br>Best Reign: <b>' + Math.max(state.year, best) + ' years</b>';
+
+  document.getElementById('gameover-stats').innerHTML = statsHtml;
+  gameoverScreen.style.display = 'flex';
+  submitScore(state.year);
+}
+
+function submitScore(score) {
+  var name = localStorage.getItem('pa_player_name') || 'Anonymous';
+  var SUPA_URL = 'https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+  var SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  fetch(SUPA_URL + '/rest/v1/scores', {
+    method: 'POST',
+    headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+    body: JSON.stringify({ game: 'city-ruler', player_name: name, score: score })
+  }).catch(function() {});
+}
+
+// ============================================================
+// START / RESTART
+// ============================================================
+function startGame() {
+  resetState();
+  // Start with a few buildings
+  state.buildings.push(placeBuildingPosition('house'));
+  state.buildings.push(placeBuildingPosition('house'));
+  state.buildings.push(placeBuildingPosition('farm'));
+  state.buildings.push(placeBuildingPosition('market'));
+  state.tags.has_market = true;
+  proposalQueue = [];
+  elEventLog.innerHTML = '';
+
+  titleScreen.style.display = 'none';
+  gameoverScreen.style.display = 'none';
+  updateUI();
+  resizeCanvas();
+  showProposal();
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+document.getElementById('btn-yes').addEventListener('click', function() { applyDecision(true); });
+document.getElementById('btn-no').addEventListener('click', function() { applyDecision(false); });
+// Touch support for iPad — click can be unreliable on styled buttons
+document.getElementById('btn-yes').addEventListener('touchend', function(e) { e.preventDefault(); applyDecision(true); });
+document.getElementById('btn-no').addEventListener('touchend', function(e) { e.preventDefault(); applyDecision(false); });
+
+document.addEventListener('keydown', function(e) {
+  if (state.gameOver || titleScreen.style.display !== 'none') {
+    if (e.key === 'Enter' || e.key === ' ') startGame();
+    return;
+  }
+  if (e.key === 'ArrowLeft' || e.key === 'y' || e.key === 'Y') applyDecision(true);
+  if (e.key === 'ArrowRight' || e.key === 'n' || e.key === 'N') applyDecision(false);
+  if (e.key === 'm' || e.key === 'M') SFX.muted = !SFX.muted;
+});
+
+var touchStartX = 0;
+document.addEventListener('touchstart', function(e) {
+  if (titleScreen.style.display !== 'none' || state.gameOver) return;
+  touchStartX = e.touches[0].clientX;
+}, { passive: true });
+
+document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById('restart-btn').addEventListener('click', startGame);
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+})();
+</script>
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px Segoe UI,Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px"><span id="vc-count">...</span> Rulers</div>
+<script>
+(function(){var G="city-ruler",SU="https://ivhpqkqnfqcgrfrsvszf.supabase.co",SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM";function hdr(){return{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json"}}async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("").slice(0,32)}catch(e){return"anon-"+Math.random().toString(36).slice(2,10)}}async function run(){var h=await vh();try{await fetch(SU+"/rest/v1/game_visits",{method:"POST",headers:Object.assign(hdr(),{"Prefer":"resolution=merge-duplicates,return=minimal"}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}try{var r=await fetch(SU+"/rest/v1/game_visits?game=eq."+G+"&select=id",{headers:Object.assign(hdr(),{"Prefer":"count=exact"})});var c=r.headers.get("content-range");if(c){var n=c.split("/")[1];if(n&&n!=="*")document.getElementById("vc-count").textContent=Number(n).toLocaleString()}}catch(e){}}run()})();
+</script>
+</body>
+</html>

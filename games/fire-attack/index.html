@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Fire Attack — LCD Classic</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{overflow:hidden;touch-action:none;background:#1a1a2e;width:100%;height:100%}
+body{display:flex;justify-content:center;align-items:center;font-family:'Courier New',monospace}
+canvas{display:block;touch-action:none}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<script>
+'use strict';
+// ═══════════════════════════════════════════════════════
+// FIRE ATTACK — Game & Watch Wide Screen (1982) LCD Recreation
+//
+// Fort in center. Defender with hammer at 4 diagonal corners.
+// Top 2 positions: attackers on cliffs THROW torches (arc down)
+// Bottom 2 positions: attackers CLIMB LADDERS to set fire
+// 4 diagonal buttons. Press to move, press again to swing.
+// 2 points per deflection. 3 fires = game over.
+// ═══════════════════════════════════════════════════════
+
+var _SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',_SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(g,s){var n=prompt('Score: '+s+'! Enter initials (max 5):');if(!n)return;n=n.trim().slice(0,5).toUpperCase();if(!n)return;try{await fetch(_SU+'/rest/v1/high_scores',{method:'POST',headers:{'apikey':_SK,'Authorization':'Bearer '+_SK,'Content-Type':'application/json'},body:JSON.stringify({game:g,initials:n,score:s})})}catch(e){}}
+
+var canvas=document.getElementById('C'),ctx=canvas.getContext('2d');
+
+// ── AUDIO ──
+var audioCtx=null;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+function beep(f,d,v){if(!audioCtx)return;var o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type='square';o.frequency.value=f;g.gain.value=v||0.1;g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d)}
+function sfxTick(){beep(100,0.03,0.05)}
+function sfxHit(){beep(600,0.06,0.12);setTimeout(function(){beep(900,0.05,0.1)},50)}
+function sfxFire(){beep(120,0.2,0.15);setTimeout(function(){beep(80,0.25,0.12)},80)}
+function sfxGameOver(){[300,250,200,150,100].forEach(function(f,i){setTimeout(function(){beep(f,0.2,0.12)},i*180)})}
+
+// ── COLOURS ──
+var LCD_BG='#9aad86',LCD_GHOST='#889a75',LCD_ON='#1a2a12',LCD_STRUCT='#708060';
+
+// ── LAYOUT ──
+var D={},S={};
+// 4 diagonal button rects
+var btns=[null,null,null,null]; // TL, TR, BL, BR
+function calcLayout(){
+  var vw=window.innerWidth,vh=window.innerHeight;
+  canvas.width=vw;canvas.height=vh;
+  var asp=5/3;D.w=vw*0.94;D.h=D.w/asp;
+  if(D.h>vh*0.94){D.h=vh*0.94;D.w=D.h*asp}
+  D.x=(vw-D.w)/2;D.y=(vh-D.h)/2;
+  S.w=D.w*0.85;S.h=D.h*0.68;
+  S.x=D.x+(D.w-S.w)/2;S.y=D.y+D.h*0.08;
+}
+
+// ── STATE ──
+// 4 positions: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right
+// Attackers approach from each direction in 3 steps (far, mid, near fort)
+// Top attackers THROW torches. Bottom attackers CLIMB with torches.
+var score,hiScore,misses,defPos,swinging,swingTimer;
+var attackers; // [{dir:0-3, step:0-2}] step 0=far, 1=mid, 2=at fort
+var tickRate,accumulator,spawnTimer;
+var flameFrame,fires; // which fort sections are on fire
+var state,scoreSubmitted,chanceTime;
+
+function loadHi(){try{hiScore=parseInt(localStorage.getItem('fa_hi'))||0}catch(e){hiScore=0}}
+function saveHi(){try{localStorage.setItem('fa_hi',score)}catch(e){}}
+
+function initGame(){
+  score=0;misses=0;defPos=0;swinging=false;swingTimer=0;
+  attackers=[];tickRate=700;accumulator=0;spawnTimer=0;
+  flameFrame=0;fires=[false,false,false,false];
+  state='title';scoreSubmitted=false;chanceTime=false;
+}
+function startGame(){initGame();state='play'}
+
+// ── GAME LOGIC ──
+function gameTick(){
+  if(state!=='play')return;
+  flameFrame=1-flameFrame;
+  if(swingTimer>0)swingTimer--;
+  if(swingTimer===0)swinging=false;
+
+  // Advance attackers
+  for(var i=attackers.length-1;i>=0;i--){
+    attackers[i].step++;
+    if(attackers[i].step>2){
+      // Reached fort — fire!
+      var dir=attackers[i].dir;
+      fires[dir]=true;
+      misses++;
+      attackers.splice(i,1);
+      sfxFire();
+      if(misses>=3){
+        state='over';
+        if(score>hiScore){hiScore=score;saveHi()}
+        if(score>0&&!scoreSubmitted){scoreSubmitted=true;submitScore('fire-attack',score)}
+        sfxGameOver();return;
+      }
+    }
+  }
+
+  // Check if defender is blocking — if swinging and attacker at step 2 in defender's direction
+  if(swinging){
+    for(var j=attackers.length-1;j>=0;j--){
+      if(attackers[j].dir===defPos&&attackers[j].step===2){
+        attackers.splice(j,1);
+        score+=chanceTime?5:2;
+        sfxHit();
+      }
+    }
+  }
+
+  // Also auto-block if defender is AT the position when attacker arrives (even without explicit swing)
+  for(var k=attackers.length-1;k>=0;k--){
+    if(attackers[k].dir===defPos&&attackers[k].step===2){
+      attackers.splice(k,1);
+      score+=chanceTime?5:2;
+      sfxHit();
+    }
+  }
+
+  // Chance time at 200 and 500
+  if(!chanceTime&&(score>=200||score>=500)&&misses===0){
+    chanceTime=true;
+  }
+
+  // Spawn new attackers
+  spawnTimer++;
+  var spawnRate=Math.max(2,5-Math.floor(score/20));
+  if(spawnTimer>=spawnRate){
+    spawnTimer=0;
+    // Pick a direction that doesn't have an attacker at step 0
+    var dirs=[0,1,2,3];
+    // Game A: only 3 directions active
+    if(score<50)dirs=[0,1,2]; // start with 3 directions
+    var avail=dirs.filter(function(d){return!attackers.some(function(a){return a.dir===d&&a.step<=0})});
+    if(avail.length>0){
+      var dir=avail[Math.floor(Math.random()*avail.length)];
+      attackers.push({dir:dir,step:0});
+      sfxTick();
+    }
+  }
+
+  // Speed up
+  tickRate=Math.max(250,700-score*3);
+
+  // Clear misses at 200 and 500
+  if(score===200||score===500){misses=0;fires=[false,false,false,false]}
+}
+
+// ── INPUT ──
+// 4 diagonal positions: 0=TL, 1=TR, 2=BL, 3=BR
+function pressDir(d){
+  if(state!=='play'){initAudio();startGame();return}
+  initAudio();
+  if(defPos===d){
+    // Already here — swing hammer!
+    swinging=true;swingTimer=2;
+  } else {
+    defPos=d;
+    // Auto-swing when arriving at a position with attacker at step 2
+    for(var i=attackers.length-1;i>=0;i--){
+      if(attackers[i].dir===d&&attackers[i].step===2){
+        attackers.splice(i,1);
+        score+=chanceTime?5:2;
+        sfxHit();
+      }
+    }
+  }
+}
+
+window.addEventListener('keydown',function(e){
+  // QWAS or numpad-style: Q=TL, W=TR, A=BL, S=BR
+  // Also arrow keys: up-left, up-right, down-left, down-right mapped
+  if(e.key==='q'||e.key==='7'){e.preventDefault();pressDir(0)}
+  if(e.key==='w'||e.key==='e'||e.key==='9'){e.preventDefault();pressDir(1)}
+  if(e.key==='a'||e.key==='1'){e.preventDefault();pressDir(2)}
+  if(e.key==='s'||e.key==='d'||e.key==='3'){e.preventDefault();pressDir(3)}
+  // Arrow combos
+  if(e.key==='ArrowUp'){e.preventDefault();pressDir(defPos<=1?defPos:defPos-2)} // move up
+  if(e.key==='ArrowDown'){e.preventDefault();pressDir(defPos>=2?defPos:defPos+2)} // move down
+  if(e.key==='ArrowLeft'){e.preventDefault();pressDir(defPos%2===0?defPos:defPos-1)} // move left
+  if(e.key==='ArrowRight'){e.preventDefault();pressDir(defPos%2===1?defPos:defPos+1)} // move right
+  if(e.key===' '||e.key==='Enter'){e.preventDefault();if(state!=='play'){initAudio();startGame()}else{swinging=true;swingTimer=2}}
+});
+
+function hitTest(x,y){
+  if(state!=='play'){initAudio();startGame();return}
+  for(var i=0;i<4;i++){
+    var b=btns[i];
+    if(b&&x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h){pressDir(i);return}
+  }
+  // Quadrant tap fallback
+  var cx=canvas.width/2,cy=canvas.height/2;
+  if(x<cx&&y<cy)pressDir(0);
+  else if(x>=cx&&y<cy)pressDir(1);
+  else if(x<cx&&y>=cy)pressDir(2);
+  else pressDir(3);
+}
+canvas.addEventListener('mousedown',function(e){hitTest(e.clientX,e.clientY)});
+canvas.addEventListener('touchstart',function(e){e.preventDefault();for(var i=0;i<e.touches.length;i++)hitTest(e.touches[i].clientX,e.touches[i].clientY)},{passive:false});
+
+// ═══════════════════════════════════════════════════════
+// DRAWING
+// ═══════════════════════════════════════════════════════
+
+var SEGS=[0x7E,0x30,0x6D,0x79,0x33,0x5B,0x5F,0x70,0x7F,0x7B];
+function draw7Seg(cx,cy,h,val,col){
+  var w=h*0.55,t=h*0.09,g=h*0.04;ctx.fillStyle=col;var s=SEGS[val]||0;
+  if(s&0x40)ctx.fillRect(cx-w/2+g,cy-h/2,w-g*2,t);
+  if(s&0x20)ctx.fillRect(cx+w/2-t,cy-h/2+g,t,h/2-g*2);
+  if(s&0x10)ctx.fillRect(cx+w/2-t,cy+g,t,h/2-g*2);
+  if(s&0x08)ctx.fillRect(cx-w/2+g,cy+h/2-t,w-g*2,t);
+  if(s&0x04)ctx.fillRect(cx-w/2,cy+g,t,h/2-g*2);
+  if(s&0x02)ctx.fillRect(cx-w/2,cy-h/2+g,t,h/2-g*2);
+  if(s&0x01)ctx.fillRect(cx-w/2+g,cy-t/2,w-g*2,t);
+}
+function drawScore(x,y,h,val){
+  var ds=[Math.floor(val/100)%10,Math.floor(val/10)%10,val%10],dw=h*0.7;
+  for(var i=0;i<3;i++){draw7Seg(x+i*dw,y,h,8,LCD_GHOST);draw7Seg(x+i*dw,y,h,ds[i],LCD_ON)}
+}
+function drawMissMarks(x,y,sz){
+  for(var i=0;i<3;i++){
+    var mx=x+i*sz*1.5,col=(i<misses&&state!=='title')?LCD_ON:LCD_GHOST;
+    ctx.fillStyle=col;
+    ctx.save();ctx.translate(mx,y);ctx.rotate(Math.PI/4);ctx.fillRect(-sz*0.4,-sz*0.08,sz*0.8,sz*0.16);ctx.restore();
+    ctx.save();ctx.translate(mx,y);ctx.rotate(-Math.PI/4);ctx.fillRect(-sz*0.4,-sz*0.08,sz*0.8,sz*0.16);ctx.restore();
+  }
+}
+
+// ── FRONTIER FORT — log stockade with watchtower feel ──
+function drawFort(cx,cy,fw,fh,col){
+  ctx.fillStyle=col;
+  // Main log walls
+  ctx.fillRect(cx-fw*0.48,cy-fh*0.15,fw*0.96,fh*0.55);
+  // Pointed log tops — tall, rugged frontier style
+  for(var p=-5;p<=5;p++){
+    ctx.beginPath();
+    var px=cx+p*fw*0.085;
+    var ph=fh*(0.12+Math.abs(p%3)*0.03); // varied heights
+    ctx.moveTo(px-fw*0.035,cy-fh*0.15);
+    ctx.lineTo(px,cy-fh*0.15-ph);
+    ctx.lineTo(px+fw*0.035,cy-fh*0.15);
+    ctx.fill();
+  }
+  // Gate — double door with arch
+  ctx.fillStyle=LCD_BG;
+  ctx.beginPath();
+  ctx.moveTo(cx-fw*0.1,cy+fh*0.4);
+  ctx.lineTo(cx-fw*0.1,cy+fh*0.05);
+  ctx.quadraticCurveTo(cx,cy-fh*0.03,cx+fw*0.1,cy+fh*0.05);
+  ctx.lineTo(cx+fw*0.1,cy+fh*0.4);
+  ctx.fill();
+  // Gate door line
+  ctx.fillStyle=col;
+  ctx.fillRect(cx-fw*0.005,cy+fh*0.05,fw*0.01,fh*0.35);
+  // Horizontal cross beams (log style)
+  ctx.fillRect(cx-fw*0.48,cy,fw*0.96,fh*0.04);
+  ctx.fillRect(cx-fw*0.48,cy+fh*0.2,fw*0.96,fh*0.04);
+  // Log texture — vertical gap lines
+  for(var pl=-5;pl<=5;pl++){
+    ctx.fillStyle=LCD_BG;
+    ctx.fillRect(cx+pl*fw*0.085-fw*0.004,cy-fh*0.15,fw*0.008,fh*0.55);
+  }
+  // Corner posts (thicker)
+  ctx.fillStyle=col;
+  ctx.fillRect(cx-fw*0.5,cy-fh*0.2,fw*0.05,fh*0.6);
+  ctx.fillRect(cx+fw*0.45,cy-fh*0.2,fw*0.05,fh*0.6);
+}
+
+// ── COWBOY DEFENDER — wide-brimmed hat, bandana, hammer ──
+function drawDefender(cx,cy,w,h,col,swing){
+  ctx.fillStyle=col;
+  // Cowboy hat — wide brim with tall crown (THE identifier)
+  // Crown
+  ctx.beginPath();
+  ctx.moveTo(cx-w*0.1,cy-h*0.32);
+  ctx.lineTo(cx-w*0.08,cy-h*0.52);
+  ctx.quadraticCurveTo(cx,cy-h*0.56,cx+w*0.08,cy-h*0.52);
+  ctx.lineTo(cx+w*0.1,cy-h*0.32);
+  ctx.fill();
+  // Wide brim (curves down at sides)
+  ctx.beginPath();
+  ctx.moveTo(cx-w*0.28,cy-h*0.3);
+  ctx.quadraticCurveTo(cx-w*0.25,cy-h*0.36,cx-w*0.1,cy-h*0.34);
+  ctx.lineTo(cx+w*0.1,cy-h*0.34);
+  ctx.quadraticCurveTo(cx+w*0.25,cy-h*0.36,cx+w*0.28,cy-h*0.3);
+  ctx.lineTo(cx+w*0.25,cy-h*0.28);
+  ctx.lineTo(cx-w*0.25,cy-h*0.28);
+  ctx.fill();
+  // Head
+  ctx.beginPath();ctx.arc(cx,cy-h*0.2,w*0.1,0,Math.PI*2);ctx.fill();
+  // Bandana/neckerchief
+  ctx.beginPath();
+  ctx.moveTo(cx-w*0.06,cy-h*0.1);
+  ctx.lineTo(cx,cy-h*0.02);
+  ctx.lineTo(cx+w*0.06,cy-h*0.1);
+  ctx.fill();
+  // Body — jacket/vest
+  ctx.beginPath();
+  ctx.moveTo(cx-w*0.14,cy-h*0.1);
+  ctx.lineTo(cx-w*0.16,cy+h*0.15);
+  ctx.lineTo(cx+w*0.16,cy+h*0.15);
+  ctx.lineTo(cx+w*0.14,cy-h*0.1);
+  ctx.fill();
+  // Belt
+  ctx.fillStyle=LCD_BG;ctx.fillRect(cx-w*0.15,cy+h*0.08,w*0.3,h*0.03);
+  ctx.fillStyle=col;
+  // Legs with boots
+  ctx.fillRect(cx-w*0.12,cy+h*0.15,w*0.09,h*0.2);
+  ctx.fillRect(cx+w*0.03,cy+h*0.15,w*0.09,h*0.2);
+  // Cowboy boots (pointed toes)
+  ctx.beginPath();
+  ctx.moveTo(cx-w*0.15,cy+h*0.33);ctx.lineTo(cx-w*0.18,cy+h*0.38);
+  ctx.lineTo(cx-w*0.03,cy+h*0.38);ctx.lineTo(cx-w*0.03,cy+h*0.33);ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cx+w*0.03,cy+h*0.33);ctx.lineTo(cx+w*0.03,cy+h*0.38);
+  ctx.lineTo(cx+w*0.18,cy+h*0.38);ctx.lineTo(cx+w*0.15,cy+h*0.33);ctx.fill();
+  // Hammer
+  if(swing){
+    ctx.fillRect(cx-w*0.04,cy-h*0.58,w*0.08,h*0.22);
+    ctx.fillRect(cx-w*0.12,cy-h*0.66,w*0.24,h*0.1);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(cx+w*0.14,cy-h*0.08);ctx.lineTo(cx+w*0.38,cy-h*0.22);
+    ctx.lineTo(cx+w*0.4,cy-h*0.15);ctx.lineTo(cx+w*0.16,cy-h*0.02);ctx.fill();
+    ctx.fillRect(cx+w*0.32,cy-h*0.3,w*0.14,h*0.12);
+  }
+}
+
+// ── WARRIOR (top) — feathered headdress, throwing torch ──
+function drawThrower(cx,cy,w,h,col,step){
+  ctx.fillStyle=col;
+  // Head
+  ctx.beginPath();ctx.arc(cx,cy-h*0.28,w*0.1,0,Math.PI*2);ctx.fill();
+  // Feathered headdress — single tall feather angled back (THE identifier)
+  ctx.beginPath();
+  ctx.moveTo(cx-w*0.02,cy-h*0.36);
+  ctx.lineTo(cx-w*0.15,cy-h*0.62);
+  ctx.lineTo(cx-w*0.08,cy-h*0.6);
+  ctx.lineTo(cx+w*0.02,cy-h*0.36);
+  ctx.fill();
+  // Second smaller feather
+  ctx.beginPath();
+  ctx.moveTo(cx+w*0.02,cy-h*0.35);
+  ctx.lineTo(cx-w*0.06,cy-h*0.55);
+  ctx.lineTo(cx-w*0.02,cy-h*0.53);
+  ctx.lineTo(cx+w*0.05,cy-h*0.35);
+  ctx.fill();
+  // Headband
+  ctx.fillRect(cx-w*0.12,cy-h*0.32,w*0.24,h*0.03);
+  // Body leaning forward to throw
+  ctx.beginPath();
+  ctx.moveTo(cx-w*0.1,cy-h*0.16);
+  ctx.lineTo(cx-w*0.06,cy+h*0.15);
+  ctx.lineTo(cx+w*0.12,cy+h*0.15);
+  ctx.lineTo(cx+w*0.1,cy-h*0.16);
+  ctx.fill();
+  // Throwing arm raised with torch
+  ctx.beginPath();
+  ctx.moveTo(cx+w*0.1,cy-h*0.1);
+  ctx.lineTo(cx+w*0.32,cy-h*0.28);
+  ctx.lineTo(cx+w*0.27,cy-h*0.33);
+  ctx.lineTo(cx+w*0.06,cy-h*0.16);
+  ctx.fill();
+  // Torch in hand
+  ctx.fillRect(cx+w*0.25,cy-h*0.4,w*0.05,h*0.15);
+  drawSmallFlame(cx+w*0.28,cy-h*0.45,w*0.1,h*0.1,col);
+  // Other arm
+  ctx.fillRect(cx-w*0.2,cy-h*0.08,w*0.1,h*0.04);
+  // Legs in crouch
+  ctx.fillRect(cx-w*0.08,cy+h*0.15,w*0.07,h*0.13);
+  ctx.fillRect(cx+w*0.03,cy+h*0.15,w*0.07,h*0.13);
+  // Moccasins
+  ctx.fillRect(cx-w*0.1,cy+h*0.27,w*0.09,h*0.04);
+  ctx.fillRect(cx+w*0.02,cy+h*0.27,w*0.09,h*0.04);
+}
+
+// ── WARRIOR (bottom) — feathered headdress, climbing with burning stick ──
+function drawClimber(cx,cy,w,h,col){
+  ctx.fillStyle=col;
+  // Head
+  ctx.beginPath();ctx.arc(cx,cy-h*0.3,w*0.1,0,Math.PI*2);ctx.fill();
+  // Feather headdress (single feather, angled)
+  ctx.beginPath();
+  ctx.moveTo(cx,cy-h*0.38);
+  ctx.lineTo(cx-w*0.12,cy-h*0.58);
+  ctx.lineTo(cx-w*0.06,cy-h*0.56);
+  ctx.lineTo(cx+w*0.03,cy-h*0.38);
+  ctx.fill();
+  // Headband
+  ctx.fillRect(cx-w*0.12,cy-h*0.34,w*0.24,h*0.03);
+  // Body — climbing posture
+  ctx.beginPath();
+  ctx.moveTo(cx-w*0.1,cy-h*0.18);
+  ctx.lineTo(cx-w*0.1,cy+h*0.14);
+  ctx.lineTo(cx+w*0.1,cy+h*0.14);
+  ctx.lineTo(cx+w*0.1,cy-h*0.18);
+  ctx.fill();
+  // Arms gripping ladder rungs
+  ctx.fillRect(cx-w*0.28,cy-h*0.14,w*0.18,h*0.05);
+  ctx.fillRect(cx+w*0.1,cy-h*0.08,w*0.18,h*0.05);
+  // Legs on ladder
+  ctx.fillRect(cx-w*0.08,cy+h*0.14,w*0.06,h*0.16);
+  ctx.fillRect(cx+w*0.02,cy+h*0.14,w*0.06,h*0.16);
+  // Moccasins
+  ctx.fillRect(cx-w*0.1,cy+h*0.29,w*0.08,h*0.04);
+  ctx.fillRect(cx+w*0.02,cy+h*0.29,w*0.08,h*0.04);
+  // Burning stick held in one hand (across body)
+  ctx.beginPath();
+  ctx.moveTo(cx+w*0.18,cy-h*0.06);
+  ctx.lineTo(cx+w*0.3,cy-h*0.3);
+  ctx.lineTo(cx+w*0.26,cy-h*0.32);
+  ctx.lineTo(cx+w*0.14,cy-h*0.08);
+  ctx.fill();
+  drawSmallFlame(cx+w*0.28,cy-h*0.36,w*0.1,h*0.1,col);
+}
+
+// ── TORCH in flight ──
+function drawTorch(cx,cy,w,h,col){
+  ctx.fillStyle=col;
+  ctx.fillRect(cx-w*0.03,cy-h*0.15,w*0.06,h*0.2);
+  drawSmallFlame(cx,cy-h*0.2,w*0.12,h*0.15,col);
+}
+
+function drawSmallFlame(cx,cy,w,h,col){
+  ctx.fillStyle=col;
+  ctx.beginPath();
+  ctx.moveTo(cx,cy-h*0.5);
+  ctx.quadraticCurveTo(cx+w*0.4,cy,cx+w*0.15,cy+h*0.3);
+  ctx.lineTo(cx-w*0.15,cy+h*0.3);
+  ctx.quadraticCurveTo(cx-w*0.4,cy,cx,cy-h*0.5);
+  ctx.fill();
+}
+
+// ── FIRE on fort ──
+function drawFortFire(cx,cy,w,h,col,frame){
+  ctx.fillStyle=col;
+  ctx.beginPath();
+  var ox=frame?w*0.05:0;
+  ctx.moveTo(cx+ox,cy-h*0.6);
+  ctx.quadraticCurveTo(cx+w*0.35+ox,cy-h*0.15,cx+w*0.2+ox,cy+h*0.1);
+  ctx.lineTo(cx+w*0.3,cy-h*0.05);
+  ctx.quadraticCurveTo(cx+w*0.45,cy+h*0.25,cx+w*0.15,cy+h*0.4);
+  ctx.lineTo(cx-w*0.15,cy+h*0.4);
+  ctx.quadraticCurveTo(cx-w*0.45,cy+h*0.25,cx-w*0.3,cy-h*0.05);
+  ctx.lineTo(cx-w*0.2-ox,cy+h*0.1);
+  ctx.quadraticCurveTo(cx-w*0.35-ox,cy-h*0.15,cx+ox,cy-h*0.6);
+  ctx.fill();
+}
+
+// ── LADDER ──
+function drawLadder(cx,cy,w,h,col){
+  ctx.fillStyle=col;
+  ctx.fillRect(cx-w*0.35,cy,w*0.06,h);
+  ctx.fillRect(cx+w*0.29,cy,w*0.06,h);
+  for(var r=0;r<4;r++){
+    ctx.fillRect(cx-w*0.29,cy+r*h*0.28+h*0.05,w*0.58,h*0.06);
+  }
+}
+
+// ── HELPERS ──
+function roundRect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath()}
+
+function drawDiagButton(r,label,active){
+  ctx.fillStyle=active?'#1a3018':'#2a4020';roundRect(r.x,r.y+2,r.w,r.h,r.h*0.25);ctx.fill();
+  ctx.fillStyle=active?'#2a4828':'#3a5830';roundRect(r.x,r.y,r.w,r.h,r.h*0.25);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.06)';roundRect(r.x+r.w*0.1,r.y+1,r.w*0.8,r.h*0.3,r.h*0.15);ctx.fill();
+  ctx.fillStyle='#80b868';ctx.font='bold '+(r.h*0.35)+'px sans-serif';ctx.textAlign='center';
+  ctx.fillText(label,r.x+r.w/2,r.y+r.h*0.6);
+}
+
+// ═══════════════════════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════════════════════
+function render(){
+  var vw=canvas.width,vh=canvas.height;
+  ctx.fillStyle='#1a1a2e';ctx.fillRect(0,0,vw,vh);
+
+  // Device casing — dark olive green
+  var grad=ctx.createLinearGradient(D.x,D.y,D.x,D.y+D.h);
+  grad.addColorStop(0,'#4a5a38');grad.addColorStop(0.4,'#3a4a28');grad.addColorStop(1,'#2a3a1a');
+  ctx.fillStyle=grad;roundRect(D.x,D.y,D.w,D.h,D.w*0.025);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.08)';roundRect(D.x,D.y,D.w,D.h*0.015,D.w*0.025);ctx.fill();
+  // Screws
+  var sr=D.w*0.01,si=D.w*0.035;
+  [[D.x+si,D.y+si],[D.x+D.w-si,D.y+si],[D.x+si,D.y+D.h-si],[D.x+D.w-si,D.y+D.h-si]].forEach(function(p){
+    ctx.fillStyle='#2a3018';ctx.beginPath();ctx.arc(p[0],p[1],sr,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#1a2010';ctx.fillRect(p[0]-sr*0.6,p[1]-sr*0.15,sr*1.2,sr*0.3);
+  });
+  ctx.fillStyle='#c0d0a0';ctx.font='bold '+(D.w*0.03)+'px sans-serif';ctx.textAlign='center';
+  ctx.fillText('FIRE ATTACK',D.x+D.w/2,D.y+D.h*0.055);
+
+  // Screen bezel
+  ctx.fillStyle='#1a2010';roundRect(S.x-4,S.y-4,S.w+8,S.h+8,3);ctx.fill();
+  ctx.fillStyle=LCD_BG;ctx.fillRect(S.x,S.y,S.w,S.h);
+
+  // ── Screen layout ──
+  var fortCX=S.x+S.w*0.5,fortCY=S.y+S.h*0.5;
+  var fortW=S.w*0.3,fortH=S.h*0.35;
+
+  // 4 attack direction positions (where attackers appear at each step)
+  // TL: top-left, TR: top-right (throwers on cliffs)
+  // BL: bottom-left, BR: bottom-right (climbers on ladders)
+  var atkPos=[
+    // dir 0 (TL): 3 steps approaching from top-left
+    [{x:S.x+S.w*0.08,y:S.y+S.h*0.12},{x:S.x+S.w*0.2,y:S.y+S.h*0.2},{x:S.x+S.w*0.3,y:S.y+S.h*0.28}],
+    // dir 1 (TR): 3 steps from top-right
+    [{x:S.x+S.w*0.92,y:S.y+S.h*0.12},{x:S.x+S.w*0.8,y:S.y+S.h*0.2},{x:S.x+S.w*0.7,y:S.y+S.h*0.28}],
+    // dir 2 (BL): 3 steps climbing from bottom-left
+    [{x:S.x+S.w*0.1,y:S.y+S.h*0.88},{x:S.x+S.w*0.2,y:S.y+S.h*0.75},{x:S.x+S.w*0.3,y:S.y+S.h*0.62}],
+    // dir 3 (BR): 3 steps climbing from bottom-right
+    [{x:S.x+S.w*0.9,y:S.y+S.h*0.88},{x:S.x+S.w*0.8,y:S.y+S.h*0.75},{x:S.x+S.w*0.7,y:S.y+S.h*0.62}],
+  ];
+
+  // Defender positions (4 corners of fort)
+  var defPosXY=[
+    {x:fortCX-fortW*0.35,y:fortCY-fortH*0.45}, // TL
+    {x:fortCX+fortW*0.35,y:fortCY-fortH*0.45}, // TR
+    {x:fortCX-fortW*0.35,y:fortCY+fortH*0.35},  // BL
+    {x:fortCX+fortW*0.35,y:fortCY+fortH*0.35},  // BR
+  ];
+
+  var atkW=S.w*0.08,atkH=S.h*0.15;
+  var defW=S.w*0.07,defH=S.h*0.2;
+
+  // Score
+  drawScore(S.x+S.w*0.04,S.y+S.h*0.06,S.h*0.09,score);
+  drawMissMarks(S.x+S.w*0.8,S.y+S.h*0.06,S.h*0.09*0.4);
+
+  // Fort (structural, always visible)
+  drawFort(fortCX,fortCY,fortW,fortH,LCD_STRUCT);
+
+  // Ladders at bottom-left and bottom-right (structural)
+  drawLadder(S.x+S.w*0.25,fortCY+fortH*0.2,S.w*0.06,S.h*0.35,LCD_STRUCT);
+  drawLadder(S.x+S.w*0.75,fortCY+fortH*0.2,S.w*0.06,S.h*0.35,LCD_STRUCT);
+
+  // Cliff platforms at top-left and top-right (structural)
+  ctx.fillStyle=LCD_STRUCT;
+  ctx.fillRect(S.x+S.w*0.02,S.y+S.h*0.22,S.w*0.15,S.h*0.04);
+  ctx.fillRect(S.x+S.w*0.83,S.y+S.h*0.22,S.w*0.15,S.h*0.04);
+
+  // ── GHOST SEGMENTS ──
+  // All attacker positions
+  for(var gd=0;gd<4;gd++){
+    for(var gs=0;gs<3;gs++){
+      var gp=atkPos[gd][gs];
+      if(gd<=1)drawThrower(gp.x,gp.y,atkW,atkH,LCD_GHOST,gs);
+      else drawClimber(gp.x,gp.y,atkW,atkH,LCD_GHOST);
+    }
+  }
+  // All defender positions
+  for(var gdf=0;gdf<4;gdf++){
+    drawDefender(defPosXY[gdf].x,defPosXY[gdf].y,defW,defH,LCD_GHOST,false);
+  }
+
+  // ── ACTIVE FIRES on fort ──
+  var firePos=[
+    {x:fortCX-fortW*0.3,y:fortCY-fortH*0.15},
+    {x:fortCX+fortW*0.3,y:fortCY-fortH*0.15},
+    {x:fortCX-fortW*0.3,y:fortCY+fortH*0.2},
+    {x:fortCX+fortW*0.3,y:fortCY+fortH*0.2},
+  ];
+  for(var fi=0;fi<4;fi++){
+    if(fires[fi])drawFortFire(firePos[fi].x,firePos[fi].y,S.w*0.04,S.h*0.08,LCD_ON,flameFrame);
+  }
+
+  // ── ACTIVE ELEMENTS ──
+  if(state==='play'||state==='over'){
+    // Active attackers
+    for(var ai=0;ai<attackers.length;ai++){
+      var a=attackers[ai];
+      var ap=atkPos[a.dir][a.step];
+      if(a.dir<=1)drawThrower(ap.x,ap.y,atkW,atkH,LCD_ON,a.step);
+      else drawClimber(ap.x,ap.y,atkW,atkH,LCD_ON);
+    }
+    // Active defender
+    var dp=defPosXY[defPos];
+    drawDefender(dp.x,dp.y,defW,defH,LCD_ON,swinging);
+  }
+
+  // ── BUTTONS — 4 diagonal positions ──
+  var btnW=D.w*0.1,btnH2=D.h*0.1;
+  var btnBaseY=S.y+S.h+D.h*0.02;
+  var btnCX=D.x+D.w*0.5;
+  var btnSpX=D.w*0.14,btnSpY=D.h*0.12;
+  btns[0]={x:btnCX-btnSpX-btnW/2,y:btnBaseY,w:btnW,h:btnH2};         // TL
+  btns[1]={x:btnCX+btnSpX-btnW/2,y:btnBaseY,w:btnW,h:btnH2};         // TR
+  btns[2]={x:btnCX-btnSpX-btnW/2,y:btnBaseY+btnSpY,w:btnW,h:btnH2};  // BL
+  btns[3]={x:btnCX+btnSpX-btnW/2,y:btnBaseY+btnSpY,w:btnW,h:btnH2};  // BR
+
+  drawDiagButton(btns[0],'↖',defPos===0&&state==='play');
+  drawDiagButton(btns[1],'↗',defPos===1&&state==='play');
+  drawDiagButton(btns[2],'↙',defPos===2&&state==='play');
+  drawDiagButton(btns[3],'↘',defPos===3&&state==='play');
+
+  // Chance time indicator
+  if(chanceTime&&state==='play'){
+    ctx.fillStyle=LCD_ON;ctx.font=(S.h*0.03)+'px sans-serif';ctx.textAlign='center';
+    ctx.fillText('CHANCE TIME!',S.x+S.w*0.5,S.y+S.h*0.97);
+  }
+
+  // ── TITLE / GAME OVER ──
+  if(state==='title'){
+    ctx.fillStyle=LCD_ON;ctx.font='bold '+(S.h*0.07)+'px sans-serif';ctx.textAlign='center';
+    ctx.fillText('FIRE ATTACK',S.x+S.w/2,S.y+S.h*0.32);
+    ctx.font=(S.h*0.035)+'px sans-serif';
+    ctx.fillText('Defend the fort from 4 directions!',S.x+S.w/2,S.y+S.h*0.44);
+    ctx.fillText('Q W / A S = move to corner',S.x+S.w/2,S.y+S.h*0.5);
+    ctx.fillText('Press same button again to swing hammer',S.x+S.w/2,S.y+S.h*0.56);
+    ctx.fillText('2 pts per hit · 3 fires = game over',S.x+S.w/2,S.y+S.h*0.62);
+    ctx.fillText('Tap or press SPACE to start',S.x+S.w/2,S.y+S.h*0.72);
+    if(hiScore>0)ctx.fillText('Hi Score: '+hiScore,S.x+S.w/2,S.y+S.h*0.82);
+  }
+  if(state==='over'){
+    ctx.fillStyle='rgba(154,173,134,0.88)';ctx.fillRect(S.x+S.w*0.15,S.y+S.h*0.28,S.w*0.7,S.h*0.44);
+    ctx.fillStyle=LCD_ON;ctx.font='bold '+(S.h*0.07)+'px sans-serif';ctx.textAlign='center';
+    ctx.fillText('GAME OVER',S.x+S.w/2,S.y+S.h*0.43);
+    ctx.font=(S.h*0.05)+'px sans-serif';
+    ctx.fillText('Score: '+score,S.x+S.w/2,S.y+S.h*0.54);
+    if(score>=hiScore&&score>0)ctx.fillText('NEW HIGH SCORE!',S.x+S.w/2,S.y+S.h*0.62);
+    ctx.font=(S.h*0.035)+'px sans-serif';
+    ctx.fillText('Tap or SPACE to restart',S.x+S.w/2,S.y+S.h*0.7);
+  }
+}
+
+// ── MAIN LOOP ──
+var lastTime=0;
+function loop(now){
+  if(!lastTime)lastTime=now;
+  var dt=now-lastTime;lastTime=now;
+  if(state==='play'){accumulator+=dt;while(accumulator>=tickRate){accumulator-=tickRate;gameTick()}}
+  render();requestAnimationFrame(loop);
+}
+
+loadHi();initGame();calcLayout();
+window.addEventListener('resize',calcLayout);
+requestAnimationFrame(loop);
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px 'Segoe UI',Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px;">
+  <span id="vc-count">...</span> Firefighters
+</div>
+<script>
+(function(){
+  var G='fire-attack',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

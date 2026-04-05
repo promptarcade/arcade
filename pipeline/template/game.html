@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>{{TITLE}}</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #111; font-family: sans-serif; }
+canvas { display: block; touch-action: none; width: 100vw; height: 100vh; }
+#ui { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; color: #fff; padding: 10px; }
+#score { font-size: 24px; font-weight: bold; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui"><div id="score">Score: 0</div></div>
+<script>
+// Generated code — strict mode disabled for compatibility
+
+// === SPRITE ENGINE ===
+{{ENGINE}}
+
+// === CANVAS SETUP ===
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, S;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  S = Math.min(W, H) / 600;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// === SPRITES ===
+{{SPRITES}}
+
+// === MECHANICS ===
+{{MECHANICS}}
+
+// === GAME STATE & LAYOUT ===
+{{LAYOUT}}
+
+// === INPUT ===
+{{INPUT}}
+
+// === GAME LOOP ===
+let lastTime = 0;
+if (typeof score === 'undefined') var score = 0;
+const scoreEl = document.getElementById('score');
+
+function gameLoop(time) {
+  const dt = Math.min((time - lastTime) / 1000, 0.05);
+  lastTime = time;
+
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, W, H);
+
+  {{UPDATE}}
+
+  {{DRAW}}
+
+  scoreEl.textContent = 'Score: ' + score;
+  requestAnimationFrame(gameLoop);
+}
+
+// === BOOT ===
+{{BOOT}}
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

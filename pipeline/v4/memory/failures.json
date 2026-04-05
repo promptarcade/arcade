@@ -1,0 +1,17 @@
+[
+  {
+    "fn_id": "fn_6",
+    "reason": "LIKELY BAD TEST VECTOR: all 3 attempts returned the same result. vector 1: returned 0, expected 0. The code is probably correct but the expected value in the test vector is wrong. Fix the test vectors.",
+    "timestamp": 1774388410358
+  },
+  {
+    "fn_id": "fn_7",
+    "reason": "LIKELY BAD TEST VECTOR: all 3 attempts returned the same result. vector 4: returned true, expected false. The code is probably correct but the expected value in the test vector is wrong. Fix the test vectors.",
+    "timestamp": 1774388552851
+  },
+  {
+    "fn_id": "fn_5bc",
+    "reason": "vector 1 crash: max is not defined",
+    "timestamp": 1774389737934
+  }
+]

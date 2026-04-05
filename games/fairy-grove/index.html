@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Fairy Grove</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #2a4a2a; overflow: hidden; touch-action: none; }
+canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+
+const C = document.getElementById('c');
+const X = C.getContext('2d');
+
+// Fixed game resolution, CSS scales to viewport
+const GW = 960, GH = 540;
+C.width = GW; C.height = GH;
+
+// ============================================================
+// ASSET LOADING
+// ============================================================
+const sprites = {};
+const spriteNames = [
+  'fairy-0',   // fairy (player)
+  'fairy-1',   // mushroom house
+  'fairy-2',   // tall tree
+  'fairy-3',   // bird
+  'fairy-4',   // old tree with hollow
+  'fairy-5',   // tree stump face
+  'fairy-6',   // flowering bush
+  'fairy-7',   // bush with face
+  'fairy-8',   // ladybug
+  'fairy-9',   // small mushroom
+  'fairy-10',  // large mushrooms
+  'fairy-11',  // brown mushrooms
+  'fairy-12',  // butterfly
+  'fairy-13',  // snail
+  'fairy-14',  // red flower
+  'fairy-15',  // tan mushroom
+  'fairy-16',  // frog
+];
+
+let loaded = 0;
+for (const name of spriteNames) {
+  const img = new Image();
+  img.onload = () => { loaded++; if (loaded >= spriteNames.length) startGame(); };
+  img.onerror = () => { loaded++; console.warn('Missing:', name); if (loaded >= spriteNames.length) startGame(); };
+  img.src = 'sprites/' + name + '.png';
+  sprites[name] = img;
+}
+
+// Friendly names for display
+const NAMES = {
+  'fairy-3': 'Bluebird', 'fairy-8': 'Ladybug', 'fairy-12': 'Butterfly',
+  'fairy-13': 'Snail', 'fairy-16': 'Frog', 'fairy-9': 'Mushroom',
+  'fairy-14': 'Flower', 'fairy-15': 'Mushroom',
+};
+
+// ============================================================
+// WORLD GENERATION
+// ============================================================
+const WORLD_W = 2400, WORLD_H = 1600;
+
+let camera = { x: 0, y: 0 };
+let player = { x: WORLD_W / 2, y: WORLD_H / 2, vx: 0, vy: 0, facing: 1, bobT: 0 };
+let worldObjects = [];
+let particles = [];
+let collected = {};
+let totalCreatures = 5; // bird, ladybug, butterfly, snail, frog
+let foundCreatures = 0;
+let totalCollectibles = 0;
+let collectedCount = 0;
+let gameTime = 0;
+let showIntro = true;
+let introTimer = 0;
+
+function generateWorld() {
+  worldObjects = [];
+  collected = {};
+  foundCreatures = 0;
+  collectedCount = 0;
+  totalCollectibles = 0;
+
+  // Mushroom house at centre
+  worldObjects.push({
+    type: 'scenery', sprite: 'fairy-1', x: WORLD_W / 2 - 50, y: WORLD_H / 2 + 20,
+    w: 120, h: 155, z: 0, label: 'Home',
+  });
+
+  // Trees scattered around
+  const treeSprites = ['fairy-2', 'fairy-4'];
+  for (let i = 0; i < 18; i++) {
+    const tx = 100 + Math.random() * (WORLD_W - 200);
+    const ty = 100 + Math.random() * (WORLD_H - 200);
+    // Don't place on top of house
+    if (Math.abs(tx - WORLD_W / 2) < 150 && Math.abs(ty - WORLD_H / 2) < 150) continue;
+    const spr = treeSprites[Math.floor(Math.random() * treeSprites.length)];
+    const scale = 0.3 + Math.random() * 0.3;
+    worldObjects.push({
+      type: 'scenery', sprite: spr, x: tx, y: ty,
+      w: 120 * scale, h: 180 * scale, z: 0,
+    });
+  }
+
+  // Bushes
+  const bushSprites = ['fairy-6', 'fairy-7'];
+  for (let i = 0; i < 12; i++) {
+    const bx = 50 + Math.random() * (WORLD_W - 100);
+    const by = 50 + Math.random() * (WORLD_H - 100);
+    if (Math.abs(bx - WORLD_W / 2) < 120 && Math.abs(by - WORLD_H / 2) < 120) continue;
+    const spr = bushSprites[Math.floor(Math.random() * bushSprites.length)];
+    worldObjects.push({
+      type: 'scenery', sprite: spr, x: bx, y: by,
+      w: 90, h: 65, z: 0,
+    });
+  }
+
+  // Tree stumps (NPCs)
+  worldObjects.push({
+    type: 'npc', sprite: 'fairy-5', x: WORLD_W / 2 - 250, y: WORLD_H / 2 + 80,
+    w: 80, h: 60, z: 0, label: 'Stumpy',
+    dialogue: 'The bluebird likes to rest near the tallest trees in the north...',
+  });
+  worldObjects.push({
+    type: 'npc', sprite: 'fairy-7', x: WORLD_W / 2 + 200, y: WORLD_H / 2 - 100,
+    w: 100, h: 70, z: 0, label: 'Mossy',
+    dialogue: 'I heard a frog croaking near the pond to the south-east...',
+  });
+
+  // Mushroom scenery
+  for (let i = 0; i < 8; i++) {
+    const mx = 80 + Math.random() * (WORLD_W - 160);
+    const my = 80 + Math.random() * (WORLD_H - 160);
+    const spr = ['fairy-10', 'fairy-11'][Math.floor(Math.random() * 2)];
+    worldObjects.push({
+      type: 'scenery', sprite: spr, x: mx, y: my,
+      w: 60 + Math.random() * 40, h: 50 + Math.random() * 40, z: 0,
+    });
+  }
+
+  // CREATURES to discover (hidden around the world)
+  const creatures = [
+    { sprite: 'fairy-3', x: WORLD_W * 0.2, y: 150, w: 70, h: 70, label: 'Bluebird' },
+    { sprite: 'fairy-8', x: WORLD_W * 0.8, y: WORLD_H * 0.3, w: 45, h: 45, label: 'Ladybug' },
+    { sprite: 'fairy-12', x: 200, y: WORLD_H * 0.7, w: 65, h: 50, label: 'Butterfly' },
+    { sprite: 'fairy-13', x: WORLD_W * 0.7, y: WORLD_H * 0.8, w: 70, h: 50, label: 'Snail' },
+    { sprite: 'fairy-16', x: WORLD_W * 0.85, y: WORLD_H * 0.85, w: 80, h: 50, label: 'Frog' },
+  ];
+  for (const c of creatures) {
+    worldObjects.push({ type: 'creature', ...c, z: 1, found: false, bobOffset: Math.random() * 6 });
+  }
+
+  // COLLECTIBLES — flowers and mushrooms
+  for (let i = 0; i < 20; i++) {
+    const fx = 60 + Math.random() * (WORLD_W - 120);
+    const fy = 60 + Math.random() * (WORLD_H - 120);
+    const isFlower = Math.random() < 0.5;
+    worldObjects.push({
+      type: 'collectible',
+      sprite: isFlower ? 'fairy-14' : ['fairy-9', 'fairy-15'][Math.floor(Math.random() * 2)],
+      x: fx, y: fy, w: isFlower ? 35 : 28, h: isFlower ? 50 : 40,
+      z: 1, collected: false, bobOffset: Math.random() * 6,
+      label: isFlower ? 'Flower' : 'Mushroom',
+    });
+    totalCollectibles++;
+  }
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+const keys = {};
+document.addEventListener('keydown', e => { keys[e.key] = true; e.preventDefault(); });
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+// Touch — joystick
+let touchActive = false, touchX = 0, touchY = 0, touchStartX = 0, touchStartY = 0;
+C.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  touchActive = true;
+  touchStartX = t.clientX;
+  touchStartY = t.clientY;
+  touchX = 0; touchY = 0;
+  if (showIntro) { showIntro = false; }
+});
+C.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  touchX = (t.clientX - touchStartX) / 40;
+  touchY = (t.clientY - touchStartY) / 40;
+  touchX = Math.max(-1, Math.min(1, touchX));
+  touchY = Math.max(-1, Math.min(1, touchY));
+});
+C.addEventListener('touchend', e => {
+  e.preventDefault();
+  touchActive = false; touchX = 0; touchY = 0;
+});
+
+// ============================================================
+// PARTICLES
+// ============================================================
+function spawnSparkles(x, y, count, color) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 3,
+      vy: -Math.random() * 2 - 1,
+      life: 1,
+      decay: 0.01 + Math.random() * 0.02,
+      size: 2 + Math.random() * 3,
+      color: color || `hsl(${50 + Math.random() * 40}, 80%, 70%)`,
+    });
+  }
+}
+
+// ============================================================
+// UPDATE
+// ============================================================
+function update(dt) {
+  gameTime += dt;
+
+  if (showIntro) {
+    introTimer += dt;
+    if (introTimer > 5 || keys['Enter'] || keys[' ']) showIntro = false;
+    return;
+  }
+
+  // Player movement — floaty fairy feel
+  const speed = 3;
+  let ix = 0, iy = 0;
+  if (keys['ArrowLeft'] || keys['a']) ix -= 1;
+  if (keys['ArrowRight'] || keys['d']) ix += 1;
+  if (keys['ArrowUp'] || keys['w']) iy -= 1;
+  if (keys['ArrowDown'] || keys['s']) iy += 1;
+  if (touchActive) { ix = touchX; iy = touchY; }
+
+  // Smooth acceleration
+  player.vx += (ix * speed - player.vx) * 0.15;
+  player.vy += (iy * speed - player.vy) * 0.15;
+  player.x += player.vx;
+  player.y += player.vy;
+  player.bobT += dt * 3;
+
+  // Clamp to world
+  player.x = Math.max(20, Math.min(WORLD_W - 20, player.x));
+  player.y = Math.max(20, Math.min(WORLD_H - 20, player.y));
+
+  if (ix !== 0) player.facing = ix > 0 ? 1 : -1;
+
+  // Fairy trail sparkles when moving
+  if (Math.abs(player.vx) > 0.5 || Math.abs(player.vy) > 0.5) {
+    if (Math.random() < 0.3) {
+      spawnSparkles(player.x, player.y + 20, 1, `hsla(${120 + Math.random() * 80}, 70%, 75%, 0.8)`);
+    }
+  }
+
+  // Camera follows player smoothly
+  const targetCX = player.x - GW / 2;
+  const targetCY = player.y - GH / 2;
+  camera.x += (targetCX - camera.x) * 0.08;
+  camera.y += (targetCY - camera.y) * 0.08;
+  camera.x = Math.max(0, Math.min(WORLD_W - GW, camera.x));
+  camera.y = Math.max(0, Math.min(WORLD_H - GH, camera.y));
+
+  // Check interactions
+  let nearestInteractable = null;
+  let nearestDist = 60;
+
+  for (const obj of worldObjects) {
+    if (obj.type === 'creature' && !obj.found) {
+      const dx = player.x - (obj.x + obj.w / 2);
+      const dy = player.y - (obj.y + obj.h / 2);
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < nearestDist) {
+        obj.found = true;
+        foundCreatures++;
+        spawnSparkles(obj.x + obj.w / 2, obj.y, 20, '#ffee66');
+        nearestInteractable = { type: 'found', label: obj.label };
+      }
+    }
+    if (obj.type === 'collectible' && !obj.collected) {
+      const dx = player.x - (obj.x + obj.w / 2);
+      const dy = player.y - (obj.y + obj.h / 2);
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 35) {
+        obj.collected = true;
+        collectedCount++;
+        spawnSparkles(obj.x + obj.w / 2, obj.y, 10, '#aaffaa');
+      }
+    }
+  }
+
+  // Update particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.02; // gentle gravity
+    p.life -= p.decay;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function drawImg(name, x, y, w, h, flipX) {
+  const img = sprites[name];
+  if (!img || !img.complete || !img.naturalWidth) return;
+  X.save();
+  if (flipX) {
+    X.translate(x + w, y);
+    X.scale(-1, 1);
+    X.drawImage(img, 0, 0, w, h);
+  } else {
+    X.drawImage(img, x, y, w, h);
+  }
+  X.restore();
+}
+
+function render() {
+  // Sky gradient background
+  const grad = X.createLinearGradient(0, 0, 0, GH);
+  grad.addColorStop(0, '#87ceeb');
+  grad.addColorStop(0.6, '#a8e6a0');
+  grad.addColorStop(1, '#6b8e5a');
+  X.fillStyle = grad;
+  X.fillRect(0, 0, GW, GH);
+
+  if (showIntro) {
+    renderIntro();
+    return;
+  }
+
+  X.save();
+  X.translate(-Math.round(camera.x), -Math.round(camera.y));
+
+  // Ground — soft green with subtle variation
+  X.fillStyle = '#5a7a4a';
+  X.fillRect(0, 0, WORLD_W, WORLD_H);
+
+  // Ground texture — patches of lighter/darker grass
+  for (let gy = 0; gy < WORLD_H; gy += 60) {
+    for (let gx = 0; gx < WORLD_W; gx += 60) {
+      const seed = (gx * 997 + gy * 13) & 0xffff;
+      const brightness = ((seed % 20) - 10);
+      const g = 122 + brightness;
+      X.fillStyle = `rgb(${90 + brightness / 2}, ${g}, ${74 + brightness / 2})`;
+      X.fillRect(gx, gy, 60, 60);
+    }
+  }
+
+  // Pond in the south-east (where the frog lives)
+  X.fillStyle = '#4a8ab0';
+  X.beginPath();
+  X.ellipse(WORLD_W * 0.83, WORLD_H * 0.82, 80, 50, 0, 0, Math.PI * 2);
+  X.fill();
+  X.fillStyle = '#5a9ac0';
+  X.beginPath();
+  X.ellipse(WORLD_W * 0.83, WORLD_H * 0.82, 60, 35, 0.2, 0, Math.PI * 2);
+  X.fill();
+  // Pond sparkle
+  X.fillStyle = 'rgba(200, 230, 255, 0.4)';
+  X.beginPath();
+  X.ellipse(WORLD_W * 0.82, WORLD_H * 0.81, 20, 10, 0.3, 0, Math.PI * 2);
+  X.fill();
+
+  // Sort objects by Y for depth ordering
+  const sortedObjects = [...worldObjects].sort((a, b) => (a.y + a.h) - (b.y + b.h));
+
+  // Draw objects + player interleaved by Y
+  let playerDrawn = false;
+  const playerBottom = player.y + 30;
+
+  for (const obj of sortedObjects) {
+    const objBottom = obj.y + obj.h;
+
+    // Draw player when their Y position is reached
+    if (!playerDrawn && playerBottom < objBottom) {
+      drawPlayer();
+      playerDrawn = true;
+    }
+
+    // Skip collected/unfound visibility
+    if (obj.type === 'collectible' && obj.collected) continue;
+
+    const bob = (obj.bobOffset !== undefined) ? Math.sin(gameTime * 2 + obj.bobOffset) * 3 : 0;
+
+    // Creature glow when not yet found
+    if (obj.type === 'creature' && !obj.found) {
+      X.save();
+      X.globalAlpha = 0.3 + Math.sin(gameTime * 3 + obj.bobOffset) * 0.15;
+      X.fillStyle = '#ffee88';
+      X.beginPath();
+      X.ellipse(obj.x + obj.w / 2, obj.y + obj.h / 2 + bob, obj.w * 0.6, obj.h * 0.5, 0, 0, Math.PI * 2);
+      X.fill();
+      X.restore();
+    }
+
+    // Found creatures bob happily
+    if (obj.type === 'creature' && obj.found) {
+      drawImg(obj.sprite, obj.x, obj.y + bob, obj.w, obj.h);
+      // Happy sparkle
+      if (Math.random() < 0.02) spawnSparkles(obj.x + obj.w / 2, obj.y, 1, '#ffee66');
+    } else if (obj.type === 'collectible') {
+      const collectBob = Math.sin(gameTime * 2.5 + obj.bobOffset) * 2;
+      drawImg(obj.sprite, obj.x, obj.y + collectBob, obj.w, obj.h);
+    } else if (obj.type === 'npc') {
+      drawImg(obj.sprite, obj.x, obj.y, obj.w, obj.h);
+      // Show dialogue when nearby
+      const dx = player.x - (obj.x + obj.w / 2);
+      const dy = player.y - (obj.y + obj.h / 2);
+      if (Math.sqrt(dx * dx + dy * dy) < 80) {
+        // Speech bubble
+        X.fillStyle = 'rgba(255, 255, 240, 0.92)';
+        const bubbleW = 180, bubbleH = 50;
+        const bx = obj.x + obj.w / 2 - bubbleW / 2;
+        const by = obj.y - bubbleH - 15;
+        X.beginPath();
+        X.roundRect(bx, by, bubbleW, bubbleH, 8);
+        X.fill();
+        X.strokeStyle = '#886';
+        X.lineWidth = 1;
+        X.stroke();
+        // Text
+        X.fillStyle = '#443';
+        X.font = '10px sans-serif';
+        X.textAlign = 'center';
+        const words = obj.dialogue.split(' ');
+        let line = '', lineY = by + 14;
+        for (const word of words) {
+          const test = line + word + ' ';
+          if (X.measureText(test).width > bubbleW - 16) {
+            X.fillText(line.trim(), obj.x + obj.w / 2, lineY);
+            line = word + ' ';
+            lineY += 12;
+          } else {
+            line = test;
+          }
+        }
+        X.fillText(line.trim(), obj.x + obj.w / 2, lineY);
+        // Label
+        X.fillStyle = '#664';
+        X.font = 'bold 11px sans-serif';
+        X.fillText(obj.label, obj.x + obj.w / 2, by - 3);
+      }
+    } else {
+      drawImg(obj.sprite, obj.x, obj.y, obj.w, obj.h);
+    }
+  }
+
+  if (!playerDrawn) drawPlayer();
+
+  // Particles
+  for (const p of particles) {
+    X.globalAlpha = p.life;
+    X.fillStyle = p.color;
+    X.beginPath();
+    X.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    X.fill();
+  }
+  X.globalAlpha = 1;
+
+  X.restore();
+
+  // HUD
+  renderHUD();
+}
+
+function drawPlayer() {
+  const bob = Math.sin(player.bobT) * 4;
+  const px = player.x - 30;
+  const py = player.y - 45 + bob;
+  // Shadow
+  X.fillStyle = 'rgba(0,0,0,0.15)';
+  X.beginPath();
+  X.ellipse(player.x, player.y + 25, 18, 6, 0, 0, Math.PI * 2);
+  X.fill();
+  // Fairy wings glow
+  X.save();
+  X.globalAlpha = 0.15 + Math.sin(gameTime * 5) * 0.05;
+  X.fillStyle = '#aaffaa';
+  X.beginPath();
+  X.ellipse(player.x, py + 25, 35, 25, 0, 0, Math.PI * 2);
+  X.fill();
+  X.restore();
+  // Fairy sprite
+  drawImg('fairy-0', px, py, 60, 75, player.facing < 0);
+}
+
+function renderHUD() {
+  // Collection counter — top left
+  X.fillStyle = 'rgba(0, 0, 0, 0.4)';
+  X.beginPath();
+  X.roundRect(10, 10, 200, 60, 8);
+  X.fill();
+
+  X.fillStyle = '#ffe';
+  X.font = 'bold 14px sans-serif';
+  X.textAlign = 'left';
+  X.fillText('Creatures: ' + foundCreatures + ' / ' + totalCreatures, 20, 32);
+  X.fillText('Collected: ' + collectedCount + ' / ' + totalCollectibles, 20, 52);
+
+  // Win message
+  if (foundCreatures >= totalCreatures) {
+    X.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    X.beginPath();
+    X.roundRect(GW / 2 - 150, 10, 300, 40, 8);
+    X.fill();
+    X.fillStyle = '#ffee88';
+    X.font = 'bold 18px sans-serif';
+    X.textAlign = 'center';
+    X.fillText('All creatures found! The grove is happy!', GW / 2, 36);
+  }
+
+  // Touch hint
+  if (touchActive) {
+    X.fillStyle = 'rgba(255,255,255,0.15)';
+    X.beginPath();
+    X.arc(touchStartX / (window.innerWidth / GW), touchStartY / (window.innerHeight / GH), 30, 0, Math.PI * 2);
+    X.fill();
+  }
+}
+
+function renderIntro() {
+  // Title screen
+  X.fillStyle = 'rgba(0, 40, 20, 0.7)';
+  X.fillRect(0, 0, GW, GH);
+
+  // Draw fairy and mushroom house
+  drawImg('fairy-0', GW / 2 - 80, GH / 2 - 120, 100, 125);
+  drawImg('fairy-1', GW / 2 + 20, GH / 2 - 80, 80, 100);
+
+  X.fillStyle = '#ffe';
+  X.font = 'bold 36px sans-serif';
+  X.textAlign = 'center';
+  X.fillText('Fairy Grove', GW / 2, 80);
+
+  X.font = '16px sans-serif';
+  X.fillStyle = '#cda';
+  X.fillText('Explore the magical forest', GW / 2, 120);
+  X.fillText('Find all 5 hidden creatures', GW / 2, 145);
+  X.fillText('Collect flowers and mushrooms', GW / 2, 170);
+
+  X.fillStyle = '#ffe';
+  X.font = '14px sans-serif';
+  X.fillText('Arrow keys / WASD to fly  •  Touch to steer', GW / 2, GH - 50);
+
+  X.globalAlpha = 0.5 + Math.sin(gameTime * 3) * 0.5;
+  X.fillText('Press any key or tap to start', GW / 2, GH - 25);
+  X.globalAlpha = 1;
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+function startGame() {
+  generateWorld();
+
+  let lastT = 0;
+  function loop(t) {
+    const dt = Math.min((t - lastT) / 1000, 0.05);
+    lastT = t;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+
+// Keyboard start
+document.addEventListener('keydown', () => { if (showIntro) showIntro = false; }, { once: false });
+</script>
+</body>
+</html>

@@ -1,0 +1,1751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fling Fury</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: 'Segoe UI', Arial, sans-serif; }
+canvas { display: block; touch-action: none; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+
+var canvas = document.getElementById('c');
+var ctx = canvas.getContext('2d');
+
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// SUPABASE
+// ============================================================
+var _SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+var _SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(g,s){var n=prompt('Score: '+s+'! Enter initials (max 5):');if(!n)return;n=n.trim().slice(0,5).toUpperCase();if(!n)return;try{await fetch(_SU+'/rest/v1/high_scores',{method:'POST',headers:{'apikey':_SK,'Authorization':'Bearer '+_SK,'Content-Type':'application/json'},body:JSON.stringify({game:g,initials:n,score:s})})}catch(e){}}
+
+// ============================================================
+// SFX
+// ============================================================
+var SFX = (function() {
+  var actx = null, muted = false;
+  function getCtx() {
+    if (!actx) try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return null; }
+    if (actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  function play(fn) { if (muted) return; var c = getCtx(); if (c) fn(c); }
+  function osc(c, type, freq, freq2, dur, vol) {
+    var o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, c.currentTime);
+    if (freq2) o.frequency.linearRampToValueAtTime(freq2, c.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.08, c.currentTime);
+    g.gain.linearRampToValueAtTime(0, c.currentTime + dur);
+    o.connect(g); g.connect(c.destination);
+    o.start(); o.stop(c.currentTime + dur);
+  }
+  function noise(c, dur, vol) {
+    var buf = c.createBuffer(1, c.sampleRate * dur, c.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    var n = c.createBufferSource(); n.buffer = buf;
+    var g = c.createGain(); g.gain.setValueAtTime(vol, c.currentTime);
+    g.gain.linearRampToValueAtTime(0, c.currentTime + dur);
+    n.connect(g); g.connect(c.destination); n.start();
+  }
+  return {
+    get muted() { return muted; }, set muted(v) { muted = v; },
+    stretch()   { play(c => osc(c,'sine',150,400,0.3,0.06)); },
+    launch()    { play(c => { osc(c,'sine',300,600,0.15,0.08); noise(c,0.1,0.04); }); },
+    ceramicBreak() { play(c => { noise(c,0.12,0.08); osc(c,'square',800,200,0.08,0.04); }); },
+    metalClang() { play(c => { osc(c,'triangle',600,200,0.2,0.06); osc(c,'sine',1200,400,0.1,0.04); }); },
+    woodThud()  { play(c => { osc(c,'sine',120,60,0.15,0.08); noise(c,0.06,0.03); }); },
+    glassShatter() { play(c => { noise(c,0.15,0.06); osc(c,'square',2000,500,0.08,0.03); }); },
+    ratSqueak() { play(c => { osc(c,'sine',800,1200,0.1,0.06); osc(c,'sine',1000,1400,0.08,0.04); }); },
+    splat()     { play(c => { noise(c,0.1,0.06); osc(c,'sine',200,100,0.1,0.04); }); },
+    starChime() { play(c => { for(var i=0;i<3;i++) setTimeout(()=>osc(c,'sine',800+i*200,900+i*200,0.12,0.06),i*100); }); },
+    click()     { play(c => osc(c,'sine',600,400,0.05,0.03)); },
+    fail()      { play(c => { osc(c,'sawtooth',300,150,0.3,0.06); osc(c,'sawtooth',250,120,0.3,0.04); }); },
+  };
+})();
+
+// ============================================================
+// GAME CONFIG
+// ============================================================
+var W, H, SCALE;
+function recalc() {
+  W = canvas.width; H = canvas.height;
+  SCALE = Math.min(W / 800, H / 500); // Design at 800x500, scale to fit
+}
+recalc();
+window.addEventListener('resize', function() { resize(); recalc(); });
+
+// World coordinates: 800x500 design space
+var WORLD_W = 800, WORLD_H = 500;
+var GRAVITY = 500;
+var GROUND_Y = 430;
+
+// ============================================================
+// SPRITE RENDERING — pre-render all sprites to canvases
+// ============================================================
+var spriteCanvases = {};
+
+function createSpriteCanvas(w, h, drawFn) {
+  var cvs = document.createElement('canvas');
+  cvs.width = w; cvs.height = h;
+  var sctx = cvs.getContext('2d');
+  drawFn(sctx, w, h);
+  return cvs;
+}
+
+function initSprites() {
+  // Tomato — red circle with green top, angry face
+  spriteCanvases.tomato = createSpriteCanvas(32, 32, function(c, w, h) {
+    // Body
+    c.fillStyle = '#dd3322';
+    c.beginPath(); c.arc(16, 17, 10, 0, Math.PI*2); c.fill();
+    // Highlight
+    c.fillStyle = '#ff6644';
+    c.beginPath(); c.arc(13, 13, 3, 0, Math.PI*2); c.fill();
+    // Calyx
+    c.fillStyle = '#448833';
+    c.fillRect(13, 4, 6, 4);
+    c.fillRect(11, 7, 10, 3);
+    c.fillRect(15, 2, 2, 3);
+    // Eyes
+    c.fillStyle = '#fff';
+    c.fillRect(10, 15, 4, 4);
+    c.fillRect(18, 15, 4, 4);
+    c.fillStyle = '#221100';
+    c.fillRect(11, 16, 2, 2);
+    c.fillRect(19, 16, 2, 2);
+    // Eyebrows
+    c.fillStyle = '#221100';
+    c.fillRect(9, 13, 4, 1);
+    c.fillRect(19, 13, 4, 1);
+    c.fillRect(12, 14, 1, 1);
+    c.fillRect(20, 14, 1, 1);
+    // Mouth
+    c.fillRect(13, 22, 6, 1);
+    c.fillRect(12, 21, 1, 1);
+    c.fillRect(19, 21, 1, 1);
+  });
+
+  // Egg — oval, cream, worried face
+  spriteCanvases.egg = createSpriteCanvas(28, 32, function(c) {
+    c.fillStyle = '#f0e8d8';
+    c.beginPath(); c.ellipse(14, 17, 10, 13, 0, 0, Math.PI*2); c.fill();
+    c.fillStyle = '#f8f0e0';
+    c.beginPath(); c.ellipse(11, 12, 4, 5, -0.3, 0, Math.PI*2); c.fill();
+    // Eyes
+    c.fillStyle = '#fff';
+    c.fillRect(8, 14, 4, 4);
+    c.fillRect(16, 14, 4, 4);
+    c.fillStyle = '#221100';
+    c.fillRect(9, 16, 2, 2);
+    c.fillRect(17, 16, 2, 2);
+    // Worried brows
+    c.fillRect(8, 12, 2, 1);
+    c.fillRect(9, 11, 2, 1);
+    c.fillRect(18, 12, 2, 1);
+    c.fillRect(17, 11, 2, 1);
+    // O mouth
+    c.fillStyle = '#221100';
+    c.fillRect(12, 22, 4, 1);
+    c.fillRect(11, 21, 1, 1);
+    c.fillRect(16, 21, 1, 1);
+    c.fillRect(12, 20, 4, 1);
+    // Blush
+    c.fillStyle = '#eeaa88';
+    c.fillRect(6, 18, 2, 1);
+    c.fillRect(20, 18, 2, 1);
+  });
+
+  // Onion — brown bulb with tapered top, half-lidded eyes
+  spriteCanvases.onion = createSpriteCanvas(32, 34, function(c) {
+    c.fillStyle = '#997744';
+    c.beginPath(); c.arc(16, 20, 11, 0, Math.PI*2); c.fill();
+    // Taper
+    c.beginPath(); c.moveTo(11, 10); c.lineTo(16, 1); c.lineTo(21, 10); c.closePath(); c.fill();
+    c.fillRect(12, 8, 8, 4);
+    // Highlight
+    c.fillStyle = '#bb9966';
+    c.beginPath(); c.arc(13, 17, 3, 0, Math.PI*2); c.fill();
+    // Root wisps
+    c.fillStyle = '#ccbb99';
+    c.fillRect(14, 30, 1, 3);
+    c.fillRect(16, 30, 1, 2);
+    c.fillRect(18, 30, 1, 3);
+    // Eyes — half lidded
+    c.fillStyle = '#fff';
+    c.fillRect(10, 18, 4, 2);
+    c.fillRect(18, 18, 4, 2);
+    c.fillStyle = '#221100';
+    c.fillRect(12, 19, 2, 1);
+    c.fillRect(20, 19, 2, 1);
+    // Eyelids
+    c.fillStyle = '#886633';
+    c.fillRect(10, 17, 4, 1);
+    c.fillRect(18, 17, 4, 1);
+    // Flat mouth
+    c.fillStyle = '#221100';
+    c.fillRect(13, 24, 6, 1);
+  });
+
+  // Chilli — curved red pepper, fierce face
+  spriteCanvases.chilli = createSpriteCanvas(28, 36, function(c) {
+    c.fillStyle = '#dd4411';
+    c.beginPath();
+    c.moveTo(14, 4);
+    c.quadraticCurveTo(6, 14, 10, 28);
+    c.quadraticCurveTo(14, 34, 18, 28);
+    c.quadraticCurveTo(26, 14, 18, 4);
+    c.closePath();
+    c.fill();
+    // Highlight
+    c.fillStyle = '#ff6633';
+    c.beginPath();
+    c.moveTo(12, 8);
+    c.quadraticCurveTo(10, 16, 12, 22);
+    c.quadraticCurveTo(14, 16, 12, 8);
+    c.fill();
+    // Stem
+    c.fillStyle = '#448833';
+    c.fillRect(13, 0, 4, 5);
+    c.fillRect(12, 4, 6, 2);
+    // Eyes
+    c.fillStyle = '#fff';
+    c.fillRect(10, 13, 3, 2);
+    c.fillRect(17, 13, 3, 2);
+    c.fillStyle = '#221100';
+    c.fillRect(11, 14, 1, 1);
+    c.fillRect(18, 14, 1, 1);
+    // Angry brows
+    c.fillRect(8, 11, 4, 1);
+    c.fillRect(11, 12, 1, 1);
+    c.fillRect(18, 11, 4, 1);
+    c.fillRect(18, 12, 1, 1);
+    // Grin with teeth
+    c.fillStyle = '#221100';
+    c.fillRect(12, 20, 6, 1);
+    c.fillStyle = '#fff';
+    c.fillRect(13, 20, 1, 1);
+    c.fillRect(16, 20, 1, 1);
+  });
+
+  // Rat — grey-brown, big ears, holding cheese
+  spriteCanvases.rat = createSpriteCanvas(24, 28, function(c) {
+    // Tail
+    c.strokeStyle = '#bb9988'; c.lineWidth = 2;
+    c.beginPath(); c.moveTo(19, 22); c.quadraticCurveTo(22, 16, 20, 12); c.stroke();
+    // Body
+    c.fillStyle = '#887766';
+    c.beginPath(); c.ellipse(12, 16, 7, 9, 0, 0, Math.PI*2); c.fill();
+    // Belly
+    c.fillStyle = '#ccbbaa';
+    c.beginPath(); c.ellipse(12, 18, 4, 6, 0, 0, Math.PI*2); c.fill();
+    // Head
+    c.fillStyle = '#887766';
+    c.beginPath(); c.arc(12, 8, 7, 0, Math.PI*2); c.fill();
+    // Ears
+    c.beginPath(); c.arc(5, 3, 4, 0, Math.PI*2); c.fill();
+    c.fillStyle = '#ddaa99';
+    c.beginPath(); c.arc(5, 3, 3, 0, Math.PI*2); c.fill();
+    c.fillStyle = '#887766';
+    c.beginPath(); c.arc(19, 3, 4, 0, Math.PI*2); c.fill();
+    c.fillStyle = '#ddaa99';
+    c.beginPath(); c.arc(19, 3, 3, 0, Math.PI*2); c.fill();
+    // Muzzle
+    c.fillStyle = '#ccbbaa';
+    c.beginPath(); c.ellipse(12, 10, 3, 2, 0, 0, Math.PI*2); c.fill();
+    // Cheese
+    c.fillStyle = '#ddcc66';
+    c.fillRect(9, 15, 5, 4);
+    c.fillStyle = '#ccbb44';
+    c.fillRect(10, 16, 2, 1);
+    // Eyes
+    c.fillStyle = '#fff';
+    c.fillRect(8, 6, 3, 3);
+    c.fillRect(14, 6, 3, 3);
+    c.fillStyle = '#111';
+    c.fillRect(9, 7, 2, 2);
+    c.fillRect(15, 7, 2, 2);
+    c.fillStyle = '#fff';
+    c.fillRect(9, 7, 1, 1);
+    c.fillRect(15, 7, 1, 1);
+    // Nose
+    c.fillStyle = '#ee8888';
+    c.fillRect(11, 9, 3, 2);
+    // Whiskers
+    c.strokeStyle = '#aaa'; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(4, 9); c.lineTo(9, 10); c.stroke();
+    c.beginPath(); c.moveTo(4, 11); c.lineTo(9, 11); c.stroke();
+    c.beginPath(); c.moveTo(15, 10); c.lineTo(20, 9); c.stroke();
+    c.beginPath(); c.moveTo(15, 11); c.lineTo(20, 11); c.stroke();
+    // Teeth
+    c.fillStyle = '#fff';
+    c.fillRect(11, 12, 1, 2);
+    c.fillRect(13, 12, 1, 2);
+    // Feet
+    c.fillStyle = '#776655';
+    c.fillRect(6, 24, 4, 2);
+    c.fillRect(14, 24, 4, 2);
+  });
+
+  // Structure materials — 16x16 tiles
+  spriteCanvases.plate = createSpriteCanvas(16, 16, function(c) {
+    c.fillStyle = '#eee'; c.fillRect(1, 7, 14, 3);
+    c.fillStyle = '#fff'; c.fillRect(2, 7, 12, 1);
+    c.fillStyle = '#bbb'; c.fillRect(2, 9, 12, 1);
+    c.fillStyle = '#7788aa'; c.fillRect(4, 8, 8, 1);
+    c.fillStyle = '#999'; c.fillRect(4, 10, 8, 1);
+  });
+
+  spriteCanvases.bowl = createSpriteCanvas(16, 16, function(c) {
+    c.fillStyle = '#dde4ee';
+    c.beginPath(); c.ellipse(8, 10, 7, 6, 0, 0, Math.PI); c.fill();
+    c.fillStyle = '#eef0f4';
+    c.fillRect(1, 5, 14, 2);
+    c.fillStyle = '#4466aa';
+    c.fillRect(3, 9, 10, 2);
+    c.fillStyle = '#bbc'; c.fillRect(5, 14, 6, 1);
+  });
+
+  spriteCanvases.pot = createSpriteCanvas(16, 16, function(c) {
+    c.fillStyle = '#886644'; c.fillRect(3, 4, 10, 10);
+    c.fillStyle = '#aa8855'; c.fillRect(2, 3, 12, 2);
+    c.fillStyle = '#554433';
+    c.fillRect(0, 6, 3, 3);
+    c.fillRect(13, 6, 3, 3);
+    c.fillStyle = '#997755'; c.fillRect(4, 5, 1, 8);
+    c.fillStyle = '#775533'; c.fillRect(12, 5, 1, 8);
+    c.fillStyle = '#775533'; c.fillRect(5, 14, 6, 2);
+  });
+
+  spriteCanvases.cuttingBoard = createSpriteCanvas(16, 16, function(c) {
+    c.fillStyle = '#bb9966'; c.fillRect(1, 3, 14, 10);
+    c.fillStyle = '#cc9'; c.fillRect(1, 3, 14, 1);
+    c.fillStyle = '#997744';
+    c.fillRect(2, 5, 12, 1);
+    c.fillRect(3, 7, 10, 1);
+    c.fillRect(2, 9, 11, 1);
+    c.fillRect(4, 11, 8, 1);
+    c.fillStyle = '#aa8855'; c.fillRect(1, 4, 1, 8);
+    c.fillStyle = '#998855'; c.fillRect(13, 8, 1, 1);
+  });
+
+  spriteCanvases.tinCan = createSpriteCanvas(16, 16, function(c) {
+    c.fillStyle = '#aab0b8'; c.fillRect(3, 2, 10, 13);
+    c.fillStyle = '#ccc'; c.fillRect(3, 2, 10, 2);
+    c.fillStyle = '#cc4444'; c.fillRect(3, 5, 10, 6);
+    c.fillStyle = '#dd6666'; c.fillRect(4, 5, 1, 6);
+    c.fillStyle = '#bb3333'; c.fillRect(12, 5, 1, 6);
+    c.fillStyle = '#ee6666';
+    c.fillRect(6, 7, 4, 1);
+    c.fillRect(6, 9, 3, 1);
+    c.fillStyle = '#bbb'; c.fillRect(4, 3, 1, 8);
+    c.fillStyle = '#999'; c.fillRect(12, 3, 1, 8);
+  });
+
+  // Slingshot ladle
+  spriteCanvases.ladle = createSpriteCanvas(48, 64, function(c) {
+    // Base
+    c.fillStyle = '#776644'; c.fillRect(8, 52, 32, 10);
+    c.fillStyle = '#887755'; c.fillRect(8, 52, 32, 2);
+    // Handle
+    c.fillStyle = '#996633'; c.fillRect(20, 18, 8, 36);
+    c.fillStyle = '#aa7744'; c.fillRect(20, 18, 2, 36);
+    c.fillStyle = '#885522'; c.fillRect(26, 18, 2, 36);
+    // Left prong
+    c.fillRect(6, 4, 6, 18);
+    c.fillStyle = '#aa7744'; c.fillRect(6, 4, 2, 18);
+    // Right prong
+    c.fillStyle = '#996633'; c.fillRect(36, 4, 6, 18);
+    c.fillStyle = '#aa7744'; c.fillRect(36, 4, 2, 18);
+    // Rounded tops
+    c.fillStyle = '#aa7744';
+    c.fillRect(7, 2, 4, 3);
+    c.fillRect(37, 2, 4, 3);
+    // Diagonals connecting prongs to handle
+    c.fillStyle = '#996633';
+    c.beginPath(); c.moveTo(12, 20); c.lineTo(20, 26); c.lineTo(20, 22); c.lineTo(12, 16); c.fill();
+    c.beginPath(); c.moveTo(36, 20); c.lineTo(28, 26); c.lineTo(28, 22); c.lineTo(36, 16); c.fill();
+    // Rubber band
+    c.strokeStyle = '#cc4444'; c.lineWidth = 3;
+    c.beginPath(); c.moveTo(8, 10); c.lineTo(24, 22); c.stroke();
+    c.beginPath(); c.moveTo(40, 10); c.lineTo(24, 22); c.stroke();
+    // Metal cup
+    c.fillStyle = '#aab0b8';
+    c.beginPath(); c.ellipse(24, 22, 6, 4, 0, 0, Math.PI*2); c.fill();
+    c.fillStyle = '#ccd'; c.beginPath(); c.ellipse(24, 21, 4, 2, 0, 0, Math.PI*2); c.fill();
+  });
+
+  // === BACKGROUND DECORATION SPRITES ===
+
+  // Kitchen window
+  spriteCanvases.bgWindow = createSpriteCanvas(48, 40, function(c) {
+    // Frame
+    c.fillStyle = '#887055'; c.fillRect(0, 0, 48, 36);
+    c.fillStyle = '#997060'; c.fillRect(1, 0, 46, 1);
+    c.fillStyle = '#776040'; c.fillRect(0, 35, 48, 1);
+    // Glass panes (2x2)
+    var cols = [3, 27]; var rows = [3, 20];
+    cols.forEach(function(px) { rows.forEach(function(py) {
+      c.fillStyle = py < 10 ? '#bbddff' : '#99ccee';
+      c.fillRect(px, py, 18, 13);
+      // Reflection
+      c.fillStyle = 'rgba(255,255,255,0.2)';
+      c.beginPath(); c.moveTo(px+2, py+2); c.lineTo(px+6, py+2); c.lineTo(px+2, py+8); c.fill();
+    })});
+    // Cross bars
+    c.fillStyle = '#887055'; c.fillRect(21, 3, 6, 30); c.fillRect(3, 16, 42, 4);
+    c.fillStyle = '#997060'; c.fillRect(21, 3, 1, 30); c.fillRect(3, 16, 42, 1);
+    // Sill
+    c.fillStyle = '#998866'; c.fillRect(0, 36, 48, 4);
+    c.fillStyle = '#aa9977'; c.fillRect(0, 36, 48, 1);
+  });
+
+  // Pot rack
+  spriteCanvases.bgPotRack = createSpriteCanvas(64, 32, function(c) {
+    // Bar
+    c.fillStyle = '#444'; c.fillRect(2, 1, 60, 3);
+    c.fillStyle = '#555'; c.fillRect(2, 1, 60, 1);
+    c.fillStyle = '#333'; c.fillRect(0, 0, 3, 5); c.fillRect(61, 0, 3, 5);
+    // Copper pot (left)
+    c.fillStyle = '#666'; c.beginPath(); c.moveTo(12, 4); c.lineTo(12, 9); c.stroke();
+    c.fillStyle = '#996633'; c.fillRect(6, 10, 12, 10);
+    c.fillStyle = '#aa7744'; c.fillRect(5, 10, 14, 2);
+    c.fillStyle = '#885522'; c.fillRect(18, 13, 5, 2);
+    c.fillStyle = '#aa7744'; c.fillRect(7, 11, 1, 8);
+    // Silver pan (center)
+    c.fillStyle = '#666'; c.beginPath(); c.moveTo(30, 4); c.lineTo(30, 8); c.stroke();
+    c.fillStyle = '#aab0b8'; c.fillRect(23, 9, 14, 5);
+    c.fillStyle = '#bbc0c8'; c.fillRect(23, 9, 14, 1);
+    c.fillStyle = '#99a0a8'; c.fillRect(37, 10, 6, 2);
+    // Iron skillet (right)
+    c.fillStyle = '#666'; c.beginPath(); c.moveTo(50, 4); c.lineTo(50, 9); c.stroke();
+    c.fillStyle = '#555'; c.beginPath(); c.arc(50, 15, 7, 0, Math.PI*2); c.fill();
+    c.fillStyle = '#666'; c.beginPath(); c.arc(50, 14, 5, 0, Math.PI*2); c.fill();
+    c.fillStyle = '#444'; c.fillRect(57, 14, 7, 2);
+  });
+
+  // Spice shelf
+  spriteCanvases.bgShelf = createSpriteCanvas(48, 24, function(c) {
+    // Shelf board
+    c.fillStyle = '#886644'; c.fillRect(0, 14, 48, 3);
+    c.fillStyle = '#997755'; c.fillRect(0, 14, 48, 1);
+    c.fillStyle = '#775533'; c.fillRect(0, 16, 48, 1);
+    // Brackets
+    c.fillStyle = '#776644'; c.fillRect(2, 14, 2, 8); c.fillRect(44, 14, 2, 8);
+    // Jars
+    var cols = ['#cc3333','#44aa44','#ddaa22','#884422'];
+    cols.forEach(function(col, i) {
+      var jx = 6 + i * 10;
+      c.fillStyle = '#ddd'; c.fillRect(jx, 3, 7, 11);
+      c.fillStyle = '#eee'; c.fillRect(jx, 3, 1, 11);
+      c.fillStyle = '#ccc'; c.fillRect(jx+6, 3, 1, 11);
+      c.fillStyle = col; c.fillRect(jx+1, 6, 5, 7);
+      c.fillStyle = '#bbb'; c.fillRect(jx, 2, 7, 2);
+    });
+  });
+
+  // Knife block
+  spriteCanvases.bgKnifeBlock = createSpriteCanvas(20, 32, function(c) {
+    // Block
+    c.fillStyle = '#776644'; c.fillRect(3, 14, 14, 16);
+    c.fillStyle = '#887755'; c.fillRect(3, 14, 14, 2);
+    c.fillStyle = '#665533'; c.fillRect(3, 29, 14, 1);
+    c.fillStyle = '#887755'; c.fillRect(3, 16, 1, 12);
+    // Knife handles sticking up
+    c.fillStyle = '#332211'; c.fillRect(9, 3, 3, 12);
+    c.fillStyle = '#443322'; c.fillRect(9, 3, 1, 12);
+    c.fillStyle = '#ccc'; c.fillRect(10, 6, 1, 1); c.fillRect(10, 9, 1, 1);
+    c.fillStyle = '#bbb'; c.fillRect(9, 13, 3, 1);
+    c.fillStyle = '#882222'; c.fillRect(5, 7, 2, 8);
+    c.fillStyle = '#993333'; c.fillRect(5, 7, 1, 8);
+    c.fillStyle = '#ccc'; c.fillRect(6, 10, 1, 1);
+    c.fillStyle = '#bbb'; c.fillRect(5, 14, 2, 1);
+    c.fillStyle = '#222'; c.fillRect(13, 5, 2, 10);
+    c.fillStyle = '#333'; c.fillRect(13, 5, 1, 10);
+    c.fillStyle = '#ccc'; c.fillRect(14, 8, 1, 1); c.fillRect(14, 11, 1, 1);
+    c.fillStyle = '#bbb'; c.fillRect(13, 14, 2, 1);
+  });
+
+  // Dirty dishes
+  spriteCanvases.bgDirtyDishes = createSpriteCanvas(30, 22, function(c) {
+    // Water puddle
+    c.fillStyle = 'rgba(150,190,220,0.4)';
+    c.beginPath(); c.ellipse(14, 20, 12, 2, 0, 0, Math.PI*2); c.fill();
+    // Plate stack — 4 horizontal lines
+    var plates = [{y:17,w:22},{y:14,w:20},{y:11,w:18},{y:8,w:16}];
+    plates.forEach(function(p, i) {
+      var px = 2 + (22-p.w)/2;
+      c.fillStyle = '#bbb'; c.fillRect(px, p.y+2, p.w, 1);
+      c.fillStyle = '#eee'; c.fillRect(px, p.y+1, p.w, 1);
+      c.fillStyle = '#fff'; c.fillRect(px, p.y, p.w, 1);
+    });
+    // Sauce smear
+    c.fillStyle = '#cc3333'; c.fillRect(8, 12, 3, 1);
+    // Sauce drip
+    c.fillStyle = '#cc3333'; c.fillRect(4, 12, 1, 7);
+    c.fillStyle = '#aa2222'; c.fillRect(4, 18, 1, 1);
+    // Food stain
+    c.fillStyle = '#aa7744'; c.fillRect(12, 15, 4, 1);
+    // Fork
+    c.fillStyle = '#bbb'; c.fillRect(0, 20, 12, 1);
+    c.fillStyle = '#bbb';
+    c.fillRect(0, 19, 1, 1); c.fillRect(2, 19, 1, 1);
+    c.fillRect(4, 19, 1, 1); c.fillRect(6, 19, 1, 1);
+  });
+
+  // Stove with bubbling pot
+  spriteCanvases.bgStove = createSpriteCanvas(40, 32, function(c) {
+    // Stove surface
+    c.fillStyle = '#333'; c.fillRect(0, 20, 40, 12);
+    c.fillStyle = '#444'; c.fillRect(0, 20, 40, 1);
+    // Burner grate
+    c.fillStyle = '#555';
+    c.fillRect(4, 22, 32, 1); c.fillRect(4, 24, 32, 1);
+    // Flames
+    c.fillStyle = '#ff8822';
+    [10,14,26,30].forEach(function(x) { c.fillRect(x, 21, 2, 1); });
+    c.fillStyle = '#4488ff';
+    [11,15,27,31].forEach(function(x) { c.fillRect(x, 22, 1, 1); });
+    // Knob
+    c.fillStyle = '#555'; c.fillRect(18, 28, 4, 3);
+    c.fillStyle = '#666'; c.fillRect(19, 28, 1, 1);
+    // Pot
+    c.fillStyle = '#886644'; c.fillRect(6, 8, 28, 14);
+    c.fillStyle = '#aa8855'; c.fillRect(5, 8, 30, 2);
+    c.fillStyle = '#997755'; c.fillRect(7, 10, 1, 10);
+    c.fillStyle = '#775533'; c.fillRect(33, 10, 1, 10);
+    // Handles
+    c.fillStyle = '#665533'; c.fillRect(2, 12, 4, 3); c.fillRect(34, 12, 4, 3);
+    // Stew
+    c.fillStyle = '#bb8833'; c.fillRect(7, 10, 26, 3);
+    c.fillStyle = '#cc9944'; c.fillRect(8, 10, 10, 2);
+    // Bubbles
+    c.fillStyle = '#ccaa55';
+    [12,18,24,28].forEach(function(x) { c.fillRect(x, 10, 2, 1); });
+    // Steam
+    c.fillStyle = 'rgba(200,220,255,0.5)';
+    c.fillRect(14, 5, 1, 2); c.fillRect(15, 3, 1, 2);
+    c.fillRect(22, 4, 1, 3); c.fillRect(23, 2, 1, 2);
+    c.fillRect(28, 5, 1, 2); c.fillRect(27, 3, 1, 1);
+  });
+
+  // Kitchen sink
+  spriteCanvases.bgSink = createSpriteCanvas(32, 24, function(c) {
+    // Counter around sink
+    c.fillStyle = '#d0ccc4'; c.fillRect(0, 0, 32, 24);
+    c.fillStyle = '#ddd0c8'; c.fillRect(0, 0, 32, 1);
+    // Basin
+    c.fillStyle = '#99a0a8'; c.fillRect(3, 4, 26, 16);
+    c.fillStyle = '#aab0b8'; c.fillRect(3, 4, 26, 1); c.fillRect(3, 4, 1, 16);
+    c.fillStyle = '#889098'; c.fillRect(4, 19, 24, 1);
+    // Drain
+    c.fillStyle = '#778'; c.fillRect(14, 17, 4, 3);
+    // Tap
+    c.fillStyle = '#888890'; c.fillRect(14, 0, 4, 3);
+    c.fillStyle = '#999'; c.fillRect(15, 0, 2, 1);
+    c.fillRect(12, 2, 3, 2); c.fillRect(11, 3, 2, 3);
+    // Tap handle
+    c.fillStyle = '#777'; c.fillRect(17, 1, 3, 2);
+    // Water stream
+    c.fillStyle = 'rgba(130,190,220,0.7)';
+    c.fillRect(12, 6, 1, 8);
+    c.fillStyle = 'rgba(150,200,230,0.5)';
+    c.fillRect(11, 7, 1, 5);
+    // Splash
+    c.fillStyle = 'rgba(150,210,240,0.5)';
+    c.fillRect(10, 14, 1, 1); c.fillRect(13, 13, 1, 1);
+    // Soap bubbles
+    c.fillStyle = '#eef4ff';
+    c.fillRect(8, 8, 2, 2); c.fillRect(20, 9, 2, 2);
+    c.fillRect(23, 7, 1, 1); c.fillRect(6, 12, 2, 1);
+    // Dirty water
+    c.fillStyle = 'rgba(130,180,200,0.3)';
+    c.beginPath(); c.ellipse(16, 14, 8, 3, 0, 0, Math.PI*2); c.fill();
+  });
+}
+
+// ============================================================
+// PHYSICS ENGINE — simple 2D rigid bodies
+// ============================================================
+var bodies = [];
+var particles = [];
+
+function Body(x, y, w, h, type, material) {
+  this.x = x; this.y = y; this.w = w; this.h = h;
+  this.vx = 0; this.vy = 0;
+  this.angle = 0; this.va = 0; // angular velocity
+  this.type = type; // 'projectile', 'block', 'rat'
+  this.material = material; // 'plate','bowl','pot','cuttingBoard','tinCan','rat'
+  this.mass = type === 'projectile' ? 2 : this.getMass();
+  this.hp = this.getHP();
+  this.alive = true;
+  this.grounded = false;
+  this.settled = 0; // time spent nearly stationary
+  this.scored = false;
+}
+
+Body.prototype.getMass = function() {
+  switch(this.material) {
+    case 'plate': return 1;
+    case 'bowl': return 2;
+    case 'pot': return 4;
+    case 'cuttingBoard': return 3;
+    case 'tinCan': return 1.5;
+    case 'rat': return 2;
+    default: return 2;
+  }
+};
+
+Body.prototype.getHP = function() {
+  switch(this.material) {
+    case 'plate': return 15;
+    case 'bowl': return 30;
+    case 'pot': return 60;
+    case 'cuttingBoard': return 40;
+    case 'tinCan': return 20;
+    case 'rat': return 25;
+    default: return 30;
+  }
+};
+
+Body.prototype.getSprite = function() {
+  return spriteCanvases[this.material] || spriteCanvases.tinCan;
+};
+
+function updatePhysics(dt) {
+  for (var i = 0; i < bodies.length; i++) {
+    var b = bodies[i];
+    if (!b.alive) continue;
+
+    // Static blocks check if they still have support underneath
+    if (b.isStatic) {
+      var hasSupport = b.y + b.h/2 >= GROUND_Y - 2; // on the ground
+      if (!hasSupport) {
+        // Check if any alive body is directly below and overlapping horizontally
+        for (var j = 0; j < bodies.length; j++) {
+          if (j === i || !bodies[j].alive) continue;
+          var other = bodies[j];
+          var hOverlap = Math.abs(b.x - other.x) < (b.w + other.w) / 2 * 0.7;
+          var below = other.y > b.y && other.y - b.y < b.h/2 + other.h/2 + 5;
+          if (hOverlap && below) { hasSupport = true; break; }
+        }
+      }
+      if (!hasSupport) { b.isStatic = false; b.settled = 0; }
+      else continue; // still static, skip physics
+    }
+
+    // Gravity
+    b.vy += GRAVITY * dt;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    b.angle += b.va * dt;
+
+    // Damping
+    b.vx *= 0.998;
+    b.vy *= 0.998;
+    b.va *= 0.97;
+
+    // Ground collision
+    if (b.y + b.h / 2 > GROUND_Y) {
+      var impactSpeed = Math.abs(b.vy); // capture BEFORE reversing
+      b.y = GROUND_Y - b.h / 2;
+      b.vy = -impactSpeed * 0.3;
+      b.vx *= 0.8;
+      b.va *= 0.7;
+      if (impactSpeed < 15) { b.vy = 0; b.grounded = true; }
+      // Only damage from real impacts (high speed, not settling)
+      if (impactSpeed > 100 && b.type !== 'block') {
+        b.hp -= impactSpeed * 0.08;
+        spawnImpactParticles(b.x, GROUND_Y, '#aa9988');
+      }
+    }
+
+    // Wall bounds
+    if (b.x - b.w/2 < 0) { b.x = b.w/2; b.vx = Math.abs(b.vx) * 0.5; }
+    if (b.x + b.w/2 > WORLD_W) { b.x = WORLD_W - b.w/2; b.vx = -Math.abs(b.vx) * 0.5; }
+
+    // Settle detection
+    if (Math.abs(b.vx) < 2 && Math.abs(b.vy) < 2) {
+      b.settled += dt;
+    } else {
+      b.settled = 0;
+    }
+
+    // Death check
+    if (b.hp <= 0) {
+      b.alive = false;
+      spawnBreakParticles(b);
+      if (b.type === 'rat') {
+        SFX.ratSqueak();
+        levelScore += 500;
+        ratsHit++;
+      } else if (b.type === 'block') {
+        levelScore += 50;
+        var mat = b.material;
+        if (mat === 'plate' || mat === 'bowl') SFX.ceramicBreak();
+        else if (mat === 'pot') SFX.metalClang();
+        else if (mat === 'cuttingBoard') SFX.woodThud();
+        else SFX.metalClang();
+      }
+    }
+  }
+
+  // Body-body collisions
+  for (var i = 0; i < bodies.length; i++) {
+    for (var j = i + 1; j < bodies.length; j++) {
+      var a = bodies[i], b2 = bodies[j];
+      if (!a.alive || !b2.alive) continue;
+      resolveCollision(a, b2);
+    }
+  }
+
+  // Remove dead bodies (keep for a frame for particles)
+  bodies = bodies.filter(function(b) { return b.alive; });
+
+  // Update particles
+  for (var i = particles.length - 1; i >= 0; i--) {
+    var p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 200 * dt;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function resolveCollision(a, b) {
+  var dx = b.x - a.x, dy = b.y - a.y;
+  var overlapX = (a.w + b.w) / 2 - Math.abs(dx);
+  var overlapY = (a.h + b.h) / 2 - Math.abs(dy);
+  if (overlapX <= 0 || overlapY <= 0) return;
+
+  // Separate along smallest overlap axis
+  var relVel = Math.sqrt((a.vx-b.vx)*(a.vx-b.vx) + (a.vy-b.vy)*(a.vy-b.vy));
+  var totalMass = a.mass + b.mass;
+
+  if (overlapX < overlapY) {
+    var sign = dx > 0 ? 1 : -1;
+    a.x -= sign * overlapX * (b.mass / totalMass);
+    b.x += sign * overlapX * (a.mass / totalMass);
+    var impulse = relVel * 0.5;
+    a.vx -= sign * impulse * (b.mass / totalMass);
+    b.vx += sign * impulse * (a.mass / totalMass);
+  } else {
+    var sign = dy > 0 ? 1 : -1;
+    a.y -= sign * overlapY * (b.mass / totalMass);
+    b.y += sign * overlapY * (a.mass / totalMass);
+    var impulse = relVel * 0.5;
+    a.vy -= sign * impulse * (b.mass / totalMass);
+    b.vy += sign * impulse * (a.mass / totalMass);
+  }
+
+  // Wake up static blocks on collision with moving objects
+  if (a.isStatic && !b.isStatic && relVel > 20) { a.isStatic = false; a.settled = 0; }
+  if (b.isStatic && !a.isStatic && relVel > 20) { b.isStatic = false; b.settled = 0; }
+
+  // Damage based on relative velocity — only from real impacts
+  if (relVel > 80) {
+    var dmg = (relVel - 80) * 0.3;
+    a.hp -= dmg * (b.mass / totalMass);
+    b.hp -= dmg * (a.mass / totalMass);
+    a.va += (Math.random() - 0.5) * 3;
+    b.va += (Math.random() - 0.5) * 3;
+    // Wake both on hard impact
+    if (a.isStatic) { a.isStatic = false; a.settled = 0; }
+    if (b.isStatic) { b.isStatic = false; b.settled = 0; }
+  }
+}
+
+function spawnImpactParticles(x, y, col) {
+  for (var i = 0; i < 4; i++) {
+    particles.push({
+      x: x, y: y,
+      vx: (Math.random() - 0.5) * 80,
+      vy: -Math.random() * 60 - 20,
+      life: 0.3 + Math.random() * 0.2,
+      col: col, size: 2 + Math.random() * 2,
+    });
+  }
+}
+
+function spawnBreakParticles(body) {
+  var cols = {
+    plate: ['#eee','#ddd','#7788aa'],
+    bowl: ['#dde4ee','#4466aa','#bbc'],
+    pot: ['#886644','#aa8855','#554433'],
+    cuttingBoard: ['#bb9966','#997744','#aa8855'],
+    tinCan: ['#aab0b8','#cc4444','#888890'],
+    rat: ['#887766','#ccbbaa','#ddcc66'],
+  };
+  var palette = cols[body.material] || ['#888','#aaa','#666'];
+  for (var i = 0; i < 8; i++) {
+    particles.push({
+      x: body.x + (Math.random()-0.5) * body.w,
+      y: body.y + (Math.random()-0.5) * body.h,
+      vx: (Math.random()-0.5) * 120,
+      vy: -Math.random() * 80 - 30,
+      life: 0.4 + Math.random() * 0.3,
+      col: palette[i % palette.length],
+      size: 2 + Math.random() * 3,
+    });
+  }
+}
+
+// ============================================================
+// SLINGSHOT MECHANICS
+// ============================================================
+var slingX = 100, slingY = GROUND_Y - 80;
+var dragging = false;
+var dragX = 0, dragY = 0;
+var projectile = null;
+var projectileType = 0; // index into ammo array
+var ammo = []; // array of food type strings
+var launched = false;
+var abilityUsed = false;
+var shotsFired = 0;
+
+var FOOD_TYPES = ['tomato', 'egg', 'onion', 'chilli'];
+// Real proportions: 430px = ~120cm, 1cm ≈ 3.6px
+var FOOD_SIZES = { tomato: {w:25,h:25}, egg: {w:16,h:20}, onion: {w:29,h:29}, chilli: {w:14,h:43} };
+
+function loadProjectile() {
+  if (ammo.length === 0) return;
+  var type = ammo[0];
+  var sz = FOOD_SIZES[type];
+  projectile = {
+    type: type,
+    x: slingX, y: slingY,
+    w: sz.w, h: sz.h,
+  };
+  launched = false;
+  abilityUsed = false;
+}
+
+function launchProjectile(vx, vy) {
+  if (!projectile) return;
+  var b = new Body(projectile.x, projectile.y, projectile.w, projectile.h, 'projectile', projectile.type);
+  b.vx = vx;
+  b.vy = vy;
+  bodies.push(b);
+  launched = true;
+  ammo.shift();
+  shotsFired++;
+  SFX.launch();
+
+  // Track active projectile for ability activation
+  activeProjectile = b;
+}
+
+var activeProjectile = null;
+
+function activateAbility() {
+  if (!activeProjectile || !activeProjectile.alive || abilityUsed) return;
+  abilityUsed = true;
+
+  switch (activeProjectile.material) {
+    case 'egg':
+      // Split into 3 fragments
+      for (var i = -1; i <= 1; i++) {
+        var frag = new Body(activeProjectile.x, activeProjectile.y, 8, 8, 'projectile', 'egg');
+        frag.vx = activeProjectile.vx + i * 80;
+        frag.vy = activeProjectile.vy - 30;
+        frag.mass = 1;
+        bodies.push(frag);
+      }
+      activeProjectile.alive = false;
+      SFX.ceramicBreak();
+      break;
+
+    case 'onion':
+      // Shockwave — push nearby bodies
+      for (var i = 0; i < bodies.length; i++) {
+        var b = bodies[i];
+        if (b === activeProjectile) continue;
+        var dx = b.x - activeProjectile.x;
+        var dy = b.y - activeProjectile.y;
+        var dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < 120 && dist > 0) {
+          var force = (120 - dist) * 3;
+          b.vx += (dx / dist) * force;
+          b.vy += (dy / dist) * force;
+          b.hp -= 5;
+        }
+      }
+      // Visual burst
+      for (var i = 0; i < 12; i++) {
+        var angle = (i/12) * Math.PI * 2;
+        particles.push({
+          x: activeProjectile.x, y: activeProjectile.y,
+          vx: Math.cos(angle) * 100, vy: Math.sin(angle) * 100,
+          life: 0.4, col: '#ddbbdd', size: 3,
+        });
+      }
+      SFX.splat();
+      break;
+
+    case 'chilli':
+      // Speed boost forward
+      activeProjectile.vx *= 2;
+      activeProjectile.vy *= 0.5;
+      activeProjectile.mass = 5; // heavier = more damage
+      // Fire trail particles
+      for (var i = 0; i < 6; i++) {
+        particles.push({
+          x: activeProjectile.x - i * 3, y: activeProjectile.y,
+          vx: -30, vy: (Math.random()-0.5) * 20,
+          life: 0.3, col: i % 2 ? '#ff6622' : '#ffaa22', size: 3 + Math.random()*2,
+        });
+      }
+      SFX.launch();
+      break;
+  }
+}
+
+// ============================================================
+// LEVELS
+// ============================================================
+var currentLevel = 0;
+var totalRats = 0;
+var ratsHit = 0;
+var levelScore = 0;
+var levelState = 'aiming'; // aiming, flying, settling, complete, failed
+var settleTimer = 0;
+var stars = []; // array of 0-3 per level
+
+function buildLevel(idx) {
+  bodies = [];
+  particles = [];
+  projectile = null;
+  activeProjectile = null;
+  launched = false;
+  abilityUsed = false;
+  shotsFired = 0;
+  ratsHit = 0;
+  levelScore = 0;
+  totalRats = 0;
+  levelState = 'aiming';
+  settleTimer = 0;
+
+  var level = LEVELS[idx];
+  ammo = level.ammo.slice();
+
+  // Build structures — blocks start static (no gravity) until hit
+  level.blocks.forEach(function(def) {
+    var b = new Body(def.x, def.y, def.w, def.h, def.type || 'block', def.mat);
+    b.isStatic = true; // won't move until impacted
+    b.grounded = true;
+    b.settled = 10;
+    bodies.push(b);
+    if (def.mat === 'rat') totalRats++;
+  });
+
+  loadProjectile();
+}
+
+// Block shorthand helpers
+function B(x, y, mat) {
+  // Sizes in world units — screen is 800x500, structures need to be visible
+  // Real proportions: 430px ≈ 120cm, 1cm ≈ 3.6px
+  var sizes = {
+    plate:       {w:90, h:7},    // 25cm wide, 2cm thin
+    bowl:        {w:54, h:29},   // 15cm wide, 8cm deep
+    pot:         {w:72, h:72},   // 20cm x 20cm
+    cuttingBoard:{w:108, h:7},   // 30cm wide, 2cm thin
+    tinCan:      {w:25, h:43},   // 7cm wide, 12cm tall
+    rat:         {w:40, h:54},   // ~11cm wide, 15cm tall sitting
+  };
+  var s = sizes[mat] || {w:40,h:40};
+  return { x:x, y:y - s.h/2, w:s.w, h:s.h, mat:mat, type: mat === 'rat' ? 'rat' : 'block' };
+}
+
+// Ground-relative Y helper
+function GY(above) { return GROUND_Y - above; }
+
+var LEVELS = [
+  // === ZONE 1: COUNTERTOP (levels 1-5) ===
+  // Sizes: plate h=7, bowl h=29, pot h=72, board h=7, can h=43, rat h=54
+  // 1cm ≈ 3.6px. Stack from ground up using actual heights.
+  { // Level 1: Simple intro — one rat on plates
+    ammo: ['tomato','tomato','tomato'],
+    blocks: [
+      B(500, GY(5), 'plate'), B(500, GY(14), 'plate'), B(500, GY(23), 'plate'),
+      B(500, GY(55), 'rat'),
+    ]
+  },
+  { // Level 2: Two stacks
+    ammo: ['tomato','tomato','tomato'],
+    blocks: [
+      B(400, GY(5), 'plate'), B(400, GY(14), 'plate'),
+      B(400, GY(46), 'rat'),
+      B(580, GY(5), 'plate'), B(580, GY(14), 'plate'), B(580, GY(23), 'plate'),
+      B(580, GY(57), 'rat'),
+    ]
+  },
+  { // Level 3: Bowl fortress
+    ammo: ['tomato','tomato','egg'],
+    blocks: [
+      B(460, GY(16), 'bowl'), B(540, GY(16), 'bowl'),
+      B(500, GY(38), 'cuttingBoard'),
+      B(500, GY(72), 'rat'),
+    ]
+  },
+  { // Level 4: Tin can pillars
+    ammo: ['tomato','egg','tomato'],
+    blocks: [
+      B(480, GY(24), 'tinCan'), B(530, GY(24), 'tinCan'),
+      B(505, GY(50), 'cuttingBoard'),
+      B(505, GY(84), 'rat'),
+    ]
+  },
+  { // Level 5: Mixed materials
+    ammo: ['tomato','egg','onion'],
+    blocks: [
+      B(450, GY(16), 'bowl'), B(550, GY(16), 'bowl'),
+      B(500, GY(38), 'cuttingBoard'),
+      B(480, GY(60), 'tinCan'), B(520, GY(60), 'tinCan'),
+      B(500, GY(90), 'cuttingBoard'),
+      B(500, GY(120), 'rat'),
+      B(660, GY(16), 'bowl'),
+      B(660, GY(50), 'rat'),
+    ]
+  },
+
+  // === ZONE 2: STOVETOP (levels 6-10) ===
+  { // Level 6: Pot wall
+    ammo: ['onion','tomato','tomato'],
+    blocks: [
+      B(480, GY(38), 'pot'), B(560, GY(38), 'pot'),
+      B(520, GY(78), 'cuttingBoard'),
+      B(520, GY(110), 'rat'),
+    ]
+  },
+  { // Level 7: Protected rat
+    ammo: ['egg','onion','tomato','tomato'],
+    blocks: [
+      B(460, GY(24), 'tinCan'), B(550, GY(24), 'tinCan'),
+      B(505, GY(50), 'cuttingBoard'),
+      B(460, GY(74), 'tinCan'), B(550, GY(74), 'tinCan'),
+      B(505, GY(100), 'cuttingBoard'),
+      B(505, GY(130), 'rat'),
+    ]
+  },
+  { // Level 8: Heavy and light
+    ammo: ['chilli','tomato','egg'],
+    blocks: [
+      B(520, GY(38), 'pot'),
+      B(520, GY(82), 'tinCan'),
+      B(520, GY(108), 'cuttingBoard'),
+      B(520, GY(140), 'rat'),
+    ]
+  },
+  { // Level 9: Three rats
+    ammo: ['onion','chilli','egg','tomato'],
+    blocks: [
+      B(380, GY(16), 'bowl'), B(380, GY(50), 'rat'),
+      B(520, GY(38), 'pot'),
+      B(520, GY(78), 'cuttingBoard'), B(520, GY(110), 'rat'),
+      B(660, GY(24), 'tinCan'), B(660, GY(70), 'tinCan'),
+      B(660, GY(100), 'rat'),
+    ]
+  },
+  { // Level 10: Fort
+    ammo: ['chilli','onion','egg','tomato','tomato'],
+    blocks: [
+      B(450, GY(38), 'pot'), B(560, GY(38), 'pot'),
+      B(505, GY(76), 'cuttingBoard'),
+      B(505, GY(110), 'rat'),
+      B(450, GY(110), 'tinCan'), B(560, GY(110), 'tinCan'),
+      B(505, GY(140), 'cuttingBoard'),
+      B(505, GY(174), 'rat'),
+    ]
+  },
+
+  // === ZONE 3: PANTRY SHELVES (levels 11-15) ===
+  { // Level 11: Elevated
+    ammo: ['egg','chilli','tomato'],
+    blocks: [
+      B(500, GY(5), 'cuttingBoard'),
+      B(485, GY(50), 'tinCan'), B(525, GY(50), 'tinCan'),
+      B(505, GY(80), 'rat'),
+      B(660, GY(16), 'bowl'),
+      B(660, GY(50), 'rat'),
+    ]
+  },
+  { // Level 12: Twin towers
+    ammo: ['onion','egg','chilli','tomato'],
+    blocks: [
+      B(400, GY(38), 'pot'),
+      B(400, GY(82), 'tinCan'),
+      B(400, GY(108), 'cuttingBoard'), B(400, GY(140), 'rat'),
+      B(600, GY(38), 'pot'),
+      B(600, GY(82), 'tinCan'),
+      B(600, GY(108), 'cuttingBoard'), B(600, GY(140), 'rat'),
+    ]
+  },
+  { // Level 13: Cage
+    ammo: ['chilli','onion','egg','tomato'],
+    blocks: [
+      B(455, GY(38), 'pot'), B(555, GY(38), 'pot'),
+      B(505, GY(76), 'cuttingBoard'),
+      B(505, GY(76), 'rat'),
+      B(455, GY(114), 'pot'), B(555, GY(114), 'pot'),
+      B(505, GY(150), 'cuttingBoard'),
+      B(505, GY(150), 'rat'),
+    ]
+  },
+  { // Level 14: Pyramid
+    ammo: ['onion','chilli','egg','tomato','tomato'],
+    blocks: [
+      B(430, GY(38), 'pot'), B(510, GY(38), 'pot'), B(590, GY(38), 'pot'),
+      B(470, GY(76), 'cuttingBoard'), B(550, GY(76), 'cuttingBoard'),
+      B(510, GY(110), 'cuttingBoard'),
+      B(510, GY(140), 'rat'),
+      B(430, GY(76), 'rat'), B(590, GY(76), 'rat'),
+    ]
+  },
+  { // Level 15: Fortress
+    ammo: ['chilli','onion','onion','egg','tomato','tomato'],
+    blocks: [
+      B(440, GY(38), 'pot'), B(570, GY(38), 'pot'),
+      B(505, GY(76), 'cuttingBoard'),
+      B(440, GY(114), 'tinCan'), B(570, GY(114), 'tinCan'),
+      B(505, GY(140), 'cuttingBoard'),
+      B(480, GY(170), 'rat'), B(530, GY(170), 'rat'),
+      B(505, GY(200), 'cuttingBoard'),
+      B(505, GY(230), 'rat'),
+    ]
+  },
+];
+
+// ============================================================
+// INPUT
+// ============================================================
+function worldPos(px, py) {
+  var sx = (W - WORLD_W * SCALE) / 2;
+  var sy = (H - WORLD_H * SCALE) / 2;
+  return { x: (px - sx) / SCALE, y: (py - sy) / SCALE };
+}
+
+function getPointerPos(e) {
+  var r = canvas.getBoundingClientRect();
+  var t = e.touches ? e.touches[0] : e;
+  return { x: (t.clientX - r.left) * (canvas.width / r.width), y: (t.clientY - r.top) * (canvas.height / r.height) };
+}
+
+canvas.addEventListener('mousedown', function(e) {
+  var p = getPointerPos(e);
+  handleDown(p.x, p.y);
+});
+canvas.addEventListener('mousemove', function(e) {
+  if (!dragging) return;
+  var p = getPointerPos(e);
+  handleMove(p.x, p.y);
+});
+canvas.addEventListener('mouseup', function(e) { handleUp(); });
+
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  var p = getPointerPos(e);
+  handleDown(p.x, p.y);
+}, { passive: false });
+canvas.addEventListener('touchmove', function(e) {
+  e.preventDefault();
+  if (!dragging) return;
+  var p = getPointerPos(e);
+  handleMove(p.x, p.y);
+}, { passive: false });
+canvas.addEventListener('touchend', function(e) { e.preventDefault(); handleUp(); }, { passive: false });
+
+window.addEventListener('keydown', function(e) {
+  if (e.key === 'r' || e.key === 'R') {
+    if (state === 'playing') { buildLevel(currentLevel); }
+  }
+  if (e.key === ' ') {
+    e.preventDefault();
+    if (state === 'menu') { state = 'playing'; currentLevel = 0; stars = []; buildLevel(0); }
+    else if (state === 'levelComplete') { nextLevel(); }
+    else if (state === 'gameComplete') { state = 'menu'; }
+    else if (state === 'playing' && levelState === 'flying') { activateAbility(); }
+  }
+});
+
+// Mute
+canvas.addEventListener('click', function(e) {
+  var p = getPointerPos(e);
+  if (p.x >= W - 44 && p.x <= W - 8 && p.y >= 8 && p.y <= 44) {
+    SFX.muted = !SFX.muted;
+  }
+});
+
+function handleDown(px, py) {
+  if (state === 'menu') { state = 'playing'; currentLevel = 0; stars = []; buildLevel(0); SFX.click(); return; }
+  if (state === 'levelComplete') { nextLevel(); SFX.click(); return; }
+  if (state === 'gameComplete') { submitScore('fling-fury', getTotalScore()); state = 'menu'; SFX.click(); return; }
+
+  // Mute check
+  if (px >= W - 44 && px <= W - 8 && py >= 8 && py <= 44) return;
+
+  if (state !== 'playing') return;
+
+  if (levelState === 'flying') {
+    activateAbility();
+    return;
+  }
+
+  if (levelState === 'complete') return;
+  if (levelState === 'failed') { buildLevel(currentLevel); SFX.click(); return; }
+
+  if (levelState !== 'aiming' || !projectile) return;
+
+  var wp = worldPos(px, py);
+  var dist = Math.sqrt((wp.x - slingX) * (wp.x - slingX) + (wp.y - slingY) * (wp.y - slingY));
+  if (dist < 80) {
+    dragging = true;
+    dragX = wp.x;
+    dragY = wp.y;
+    SFX.stretch();
+  }
+}
+
+function handleMove(px, py) {
+  var wp = worldPos(px, py);
+  dragX = wp.x;
+  dragY = wp.y;
+
+  // Clamp drag distance
+  var dx = dragX - slingX, dy = dragY - slingY;
+  var dist = Math.sqrt(dx*dx + dy*dy);
+  var maxDrag = 80;
+  if (dist > maxDrag) {
+    dragX = slingX + (dx/dist) * maxDrag;
+    dragY = slingY + (dy/dist) * maxDrag;
+    dx = dragX - slingX; dy = dragY - slingY;
+  }
+
+  // Restrict to left-and-below quadrant only (can't shoot backwards/upward)
+  // Drag must be to the left of sling (dx < 0) or below (dy > 0)
+  if (dx > 0) { dragX = slingX; dx = 0; }
+  if (dy < -10) { dragY = slingY - 10; dy = -10; } // slight upward allowed for low arc
+
+  projectile.x = dragX;
+  projectile.y = dragY;
+}
+
+function handleUp() {
+  if (!dragging || !projectile) { dragging = false; return; }
+  dragging = false;
+  var dx = slingX - dragX, dy = slingY - dragY;
+  var power = 8;
+  launchProjectile(dx * power, dy * power);
+  levelState = 'flying';
+}
+
+function nextLevel() {
+  currentLevel++;
+  if (currentLevel >= LEVELS.length) {
+    state = 'gameComplete';
+  } else {
+    buildLevel(currentLevel);
+    state = 'playing';
+  }
+}
+
+function getTotalScore() {
+  var total = 0;
+  for (var i = 0; i < stars.length; i++) total += stars[i];
+  return total;
+}
+
+// ============================================================
+// UPDATE
+// ============================================================
+var state = 'menu'; // menu, playing, levelComplete, gameComplete
+var lastTime = 0;
+
+function update(dt) {
+  if (state !== 'playing') return;
+
+  updatePhysics(dt);
+
+  // Check level state
+  if (levelState === 'flying') {
+    // Check if all projectiles have settled or left the screen
+    var anyMoving = false;
+    for (var i = 0; i < bodies.length; i++) {
+      if (bodies[i].type === 'projectile' && bodies[i].alive) {
+        if (bodies[i].settled < 1.5 && bodies[i].y < GROUND_Y + 50) {
+          anyMoving = true;
+        }
+      }
+    }
+    if (!anyMoving) {
+      levelState = 'settling';
+      settleTimer = 0;
+    }
+  }
+
+  if (levelState === 'settling') {
+    settleTimer += dt;
+    // Wait for everything to settle
+    var allSettled = true;
+    for (var i = 0; i < bodies.length; i++) {
+      if (bodies[i].alive && bodies[i].settled < 0.5) {
+        allSettled = false;
+        break;
+      }
+    }
+    if (allSettled || settleTimer > 3) {
+      // Check if all rats are dead
+      var ratsAlive = 0;
+      for (var i = 0; i < bodies.length; i++) {
+        if (bodies[i].type === 'rat' && bodies[i].alive) ratsAlive++;
+      }
+
+      if (ratsAlive === 0) {
+        // Level complete
+        levelState = 'complete';
+        var shotsLeft = ammo.length;
+        levelScore += shotsLeft * 200;
+        var levelStars = shotsLeft >= 2 ? 3 : shotsLeft >= 1 ? 2 : 1;
+        stars[currentLevel] = Math.max(stars[currentLevel] || 0, levelStars);
+        SFX.starChime();
+        state = 'levelComplete';
+      } else if (ammo.length === 0) {
+        // No ammo left, rats still alive
+        levelState = 'failed';
+        stars[currentLevel] = Math.max(stars[currentLevel] || 0, 0);
+        SFX.fail();
+      } else {
+        // Load next projectile
+        levelState = 'aiming';
+        loadProjectile();
+      }
+    }
+  }
+}
+
+// ============================================================
+// DRAWING
+// ============================================================
+function screenX(wx) { return (W - WORLD_W * SCALE) / 2 + wx * SCALE; }
+function screenY(wy) { return (H - WORLD_H * SCALE) / 2 + wy * SCALE; }
+
+function draw() {
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, W, H);
+
+  if (state === 'menu') { drawMenu(); return; }
+
+  drawBackground();
+  drawBodies();
+  drawSlingshot();
+  drawParticles();
+  drawHUD();
+
+  if (state === 'levelComplete') drawLevelComplete();
+  if (state === 'gameComplete') drawGameComplete();
+  if (levelState === 'failed') drawFailed();
+}
+
+function drawBackground() {
+  var wl = screenX(0), wr = screenX(WORLD_W);
+  var ww = WORLD_W * SCALE;
+  var gy = screenY(GROUND_Y);
+
+  // === KITCHEN WALL — full height, cream subway tiles ===
+  ctx.fillStyle = '#e8e4d8';
+  ctx.fillRect(wl, screenY(0), ww, GROUND_Y * SCALE);
+
+  // Grout lines — subway tile pattern
+  ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+  ctx.lineWidth = 1;
+  var tileW = 30 * SCALE, tileH = 14 * SCALE;
+  for (var y = screenY(0); y < gy; y += tileH) {
+    var rowIdx = Math.floor((y - screenY(0)) / tileH);
+    var offset = (rowIdx % 2) * tileW / 2;
+    for (var x = wl - tileW + offset; x < wr; x += tileW) {
+      ctx.strokeRect(x, y, tileW, tileH);
+    }
+  }
+
+  // === BACKGROUND DECORATIONS — pre-rendered pixel art sprites ===
+  // Disable smoothing so pixel art stays crisp when scaled
+  ctx.imageSmoothingEnabled = false;
+
+  // Wall decorations (positioned on wall above counter)
+  // Pot rack — top center
+  if (spriteCanvases.bgPotRack) {
+    ctx.drawImage(spriteCanvases.bgPotRack, screenX(240), screenY(5), 180 * SCALE, 90 * SCALE);
+  }
+  // Window — upper right
+  if (spriteCanvases.bgWindow) {
+    ctx.drawImage(spriteCanvases.bgWindow, screenX(580), screenY(40), 130 * SCALE, 110 * SCALE);
+  }
+  // Spice shelf — left wall
+  if (spriteCanvases.bgShelf) {
+    ctx.drawImage(spriteCanvases.bgShelf, screenX(15), screenY(80), 130 * SCALE, 65 * SCALE);
+  }
+
+  // Counter-top items — bottom edge must align with GROUND_Y
+  var gy = GROUND_Y;
+  // Knife block (25w x 85h) — sits on counter
+  if (spriteCanvases.bgKnifeBlock) {
+    var kbH = 85;
+    ctx.drawImage(spriteCanvases.bgKnifeBlock, screenX(160), screenY(gy - kbH), 25 * SCALE, kbH * SCALE);
+  }
+  // Dirty dishes (80w x 55h) — sits on counter
+  if (spriteCanvases.bgDirtyDishes) {
+    var ddH = 55;
+    ctx.drawImage(spriteCanvases.bgDirtyDishes, screenX(620), screenY(gy - ddH), 80 * SCALE, ddH * SCALE);
+  }
+  // Stove with pot (140w x 110h) — sits on counter
+  if (spriteCanvases.bgStove) {
+    var stH = 110;
+    ctx.drawImage(spriteCanvases.bgStove, screenX(350), screenY(gy - stH), 140 * SCALE, stH * SCALE);
+  }
+  // Sink (90w x 65h) — sits on counter
+  if (spriteCanvases.bgSink) {
+    var snH = 65;
+    ctx.drawImage(spriteCanvases.bgSink, screenX(700), screenY(gy - snH), 90 * SCALE, snH * SCALE);
+  }
+
+  ctx.imageSmoothingEnabled = true;
+
+  // === COUNTER SURFACE ===
+  ctx.fillStyle = '#d0ccc4';
+  ctx.fillRect(wl, gy, ww, (WORLD_H - GROUND_Y) * SCALE);
+  // Counter front edge — dark bevel
+  ctx.fillStyle = '#aaa8a0';
+  ctx.fillRect(wl, gy, ww, 4 * SCALE);
+  ctx.fillStyle = '#999890';
+  ctx.fillRect(wl, gy + 4 * SCALE, ww, 2 * SCALE);
+  // Marble speckle (fixed positions, not random per frame)
+  ctx.fillStyle = 'rgba(0,0,0,0.04)';
+  for (var i = 0; i < 30; i++) {
+    var sx = wl + ((i * 137 + 50) % 800) * SCALE;
+    var sy = gy + 8 * SCALE + ((i * 89 + 20) % 50) * SCALE;
+    ctx.fillRect(sx, sy, 3 * SCALE, 1 * SCALE);
+  }
+}
+
+function drawSlingshot() {
+  ctx.imageSmoothingEnabled = false;
+  var lx = screenX(slingX), ly = screenY(slingY);
+  var ladleSprite = spriteCanvases.ladle;
+  // Calculate sling sprite dimensions and position
+  var sw = 48 * SCALE * 0.8, sh = 64 * SCALE * 0.8;
+  var groundScreen = screenY(GROUND_Y);
+  var slingTop = groundScreen - sh;
+  // Fork tips are at ~6px and ~36px across the 48px sprite, ~4px from top of 64px sprite
+  var forkLeftX = lx - sw/2 + (8/48) * sw;
+  var forkRightX = lx - sw/2 + (40/48) * sw;
+  var forkY = slingTop + (6/64) * sh;
+
+  if (ladleSprite) {
+    ctx.drawImage(ladleSprite, lx - sw/2, slingTop, sw, sh);
+  }
+
+  // Draw rubber bands when dragging
+  if (dragging && projectile) {
+    var px = screenX(projectile.x), py = screenY(projectile.y);
+    ctx.strokeStyle = '#cc4444';
+    ctx.lineWidth = 3 * SCALE;
+    ctx.beginPath(); ctx.moveTo(forkLeftX, forkY); ctx.lineTo(px, py); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(forkRightX, forkY); ctx.lineTo(px, py); ctx.stroke();
+
+    // Draw trajectory dots — must match actual launch physics
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    var launchVX = (slingX - projectile.x) * 8; // same power as launch
+    var launchVY = (slingY - projectile.y) * 8;
+    for (var i = 1; i <= 12; i++) {
+      var t = i * 0.04;
+      var tx = projectile.x + launchVX * t;
+      var ty = projectile.y + launchVY * t + 0.5 * GRAVITY * t * t;
+      if (ty > GROUND_Y || tx > WORLD_W) break;
+      ctx.globalAlpha = 0.4 - i * 0.025;
+      ctx.beginPath(); ctx.arc(screenX(tx), screenY(ty), 2 * SCALE, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Draw projectile on slingshot
+  if (projectile && !launched) {
+    drawFoodSprite(projectile.type, projectile.x, projectile.y, projectile.w, projectile.h);
+  }
+  ctx.imageSmoothingEnabled = true;
+}
+
+function drawFoodSprite(type, x, y, w, h) {
+  var sprite = spriteCanvases[type];
+  if (sprite) {
+    var sw = w * SCALE, sh = h * SCALE;
+    ctx.drawImage(sprite, 0, 0, sprite.width, sprite.height, screenX(x) - sw/2, screenY(y) - sh/2, sw, sh);
+  }
+}
+
+function drawBodies() {
+  ctx.imageSmoothingEnabled = false;
+  for (var i = 0; i < bodies.length; i++) {
+    var b = bodies[i];
+    if (!b.alive) continue;
+    var sprite = b.getSprite();
+    if (!sprite) continue;
+    var sx = screenX(b.x), sy = screenY(b.y);
+    var sw = b.w * SCALE, sh = b.h * SCALE;
+
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(b.angle);
+    ctx.drawImage(sprite, 0, 0, sprite.width, sprite.height, -sw/2, -sh/2, sw, sh);
+
+    // Damage indicator — subtle crack lines, not a red box
+    if (b.hp < b.getHP() * 0.5 && b.type !== 'projectile') {
+      var dmgAlpha = 0.4 * (1 - b.hp / b.getHP());
+      ctx.strokeStyle = 'rgba(80,30,10,' + dmgAlpha + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-sw*0.3, -sh*0.2);
+      ctx.lineTo(sw*0.1, sh*0.1);
+      ctx.lineTo(-sw*0.1, sh*0.3);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(sw*0.2, -sh*0.3);
+      ctx.lineTo(0, 0);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+  ctx.imageSmoothingEnabled = true;
+}
+
+function drawParticles() {
+  for (var i = 0; i < particles.length; i++) {
+    var p = particles[i];
+    ctx.globalAlpha = Math.max(0, p.life * 2);
+    ctx.fillStyle = p.col;
+    ctx.beginPath();
+    ctx.arc(screenX(p.x), screenY(p.y), p.size * SCALE, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawHUD() {
+  var pad = 12;
+
+  // Level number
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold ' + Math.floor(18 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText('Level ' + (currentLevel + 1), pad, pad + 18 * SCALE);
+
+  // Zone name
+  var zone = currentLevel < 5 ? 'Countertop' : currentLevel < 10 ? 'Stovetop' : 'Pantry';
+  ctx.fillStyle = '#aabbcc';
+  ctx.font = Math.floor(12 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText(zone, pad, pad + 34 * SCALE);
+
+  // Score
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold ' + Math.floor(16 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('Score: ' + levelScore, W/2, pad + 18 * SCALE);
+
+  // Rats remaining
+  var ratsAlive = 0;
+  for (var i = 0; i < bodies.length; i++) {
+    if (bodies[i].type === 'rat' && bodies[i].alive) ratsAlive++;
+  }
+  ctx.fillStyle = '#ff8866';
+  ctx.textAlign = 'right';
+  ctx.fillText('Rats: ' + ratsAlive + '/' + totalRats, W - pad - 40, pad + 18 * SCALE);
+
+  // Ammo display
+  ctx.textAlign = 'left';
+  var ammoX = pad;
+  var ammoY = H - pad - 24 * SCALE;
+  ctx.fillStyle = '#ddd';
+  ctx.font = Math.floor(11 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('Ammo:', ammoX, ammoY - 4 * SCALE);
+  for (var i = 0; i < ammo.length; i++) {
+    var sprite = spriteCanvases[ammo[i]];
+    if (sprite) {
+      var aSize = 20 * SCALE;
+      ctx.drawImage(sprite, 0, 0, sprite.width, sprite.height, ammoX + i * (aSize + 4*SCALE), ammoY, aSize, aSize);
+    }
+  }
+
+  // Ability hint
+  if (levelState === 'flying' && activeProjectile && activeProjectile.alive && !abilityUsed) {
+    var abilityText = '';
+    switch(activeProjectile.material) {
+      case 'egg': abilityText = 'TAP to split!'; break;
+      case 'onion': abilityText = 'TAP for shockwave!'; break;
+      case 'chilli': abilityText = 'TAP to boost!'; break;
+    }
+    if (abilityText) {
+      ctx.fillStyle = 'rgba(255,255,100,0.8)';
+      ctx.font = 'bold ' + Math.floor(14 * SCALE) + 'px "Segoe UI", Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(abilityText, W/2, H - pad - 50 * SCALE);
+    }
+  }
+
+  // Retry hint
+  if (levelState === 'aiming' || levelState === 'failed') {
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = Math.floor(10 * SCALE) + 'px "Segoe UI", Arial';
+    ctx.textAlign = 'right';
+    ctx.fillText('Tap / R = Retry', W - pad - 40, H - pad);
+  }
+
+  // Mute
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(W - 42, 10, 32, 32);
+  ctx.fillStyle = '#aaa';
+  ctx.font = '16px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(SFX.muted ? 'X' : String.fromCharCode(9835), W - 26, 31);
+}
+
+function drawMenu() {
+  // Background
+  var skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+  skyGrad.addColorStop(0, '#88bbee');
+  skyGrad.addColorStop(1, '#ccddee');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+
+  // Title
+  ctx.fillStyle = '#dd4411';
+  ctx.font = 'bold ' + Math.floor(48 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('FLING FURY', W/2, H * 0.25);
+
+  ctx.fillStyle = '#886644';
+  ctx.font = Math.floor(18 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('Kitchen Chaos — Launch food at rat-infested dish forts!', W/2, H * 0.34);
+
+  // Draw food sprites as preview
+  var foods = ['tomato', 'egg', 'onion', 'chilli'];
+  var previewY = H * 0.48;
+  foods.forEach(function(type, i) {
+    var sprite = spriteCanvases[type];
+    if (sprite) {
+      var sz = 40 * SCALE;
+      var x = W/2 + (i - 1.5) * sz * 1.5;
+      ctx.drawImage(sprite, 0, 0, sprite.width, sprite.height, x - sz/2, previewY - sz/2, sz, sz);
+    }
+  });
+
+  ctx.fillStyle = '#555';
+  ctx.font = Math.floor(14 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('Drag to aim, release to fire. Tap mid-flight for special abilities!', W/2, H * 0.62);
+
+  ctx.fillStyle = '#448833';
+  ctx.font = 'bold ' + Math.floor(20 * SCALE) + 'px "Segoe UI", Arial';
+  var pulse = 0.7 + Math.sin(Date.now() * 0.004) * 0.3;
+  ctx.globalAlpha = pulse;
+  ctx.fillText('TAP TO START', W/2, H * 0.78);
+  ctx.globalAlpha = 1;
+}
+
+function drawLevelComplete() {
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold ' + Math.floor(36 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('Level Complete!', W/2, H * 0.3);
+
+  ctx.fillStyle = '#fff';
+  ctx.font = Math.floor(18 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('Score: ' + levelScore, W/2, H * 0.42);
+
+  // Stars
+  var starSize = 30 * SCALE;
+  var levelStars = stars[currentLevel] || 0;
+  for (var i = 0; i < 3; i++) {
+    ctx.fillStyle = i < levelStars ? '#ffcc22' : '#444';
+    ctx.font = Math.floor(starSize) + 'px Arial';
+    ctx.fillText(i < levelStars ? '\u2605' : '\u2606', W/2 + (i - 1) * starSize * 1.2, H * 0.55);
+  }
+
+  ctx.fillStyle = '#88ff88';
+  ctx.font = Math.floor(16 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('Tap to continue', W/2, H * 0.72);
+}
+
+function drawFailed() {
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = '#ff6644';
+  ctx.font = 'bold ' + Math.floor(30 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('Out of ammo!', W/2, H * 0.35);
+
+  ctx.fillStyle = '#ccc';
+  ctx.font = Math.floor(16 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('Tap to retry', W/2, H * 0.5);
+}
+
+function drawGameComplete() {
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold ' + Math.floor(40 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('Kitchen Cleared!', W/2, H * 0.25);
+
+  ctx.fillStyle = '#fff';
+  ctx.font = Math.floor(20 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('All rats evicted!', W/2, H * 0.37);
+
+  // Total stars
+  var total = getTotalScore();
+  ctx.fillStyle = '#ffcc22';
+  ctx.font = 'bold ' + Math.floor(24 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('Total Stars: ' + total + ' / ' + (LEVELS.length * 3), W/2, H * 0.5);
+
+  ctx.fillStyle = '#88ff88';
+  ctx.font = Math.floor(16 * SCALE) + 'px "Segoe UI", Arial';
+  ctx.fillText('Tap to submit score & return to menu', W/2, H * 0.7);
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+function gameLoop(ts) {
+  var dt = Math.min(0.033, (ts - lastTime) / 1000);
+  lastTime = ts;
+  update(dt);
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+initSprites();
+requestAnimationFrame(function(ts) { lastTime = ts; gameLoop(ts); });
+
+</script>
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px Segoe UI,Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px"><span id="vc-count">...</span> Flingers</div>
+<script>
+(function(){var G="fling-fury",SU="https://ivhpqkqnfqcgrfrsvszf.supabase.co",SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM";function hdr(){return{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json"}}async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("").slice(0,32)}catch(e){return"anon-"+Math.random().toString(36).slice(2,10)}}async function run(){var h=await vh();try{await fetch(SU+"/rest/v1/game_visits",{method:"POST",headers:Object.assign(hdr(),{"Prefer":"resolution=merge-duplicates,return=minimal"}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}try{var r=await fetch(SU+"/rest/v1/game_visits?game=eq."+G+"&select=id",{headers:Object.assign(hdr(),{"Prefer":"count=exact"})});var c=r.headers.get("content-range");if(c){var n=c.split("/")[1];if(n&&n!=="*")document.getElementById("vc-count").textContent=Number(n).toLocaleString()}}catch(e){}}run()})();
+</script>
+</body>
+</html>

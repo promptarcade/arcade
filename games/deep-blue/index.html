@@ -1,0 +1,2086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Deep Blue</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+canvas { display: block; touch-action: none; cursor: none; }
+canvas.journal-open { cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function() {
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// SOUND
+// ============================================================
+const SFX = {
+  _ctx: null,
+  _get() { if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this._ctx.state === 'suspended') this._ctx.resume(); return this._ctx; },
+  _tone(f, type, dur, vol) { try { const c = this._get(), o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(vol, c.currentTime); g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur); o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + dur); } catch(e) {} },
+  shutter() { this._tone(1200, 'sine', 0.03, 0.08); setTimeout(() => this._tone(800, 'sine', 0.05, 0.06), 30); },
+  sonar() { this._tone(600, 'sine', 0.4, 0.04); },
+  creak() { this._tone(60 + Math.random() * 40, 'triangle', 0.15 + Math.random() * 0.1, 0.03 + Math.random() * 0.02); },
+  discover() { this._tone(400, 'sine', 0.1, 0.06); setTimeout(() => this._tone(500, 'sine', 0.1, 0.05), 80); setTimeout(() => this._tone(600, 'sine', 0.15, 0.04), 160); },
+};
+
+// ============================================================
+// WORLD — real ocean zones scaled
+// ============================================================
+// Scale: 2px per meter
+const M = 2; // pixels per meter
+const ZONES = [
+  { name: 'Sunlight Zone',  minD: 0,    maxD: 200,  col1: [20,80,140], col2: [10,50,100] },
+  { name: 'Twilight Zone',  minD: 200,  maxD: 1000, col1: [10,50,100], col2: [5,20,60]   },
+  { name: 'Midnight Zone',  minD: 1000, maxD: 4000, col1: [5,20,60],   col2: [2,5,15]    },
+  { name: 'Abyssal Zone',   minD: 4000, maxD: 6000, col1: [2,5,15],    col2: [1,2,5]     },
+  { name: 'Hadal Zone',     minD: 6000, maxD: 11000,col1: [1,2,5],     col2: [0,0,2]     },
+];
+const MAX_DEPTH = 11000;
+// WORLD_W defined in terrain section below
+
+// Terrain heightmap — realistic ocean cross-section
+// Profile: beach → shelf → slope → rise → abyssal plain → mid-ocean ridge → plain → trench → plain → rise → slope → shelf → beach
+const TERRAIN_POINTS = 400;
+const WORLD_W = 16000; // wide enough for full ocean profile
+const terrain = [];
+
+function smoothstep(t) { return t * t * (3 - 2 * t); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function generateTerrain() {
+  // Define key waypoints as [fraction, depth_in_meters]
+  // Based on real Atlantic ocean profile: two continental margins with abyssal plain and mid-ocean ridge
+  const profile = [
+    // Left coast
+    [0.000,    0],    // shoreline
+    [0.015,    5],    // beach — gentle sandy slope
+    [0.030,   15],    // nearshore
+    // Continental shelf — wide, nearly flat
+    [0.050,   80],
+    [0.080,  120],
+    [0.100,  140],
+    // Shelf break — where the steep descent begins
+    [0.110,  180],
+    // Continental slope — smooth steep descent
+    [0.140,  800],
+    [0.165, 2000],
+    [0.180, 3200],
+    // Continental rise — sediment apron, slope gentles
+    [0.200, 3800],
+    [0.220, 4200],
+    // Abyssal plain — vast, nearly flat
+    [0.240, 4400],
+    [0.300, 4500],
+    [0.370, 4450],
+    // Mid-ocean ridge approach — gradual rise
+    [0.420, 3800],
+    [0.450, 3000],
+    // Ridge crest with rift valley
+    [0.475, 2400],
+    [0.490, 2600],    // rift valley dip
+    [0.510, 2600],    // rift valley
+    [0.525, 2400],    // other side of crest
+    // Descend from ridge
+    [0.550, 3000],
+    [0.580, 3800],
+    // Second abyssal plain
+    [0.620, 4500],
+    [0.660, 4550],
+    // Oceanic trench — smooth V-shape
+    [0.700, 5000],
+    [0.720, 6500],
+    [0.740, 8500],
+    [0.755,10500],    // deepest point
+    [0.770, 8500],
+    [0.790, 6500],
+    [0.810, 5000],
+    // Recovery to abyssal plain
+    [0.830, 4500],
+    [0.850, 4300],
+    // Far continental rise
+    [0.870, 3800],
+    [0.885, 3200],
+    // Far continental slope
+    [0.900, 2000],
+    [0.920,  800],
+    // Far shelf break
+    [0.935,  180],
+    // Far continental shelf
+    [0.950,  130],
+    [0.965,  100],
+    [0.978,   60],
+    // Far beach
+    [0.990,   10],
+    [0.997,    3],
+    [1.000,    0],    // far shoreline
+  ];
+
+  for (let i = 0; i <= TERRAIN_POINTS; i++) {
+    const frac = i / TERRAIN_POINTS;
+    const x = frac * WORLD_W;
+
+    // Find which two waypoints we're between
+    let p0 = profile[0], p1 = profile[1];
+    for (let j = 1; j < profile.length; j++) {
+      if (frac <= profile[j][0]) {
+        p0 = profile[j - 1];
+        p1 = profile[j];
+        break;
+      }
+    }
+
+    // Smoothstep interpolation between waypoints
+    const segT = (p1[0] === p0[0]) ? 0 : (frac - p0[0]) / (p1[0] - p0[0]);
+    let depth = lerp(p0[1], p1[1], smoothstep(segT));
+
+    // Very gentle undulations — sediment ripples and small features
+    // Amplitude scales with depth (deeper = gentler relative to depth)
+    const baseNoise = Math.sin(frac * 47) * 15 + Math.sin(frac * 97) * 8 + Math.sin(frac * 203) * 4;
+    // Only add noise away from beaches (suppress near shores)
+    const shoreSuppress = Math.min(1, frac / 0.05, (1 - frac) / 0.05);
+    depth += baseNoise * shoreSuppress;
+
+    // Seamounts — isolated volcanic peaks on the abyssal plain
+    // Two small seamounts at specific locations
+    const sm1 = Math.exp(-Math.pow((frac - 0.33) / 0.012, 2)) * 1500; // rises ~1500m from plain
+    const sm2 = Math.exp(-Math.pow((frac - 0.65) / 0.008, 2)) * 800;  // smaller seamount
+    depth -= (sm1 + sm2);
+
+    terrain.push({ x, depth: Math.max(0, depth) });
+  }
+}
+generateTerrain();
+
+function getTerrainDepth(worldX) {
+  const frac = worldX / WORLD_W;
+  const idx = frac * TERRAIN_POINTS;
+  const i0 = Math.max(0, Math.min(TERRAIN_POINTS - 1, Math.floor(idx)));
+  const i1 = Math.min(TERRAIN_POINTS, i0 + 1);
+  const t = idx - i0;
+  return terrain[i0].depth * (1 - t) + terrain[i1].depth * t;
+}
+
+// ============================================================
+// SPECIES DATABASE
+// ============================================================
+const SPECIES = [
+  // Sunlight Zone
+  { id: 'clownfish', name: 'Clownfish', zone: 0, rarity: 1, depth: [10, 80], size: 8,
+    habitat: 'reef', // spawns ON seafloor near coral
+    fact: 'All clownfish are born male. The dominant fish in a group becomes female.',
+    diet: 'Algae, plankton, and small invertebrates.',
+    behaviour: 'Never ventures more than a few metres from its host anemone. The anemone provides protection with its stinging tentacles, while the clownfish keeps the anemone clean.',
+    details: 'There are around 30 species. They coat themselves in the anemone\'s mucus to avoid being stung. A symbiotic relationship — the clownfish lures prey for the anemone and eats parasites from its tentacles.' },
+  { id: 'sea_turtle', name: 'Green Sea Turtle', zone: 0, rarity: 1, depth: [5, 150], size: 35,
+    habitat: 'openwater',
+    fact: 'Sea turtles can hold their breath for up to 5 hours while sleeping.',
+    diet: 'Primarily seagrass and algae — one of the few marine reptiles that are herbivorous as adults.',
+    behaviour: 'Migrates thousands of kilometres between feeding grounds and nesting beaches. Returns to the exact beach where it was born to lay eggs.',
+    details: 'Can live over 80 years. Named for the green colour of their fat, not their shell. Endangered due to habitat loss, fishing bycatch, and egg poaching. Nesting females cry — not from emotion, but to remove salt from their eyes.' },
+  { id: 'dolphin', name: 'Bottlenose Dolphin', zone: 0, rarity: 2, depth: [5, 100], size: 40,
+    habitat: 'openwater',
+    fact: 'Dolphins sleep with one eye open and one half of their brain awake.',
+    diet: 'Fish, squid, and crustaceans. Uses echolocation to find prey.',
+    behaviour: 'Highly social, living in pods of 10-30. Uses a unique signature whistle to identify itself. Cooperates with other dolphins to herd fish.',
+    details: 'One of the most intelligent animals. Uses tools — wraps sponges around their snout to protect it while foraging on rough ocean floor. Has been observed teaching, learning, cooperating, and grieving.' },
+  { id: 'manta', name: 'Giant Manta Ray', zone: 0, rarity: 2, depth: [10, 180], size: 50,
+    habitat: 'openwater',
+    fact: 'Mantas have the largest brain-to-body ratio of any cold-blooded fish.',
+    diet: 'Filter feeder — scoops plankton and small fish through its open mouth while swimming.',
+    behaviour: 'Somersaults through plankton clouds to feed efficiently. Visits "cleaning stations" where small fish eat parasites from its skin.',
+    details: 'Wingspan up to 7 metres. Despite their size, completely harmless. Can recognise themselves in mirrors — one of very few animals. Each individual has a unique spot pattern on its belly, like a fingerprint.' },
+  { id: 'seahorse', name: 'Seahorse', zone: 0, rarity: 3, depth: [5, 50], size: 10,
+    habitat: 'reef', // near seafloor among seaweed/coral
+    fact: 'Male seahorses carry the babies in a brood pouch and give birth.',
+    diet: 'Tiny crustaceans and plankton. Eats almost constantly — has no stomach, so food passes through quickly.',
+    behaviour: 'Anchors to seagrass or coral with its prehensile tail. Pairs bond for life and greet each other daily with an elaborate dance.',
+    details: 'Poor swimmers — the slowest fish in the ocean. Eyes move independently like a chameleon. Changes colour to match surroundings and communicate with its partner.' },
+  // Twilight Zone
+  { id: 'siphonophore', name: 'Giant Siphonophore', zone: 1, rarity: 3, depth: [300, 900], size: 35,
+    habitat: 'openwater',
+    fact: 'Siphonophores can grow over 40 metres — longer than a blue whale.',
+    diet: 'Small fish and crustaceans caught by trailing stinging tentacles.',
+    behaviour: 'Drifts with ocean currents. Each "individual" is actually a colony of thousands of specialised organisms called zooids, each performing a specific function.',
+    details: 'Not a single animal — a superorganism. Different zooids handle swimming, feeding, reproduction, and defence. The Portuguese man-of-war is a well-known relative. Produces bioluminescent light to lure prey.' },
+  { id: 'barreleye', name: 'Barreleye Fish', zone: 1, rarity: 4, depth: [400, 800], size: 12,
+    habitat: 'openwater',
+    fact: 'Its transparent head lets it look upward through its own skull.',
+    diet: 'Small fish and jellyfish. Steals food from siphonophores by navigating between their stinging tentacles.',
+    behaviour: 'Hangs motionless in the dark, eyes pointed upward watching for silhouettes of prey against the faint surface light. Rotates its tubular eyes forward to eat.',
+    details: 'Only discovered to have a transparent head in 2004 when filmed alive for the first time. Previous specimens had their fragile transparent shield destroyed by fishing nets. About 15cm long.' },
+  { id: 'lanternfish', name: 'Lanternfish School', zone: 1, rarity: 1, depth: [200, 900], size: 15,
+    habitat: 'openwater',
+    fact: 'Lanternfish make up 65% of all deep sea fish biomass.',
+    diet: 'Tiny copepods, krill, and plankton.',
+    behaviour: 'Undertakes the largest migration on Earth — every night, billions rise from the deep to feed near the surface, then descend at dawn to avoid predators.',
+    details: 'There are about 250 species. Named for their photophores — light-producing organs along their bodies. Estimated 660 million tonnes of lanternfish in the oceans — more than any other type of fish by mass.' },
+  { id: 'giant_squid', name: 'Giant Squid', zone: 1, rarity: 5, depth: [500, 1000], size: 55,
+    habitat: 'openwater',
+    fact: 'First filmed alive in 2004. They have the largest eyes in the animal kingdom.',
+    diet: 'Deep-sea fish and other squid. Uses two long feeding tentacles with toothed suckers to capture prey.',
+    behaviour: 'Solitary hunter in the deep twilight zone. Very little is known about its behaviour — most knowledge comes from dead specimens washed ashore or caught in fishing nets.',
+    details: 'Can reach 13 metres. Eyes the size of dinner plates (27cm) to detect bioluminescence in the dark. The only known predator is the sperm whale — scars from squid suckers are found on whale skin. May live only about 5 years despite their size.' },
+  // Midnight Zone
+  { id: 'anglerfish', name: 'Anglerfish', zone: 2, rarity: 2, depth: [1200, 3500], size: 20,
+    habitat: 'seafloor',
+    fact: 'Male anglerfish fuse permanently onto females, sharing her bloodstream.',
+    diet: 'Any fish or crustacean that comes close to the bioluminescent lure.',
+    behaviour: 'Sits motionless on the seafloor, dangling its glowing lure to attract prey in the pitch darkness. Strikes in milliseconds when prey approaches.',
+    details: 'Males are tiny (a few centimetres) and their sole purpose is to find a female. Once found, the male bites into her and fuses permanently — his organs dissolve until he is nothing but a pair of gonads attached to her body. She may carry several males.' },
+  { id: 'vampire_squid', name: 'Vampire Squid', zone: 2, rarity: 3, depth: [1500, 3000], size: 18,
+    habitat: 'openwater',
+    fact: 'Not a true squid. It turns inside-out to escape predators, revealing spines.',
+    diet: 'Marine snow — dead organic matter that drifts down from above. One of the only cephalopods that doesn\'t hunt live prey.',
+    behaviour: 'Drifts slowly in the oxygen minimum zone where few predators can survive. When threatened, inverts its webbed arms over its body to display spine-like projections and bioluminescent tips.',
+    details: 'A living fossil — unchanged for 300 million years. Not actually a vampire or a true squid. Lives in water with as little as 3% oxygen. Has the largest eyes relative to body size of any animal. Can glow and release clouds of bioluminescent mucus.' },
+  { id: 'giant_isopod', name: 'Giant Isopod', zone: 2, rarity: 2, depth: [1500, 3500], size: 22,
+    habitat: 'seafloor',
+    fact: 'A deep-sea relative of the woodlouse that can go 5 years without eating.',
+    diet: 'Scavenges dead whales, fish, and squid that sink to the seafloor.',
+    behaviour: 'Slow-moving bottom dweller. Curls into a ball when threatened, like its terrestrial relative the pill bug. Incredibly resilient — one in captivity refused food for over 5 years.',
+    details: 'Up to 50cm long — a giant version of the common woodlouse. Has compound eyes with over 3,500 facets. An example of deep-sea gigantism — organisms grow larger in the deep ocean, possibly due to cold temperatures and scarce food.' },
+  { id: 'dragonfish', name: 'Black Dragonfish', zone: 2, rarity: 3, depth: [1000, 2500], size: 18,
+    habitat: 'openwater',
+    fact: 'Produces invisible near-infrared light to see prey that cannot see it.',
+    diet: 'Small fish and crustaceans, attracted by the bioluminescent chin barbel.',
+    behaviour: 'Hunts with a built-in flashlight that only it can see. Most deep-sea creatures can only detect blue/green light, but the dragonfish produces red light — giving it a private spotlight invisible to prey.',
+    details: 'Females are fierce predators up to 40cm long. Males are tiny (5cm), have no teeth, no functioning gut, and exist only to reproduce. The stomach is lined with black pigment to hide the glow of bioluminescent prey it swallows.' },
+  // Abyssal Zone
+  { id: 'dumbo_octopus', name: 'Dumbo Octopus', zone: 3, rarity: 4, depth: [4000, 5500], size: 20,
+    habitat: 'seafloor',
+    fact: 'Named for ear-like fins. Lives deeper than any other octopus.',
+    diet: 'Worms, bivalves, copepods, and other small crustaceans found on the seafloor.',
+    behaviour: 'Flaps its ear-like fins to swim gracefully just above the ocean floor. Unlike shallow-water octopuses, it swallows prey whole rather than tearing it apart.',
+    details: 'About 20cm across. Found at depths up to 7,000m. Unlike other octopuses, has no ink sac — at these depths there is no light, so ink would be useless. Over a dozen species exist, all adorable.' },
+  { id: 'tube_worms', name: 'Giant Tube Worms', zone: 3, rarity: 2, depth: [4000, 5000], size: 25,
+    habitat: 'vent', // spawns at hydrothermal vent locations
+    fact: 'Grow near hydrothermal vents. Have no mouth, stomach, or eyes.',
+    diet: 'None — relies on chemosynthetic bacteria living inside its body. The bacteria convert hydrogen sulphide from the vent into energy.',
+    behaviour: 'Extends its red plume into the hot vent water to absorb chemicals for its symbiotic bacteria. Retracts into its protective white tube when disturbed.',
+    details: 'Can grow to 2.4 metres. One of the fastest-growing invertebrates — can grow 85cm per year. Red colour comes from haemoglobin. Thrives in water up to 80°C. First discovered in 1977, rewriting our understanding of life\'s energy sources.' },
+  { id: 'yeti_crab', name: 'Yeti Crab', zone: 3, rarity: 4, depth: [4200, 5200], size: 12,
+    habitat: 'vent',
+    fact: 'Discovered in 2005. Farms bacteria on its hairy claws for food.',
+    diet: 'Bacteria that it cultivates on its own hairy claws. Waves its claws near hydrothermal vents to "farm" the bacteria.',
+    behaviour: 'Lives in dense clusters around hydrothermal vents. Rhythmically waves its hairy claws through the mineral-rich vent water to grow bacteria, then scrapes the bacteria off and eats it.',
+    details: 'Only three species known, all discovered since 2005. Named Kiwa hirsuta — Kiwa is a Polynesian goddess of crustaceans. Nearly blind. The hairs (setae) on its claws are covered in filamentous bacteria — essentially a walking garden.' },
+  // Hadal Zone
+  { id: 'snailfish', name: 'Mariana Snailfish', zone: 4, rarity: 5, depth: [7000, 8200], size: 14,
+    habitat: 'seafloor',
+    fact: 'The deepest-living fish ever recorded, at 8,178 metres.',
+    diet: 'Tiny amphipods and other small crustaceans living on the trench floor.',
+    behaviour: 'Moves slowly along the hadal zone floor. Translucent body allows internal organs to be visible. Thrives under pressure that would crush most life — over 800 times atmospheric pressure.',
+    details: 'Discovered in 2014 in the Mariana Trench. Tadpole-shaped, about 28cm. Has no scales. Its body contains a chemical (TMAO) that prevents proteins from being crushed by pressure. At the top of its food chain — the only fish at this depth.' },
+  { id: 'amphipod', name: 'Supergiant Amphipod', zone: 4, rarity: 3, depth: [6500, 10500], size: 10,
+    habitat: 'seafloor',
+    fact: 'Scavengers of the deep. Found feeding on whale carcasses at extreme depth.',
+    diet: 'Carrion — anything organic that sinks to the trench floor, including dead fish, whales, and marine snow.',
+    behaviour: 'Swarms in large numbers when food reaches the bottom. Can detect food from great distances using chemoreception. Remarkably active given the extreme pressure and near-freezing temperatures.',
+    details: 'Up to 34cm — ten times larger than shallow-water amphipods. Another example of deep-sea gigantism. Found in every ocean trench. Scientists use baited cameras to study them, sinking bait packages to the trench floor.' },
+];
+
+// ============================================================
+// GAME STATE
+// ============================================================
+let time = 0;
+let camX = 0, camY = 0;
+const sub = { x: 600, y: 150, vx: 0, vy: 0, facing: 1, propPhase: 0, bubbleTimer: 0 };
+let bubbles = [];
+let creatures = [];
+let corals = [];
+let seaweeds = [];
+let ruins = [];
+let journal = {}; // species id -> { discovered: bool, photoCount: int }
+let cameraMode = false;
+let lastPhoto = null; // { species, timer }
+let journalOpen = false;
+let journalDetail = null; // species object when viewing detail page
+let journalCards = []; // [{x,y,w,h,species}] for tap detection
+let zoneAnnounce = { text: '', timer: 0, lastZone: -1 };
+let creakTimer = 3;
+let sonarTimer = 8;
+
+// Init journal
+for (const sp of SPECIES) journal[sp.id] = { discovered: false, photoCount: 0 };
+
+// Cached preview creatures for journal/polaroid — stable animation seeds
+const previewCreatures = {};
+function getPreviewCreature(sp) {
+  if (!previewCreatures[sp.id]) {
+    previewCreatures[sp.id] = createCreature(sp, 0, 0);
+    previewCreatures[sp.id].vx = 1;
+  }
+  return previewCreatures[sp.id];
+}
+
+// ============================================================
+// CREATURE SPAWNING — per zone, near the player
+// ============================================================
+// Pre-populate the ENTIRE ocean at startup. No reactive spawning.
+function populateOcean() {
+  creatures = [];
+  for (const sp of SPECIES) {
+    const count = sp.rarity >= 5 ? 2 : sp.rarity >= 4 ? 4 : sp.rarity >= 3 ? 6 : sp.rarity >= 2 ? 10 : 15;
+    let placed = 0;
+    for (let attempt = 0; attempt < count * 30 && placed < count; attempt++) {
+      const cx = 400 + Math.random() * (WORLD_W - 800);
+      const floorDepth = getTerrainDepth(cx);
+      let cy;
+      if (sp.habitat === 'reef' || sp.habitat === 'seafloor' || sp.habitat === 'vent') {
+        if (floorDepth < sp.depth[0] - 50 || floorDepth > sp.depth[1] + 50) continue;
+        cy = (floorDepth - 3 - Math.random() * 10) * M;
+      } else {
+        const d = sp.depth[0] + Math.random() * (sp.depth[1] - sp.depth[0]);
+        if (d > floorDepth - 60) continue;
+        cy = d * M;
+      }
+      // Enforce minimum distance between same species
+      let tooClose = false;
+      for (const e of creatures) {
+        if (e.speciesId === sp.id && Math.abs(e.x - cx) < 500 && Math.abs(e.y - cy) < 300) {
+          tooClose = true; break;
+        }
+      }
+      if (tooClose) continue;
+      creatures.push(createCreature(sp, cx, cy));
+      placed++;
+    }
+  }
+}
+
+// Called every frame but does nothing — ocean is pre-populated
+function spawnCreatures() {}
+
+function createCreature(sp, x, y) {
+  const isFixed = sp.habitat === 'reef' || sp.habitat === 'vent';
+  return {
+    speciesId: sp.id,
+    species: sp,
+    x, y,
+    vx: isFixed ? 0 : (Math.random() < 0.5 ? 1 : -1) * (5 + Math.random() * 15),
+    vy: 0,
+    size: (sp.size || 20) * (0.9 + Math.random() * 0.2),
+    phase: Math.random() * Math.PI * 2,
+    seed: Math.random() * 1000,
+  };
+}
+
+// ============================================================
+// DRAWING — Zone-specific water colours
+// ============================================================
+function getZoneAtDepth(d) {
+  for (let i = ZONES.length - 1; i >= 0; i--) {
+    if (d >= ZONES[i].minD) return i;
+  }
+  return 0;
+}
+
+function waterColor(depth) {
+  const d = Math.max(0, Math.min(MAX_DEPTH, depth));
+  const zi = getZoneAtDepth(d);
+  const z = ZONES[zi];
+  const t = Math.min(1, (d - z.minD) / Math.max(1, z.maxD - z.minD));
+  const r = Math.round(z.col1[0] + (z.col2[0] - z.col1[0]) * t);
+  const g = Math.round(z.col1[1] + (z.col2[1] - z.col1[1]) * t);
+  const b = Math.round(z.col1[2] + (z.col2[2] - z.col1[2]) * t);
+  return `rgb(${r},${g},${b})`;
+}
+
+function depthDarkness(d) {
+  return Math.min(0.92, d / MAX_DEPTH * 1.1);
+}
+
+// ============================================================
+// LIGHT RAYS
+// ============================================================
+function drawLightRays() {
+  const surfaceScreenY = -camY;
+  if (surfaceScreenY < -800) return;
+  const intensity = Math.max(0, 1 - camY / (400 * M));
+  if (intensity <= 0) return;
+  ctx.save();
+  for (let i = 0; i < 5; i++) {
+    const rx = ((i * 280 + time * 6) % (W + 500)) - 250;
+    const angle = 0.12 + Math.sin(time * 0.2 + i * 1.7) * 0.04;
+    const width = 50 + Math.sin(time * 0.4 + i * 2.3) * 20;
+    const rayLen = 500 + Math.sin(time * 0.15 + i) * 80;
+    ctx.save();
+    ctx.translate(rx, Math.max(0, surfaceScreenY));
+    ctx.rotate(angle);
+    const grad = ctx.createLinearGradient(0, 0, 0, rayLen);
+    grad.addColorStop(0, `rgba(200,230,255,${0.06 * intensity})`);
+    grad.addColorStop(0.4, `rgba(180,220,255,${0.025 * intensity})`);
+    grad.addColorStop(1, 'rgba(150,200,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(-width / 2, 0, width, rayLen);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// ============================================================
+// TERRAIN DRAWING
+// ============================================================
+function drawTerrain() {
+  // Draw the sea floor as a filled polygon
+  ctx.beginPath();
+  let started = false;
+  for (let i = 0; i <= TERRAIN_POINTS; i++) {
+    const t = terrain[i];
+    const sx = t.x - camX;
+    if (sx < -100 || sx > W + 100) continue;
+    const sy = t.depth * M - camY;
+    if (!started) { ctx.moveTo(sx, sy); started = true; }
+    else ctx.lineTo(sx, sy);
+  }
+  // Close at bottom
+  ctx.lineTo(WORLD_W - camX, H + 100);
+  ctx.lineTo(-camX, H + 100);
+  ctx.closePath();
+
+  // Floor gradient
+  const floorGrad = ctx.createLinearGradient(0, 0, 0, H);
+  floorGrad.addColorStop(0, 'rgba(80,65,40,0.7)');
+  floorGrad.addColorStop(0.3, 'rgba(50,40,25,0.8)');
+  floorGrad.addColorStop(1, 'rgba(20,15,8,0.9)');
+  ctx.fillStyle = floorGrad;
+  ctx.fill();
+
+  // Floor surface line
+  ctx.strokeStyle = 'rgba(100,85,55,0.4)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  started = false;
+  for (let i = 0; i <= TERRAIN_POINTS; i++) {
+    const t = terrain[i];
+    const sx = t.x - camX;
+    if (sx < -100 || sx > W + 100) continue;
+    const sy = t.depth * M - camY;
+    if (!started) { ctx.moveTo(sx, sy); started = true; }
+    else ctx.lineTo(sx, sy);
+  }
+  ctx.stroke();
+
+  // Sandy beaches at both shores — rise above the water
+  const beachEndFrac = 0.035;
+  const beachEndX = WORLD_W * beachEndFrac;
+  const beachSX = beachEndX - camX;
+  if (beachSX > -300) {
+    ctx.fillStyle = '#d4c4a0';
+    ctx.beginPath();
+    ctx.moveTo(-camX - 100, -camY - 100); // above screen
+    ctx.lineTo(beachSX + 20, -camY - 100);
+    // Follow terrain down to where it gets deep
+    for (let i = Math.min(TERRAIN_POINTS, Math.floor(beachEndFrac * TERRAIN_POINTS) + 2); i >= 0; i--) {
+      ctx.lineTo(terrain[i].x - camX, terrain[i].depth * M - camY);
+    }
+    ctx.lineTo(-camX - 100, -camY);
+    ctx.closePath();
+    ctx.fill();
+    // Wave line at water's edge
+    ctx.strokeStyle = 'rgba(180,220,240,0.3)';
+    ctx.lineWidth = 2;
+    const waveX = WORLD_W * 0.008 - camX;
+    ctx.beginPath();
+    ctx.moveTo(waveX, -camY - 5);
+    ctx.lineTo(waveX + 20, 5 * M - camY);
+    ctx.stroke();
+  }
+
+  // Right shore
+  const rStartFrac = 0.965;
+  const rStartX = WORLD_W * rStartFrac;
+  const rSX = rStartX - camX;
+  if (rSX < W + 300) {
+    ctx.fillStyle = '#d4c4a0';
+    ctx.beginPath();
+    ctx.moveTo(WORLD_W - camX + 100, -camY - 100);
+    ctx.lineTo(rSX - 20, -camY - 100);
+    for (let i = Math.max(0, Math.floor(rStartFrac * TERRAIN_POINTS) - 2); i <= TERRAIN_POINTS; i++) {
+      ctx.lineTo(terrain[i].x - camX, terrain[i].depth * M - camY);
+    }
+    ctx.lineTo(WORLD_W - camX + 100, -camY);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+// ============================================================
+// SEAFLOOR DECORATIONS — coral, seaweed, ruins
+// ============================================================
+function generateSeafloorDecor() {
+  corals = []; seaweeds = []; ruins = [];
+  // Coral — on shallow shelf and upper slopes (depth < 500m)
+  for (let x = 50; x < WORLD_W; x += 25 + Math.random() * 50) {
+    const d = getTerrainDepth(x);
+    if (d > 500) continue; // coral only in shallow water
+    const hue = [340, 20, 280, 160, 40, 10, 300][Math.floor(Math.random() * 7)];
+    const type = Math.floor(Math.random() * 5);
+    corals.push({ x, y: d * M, type, hue, sat: 55 + Math.random() * 30, light: 35 + Math.random() * 20, size: 12 + Math.random() * 25, seed: Math.random() * 1000 });
+  }
+  // Seaweed — on shallow to mid depths (< 800m)
+  for (let x = 50; x < WORLD_W; x += 30 + Math.random() * 60) {
+    const d = getTerrainDepth(x);
+    if (d > 800) continue;
+    seaweeds.push({ x, baseY: d * M, segments: 4 + Math.floor(Math.random() * 6), segLen: 8 + Math.random() * 10, hue: 100 + Math.random() * 40, width: 2 + Math.random() * 3, phase: Math.random() * Math.PI * 2 });
+  }
+  // Ruins — scattered on the abyssal plain
+  for (let i = 0; i < 8; i++) {
+    const x = 1500 + Math.random() * 4000;
+    const d = getTerrainDepth(x);
+    ruins.push({ x, y: d * M, type: Math.floor(Math.random() * 3), size: 25 + Math.random() * 30, mossCoverage: 0.3 + Math.random() * 0.4 });
+  }
+}
+generateSeafloorDecor();
+populateOcean();
+
+function drawSeafloorDecor() {
+  // Seaweed
+  for (const sw of seaweeds) {
+    const sx = sw.x - camX, sy = sw.baseY - camY;
+    if (sx < -30 || sx > W + 30 || sy < -200 || sy > H + 30) continue;
+    ctx.strokeStyle = `hsla(${sw.hue},50%,30%,0.45)`;
+    ctx.lineWidth = sw.width; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(sx, sy);
+    for (let seg = 1; seg <= sw.segments; seg++) {
+      const frac = seg / sw.segments;
+      const sway = Math.sin(time * 0.8 + sw.phase + frac * 3) * (4 + frac * 10);
+      ctx.lineTo(sx + sway, sy - seg * sw.segLen);
+    }
+    ctx.stroke();
+    // Leaf blades
+    ctx.fillStyle = `hsla(${sw.hue + 10},45%,35%,0.3)`;
+    for (let seg = 2; seg < sw.segments; seg += 2) {
+      const frac = seg / sw.segments;
+      const sway = Math.sin(time * 0.8 + sw.phase + frac * 3) * (4 + frac * 10);
+      const lx = sx + sway, ly = sy - seg * sw.segLen;
+      const side = seg % 4 < 2 ? -1 : 1;
+      ctx.beginPath(); ctx.moveTo(lx, ly);
+      ctx.quadraticCurveTo(lx + side * 8, ly - 4, lx + side * 12 + Math.sin(time + sw.phase + seg) * 2, ly);
+      ctx.quadraticCurveTo(lx + side * 8, ly + 2, lx, ly); ctx.fill();
+    }
+  }
+
+  // Coral
+  for (const c of corals) {
+    const sx = c.x - camX, sy = c.y - camY;
+    if (sx < -60 || sx > W + 60 || sy < -60 || sy > H + 60) continue;
+    ctx.save(); ctx.translate(sx, sy);
+    if (c.type <= 1) {
+      // Branching coral
+      function branch(x, y, angle, len, depth) {
+        if (depth <= 0 || len < 2) return;
+        const ex = x + Math.cos(angle) * len, ey = y + Math.sin(angle) * len;
+        ctx.strokeStyle = `hsla(${c.hue},${c.sat}%,${c.light + depth * 5}%,0.55)`;
+        ctx.lineWidth = depth * 1.1; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(ex, ey); ctx.stroke();
+        if (depth <= 2) {
+          ctx.fillStyle = `hsla(${c.hue + 20},70%,70%,0.35)`;
+          ctx.beginPath(); ctx.arc(ex, ey, depth, 0, Math.PI * 2); ctx.fill();
+        }
+        const spread = 0.4 + Math.sin(c.seed + depth) * 0.2;
+        branch(ex, ey, angle - spread, len * 0.68, depth - 1);
+        branch(ex, ey, angle + spread, len * 0.68, depth - 1);
+      }
+      branch(0, 0, -Math.PI / 2, c.size * 0.45, 5);
+    } else if (c.type === 2) {
+      // Brain coral
+      ctx.fillStyle = `hsla(${c.hue},${c.sat}%,${c.light}%,0.5)`;
+      ctx.beginPath(); ctx.ellipse(0, -c.size * 0.3, c.size * 0.4, c.size * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = `hsla(${c.hue},${c.sat - 10}%,${c.light - 10}%,0.25)`;
+      ctx.lineWidth = 1;
+      for (let r = 0; r < 4; r++) {
+        ctx.beginPath(); ctx.ellipse(0, -c.size * 0.3, c.size * (0.1 + r * 0.08), c.size * (0.07 + r * 0.06), r * 0.3, 0, Math.PI * 2); ctx.stroke();
+      }
+    } else if (c.type === 3) {
+      // Fan coral
+      ctx.fillStyle = `hsla(${c.hue},${c.sat}%,${c.light}%,0.35)`;
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(-c.size * 0.35, -c.size * 0.65, 0, -c.size * 0.9);
+      ctx.quadraticCurveTo(c.size * 0.35, -c.size * 0.65, 0, 0); ctx.fill();
+      ctx.strokeStyle = `hsla(${c.hue},${c.sat}%,${c.light + 10}%,0.25)`;
+      ctx.lineWidth = 0.7;
+      for (let v = 0; v < 5; v++) {
+        const va = -Math.PI / 2 + (v - 2) * 0.22;
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(va) * c.size * 0.6, Math.sin(va) * c.size * 0.6); ctx.stroke();
+      }
+    } else {
+      // Tube coral
+      for (let t = 0; t < 5; t++) {
+        const tx = Math.sin(c.seed + t * 2.1) * c.size * 0.25;
+        const th = c.size * (0.3 + Math.sin(c.seed + t * 1.7) * 0.15);
+        ctx.fillStyle = `hsla(${c.hue + t * 12},${c.sat}%,${c.light}%,0.45)`;
+        ctx.fillRect(tx - 2, -th, 4, th);
+        ctx.fillStyle = `hsla(${c.hue + t * 12},${c.sat}%,${c.light + 15}%,0.35)`;
+        ctx.beginPath(); ctx.ellipse(tx, -th, 2.5, 1.5, 0, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  // Ruins
+  for (const r of ruins) {
+    const sx = r.x - camX, sy = r.y - camY;
+    if (sx < -60 || sx > W + 60 || sy < -80 || sy > H + 60) continue;
+    ctx.save(); ctx.translate(sx, sy);
+    if (r.type === 0) {
+      // Broken pillar
+      ctx.fillStyle = 'rgba(130,120,100,0.4)';
+      ctx.fillRect(-r.size * 0.12, -r.size * 0.9, r.size * 0.24, r.size * 0.9);
+      ctx.fillRect(-r.size * 0.18, -r.size * 0.93, r.size * 0.36, 4);
+      ctx.fillStyle = 'rgba(40,70,30,0.25)';
+      ctx.beginPath(); ctx.ellipse(0, -r.size * 0.45, r.size * 0.15, r.size * r.mossCoverage * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+    } else if (r.type === 1) {
+      // Broken arch
+      ctx.strokeStyle = 'rgba(130,120,100,0.4)'; ctx.lineWidth = r.size * 0.1;
+      ctx.beginPath(); ctx.arc(0, 0, r.size * 0.4, Math.PI, Math.PI * 1.85); ctx.stroke();
+      ctx.fillStyle = 'rgba(120,110,90,0.4)';
+      ctx.fillRect(-r.size * 0.45, -r.size * 0.08, r.size * 0.1, r.size * 0.35);
+      ctx.fillRect(r.size * 0.3, -r.size * 0.25, r.size * 0.1, r.size * 0.5);
+    } else {
+      // Amphora
+      ctx.fillStyle = 'rgba(150,110,70,0.4)';
+      ctx.beginPath(); ctx.ellipse(0, -r.size * 0.25, r.size * 0.15, r.size * 0.25, 0.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(-r.size * 0.06, -r.size * 0.55, r.size * 0.12, r.size * 0.12);
+      ctx.strokeStyle = 'rgba(140,100,60,0.3)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(-r.size * 0.12, -r.size * 0.38, r.size * 0.06, -0.5, Math.PI + 0.5); ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// SUBMARINE
+// ============================================================
+function drawSubmarine() {
+  const sx = sub.x - camX;
+  const sy = sub.y - camY;
+  const f = sub.facing;
+  const depthM = sub.y / M;
+
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.scale(f, 1);
+
+  // Headlight beam — brighter with depth
+  const beamIntensity = 0.06 + depthDarkness(depthM) * 0.25;
+  const beamLen = 200 + depthDarkness(depthM) * 100;
+  const beamGrad = ctx.createRadialGradient(28, 0, 3, 28 + beamLen * 0.4, 0, beamLen);
+  beamGrad.addColorStop(0, `rgba(255,250,220,${beamIntensity})`);
+  beamGrad.addColorStop(0.3, `rgba(200,220,255,${beamIntensity * 0.4})`);
+  beamGrad.addColorStop(1, 'rgba(150,200,255,0)');
+  ctx.fillStyle = beamGrad;
+  ctx.beginPath();
+  ctx.moveTo(28, -4);
+  ctx.lineTo(28 + beamLen, -55);
+  ctx.lineTo(28 + beamLen, 55);
+  ctx.lineTo(28, 4);
+  ctx.closePath();
+  ctx.fill();
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath(); ctx.ellipse(2, 20, 22, 4, 0, 0, Math.PI * 2); ctx.fill();
+
+  // Hull
+  const hg = ctx.createLinearGradient(0, -14, 0, 14);
+  hg.addColorStop(0, '#6688aa'); hg.addColorStop(0.3, '#88aacc');
+  hg.addColorStop(0.5, '#aaccdd'); hg.addColorStop(0.7, '#88aacc'); hg.addColorStop(1, '#5577aa');
+  ctx.fillStyle = hg;
+  ctx.beginPath(); ctx.ellipse(0, 0, 24, 12, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#446688'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Rivets
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  for (let r = -16; r <= 12; r += 7) {
+    ctx.beginPath(); ctx.arc(r, -10, 1.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(r, 10, 1.2, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Porthole
+  ctx.fillStyle = '#1a3a5a';
+  ctx.beginPath(); ctx.arc(5, -2, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#8899aa'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = 'rgba(150,200,255,0.2)';
+  ctx.beginPath(); ctx.arc(4, -3.5, 2.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,240,200,0.15)';
+  ctx.beginPath(); ctx.arc(5, -2, 4, 0, Math.PI * 2); ctx.fill();
+
+  // Conning tower + periscope
+  ctx.fillStyle = '#7799bb'; ctx.fillRect(-6, -18, 10, 7);
+  ctx.fillStyle = '#88aacc'; ctx.fillRect(-5, -19, 8, 2);
+  ctx.fillStyle = '#667788'; ctx.fillRect(-1, -26, 2.5, 10);
+  ctx.fillStyle = '#aabbcc'; ctx.fillRect(-2, -27, 4.5, 2);
+
+  // Tail fins
+  ctx.fillStyle = '#6688aa';
+  ctx.beginPath(); ctx.moveTo(-22, -3); ctx.lineTo(-32, -14); ctx.lineTo(-28, -3); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-22, 3); ctx.lineTo(-32, 14); ctx.lineTo(-28, 3); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.beginPath(); ctx.moveTo(-22, -3); ctx.lineTo(-30, -11); ctx.lineTo(-28, -3); ctx.closePath(); ctx.fill();
+
+  // Propeller
+  sub.propPhase += 0.3;
+  ctx.strokeStyle = '#556677'; ctx.lineWidth = 2;
+  for (let b = 0; b < 3; b++) {
+    const a = sub.propPhase + b * Math.PI * 2 / 3;
+    ctx.beginPath(); ctx.moveTo(-26, 0); ctx.lineTo(-26 + Math.cos(a) * 2, Math.sin(a) * 7); ctx.stroke();
+  }
+  ctx.fillStyle = '#778899'; ctx.beginPath(); ctx.arc(-26, 0, 2, 0, Math.PI * 2); ctx.fill();
+
+  // Headlight lens
+  ctx.fillStyle = 'rgba(255,250,220,0.6)';
+  ctx.beginPath(); ctx.arc(23, 0, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.beginPath(); ctx.arc(22.5, -1, 1.5, 0, Math.PI * 2); ctx.fill();
+
+  ctx.restore();
+}
+
+// ============================================================
+// CREATURE DRAWING — each species uniquely drawn
+// ============================================================
+function drawCreature(c) {
+  const sx = c.x - camX, sy = c.y - camY;
+  if (sx < -120 || sx > W + 120 || sy < -120 || sy > H + 120) return;
+  const s = c.size;
+  const sp = c.species;
+  const t = time;
+  const swim = Math.sin(t * 1.5 + c.phase);
+  const dir = c.vx >= 0 ? 1 : -1;
+
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.scale(dir, 1);
+
+  switch (c.speciesId) {
+    case 'clownfish': {
+      // Anemone anchored to ground — tentacles fan UPWARD from base
+      const anemoneR = s * 3;
+      const baseY = anemoneR * 0.4; // base sits at bottom of creature pos
+
+      // Column/stalk — anchors anemone to the surface
+      ctx.fillStyle = 'hsla(340,30%,35%,0.4)';
+      ctx.beginPath();
+      ctx.moveTo(-anemoneR * 0.2, baseY);
+      ctx.quadraticCurveTo(-anemoneR * 0.25, baseY + anemoneR * 0.3, -anemoneR * 0.15, baseY + anemoneR * 0.5);
+      ctx.lineTo(anemoneR * 0.15, baseY + anemoneR * 0.5);
+      ctx.quadraticCurveTo(anemoneR * 0.25, baseY + anemoneR * 0.3, anemoneR * 0.2, baseY);
+      ctx.fill();
+
+      // Oral disc — flat base where tentacles emerge
+      ctx.fillStyle = 'hsla(340,40%,40%,0.35)';
+      ctx.beginPath(); ctx.ellipse(0, baseY, anemoneR * 0.4, anemoneR * 0.15, 0, 0, Math.PI * 2); ctx.fill();
+
+      // Tentacles — fan upward in a semicircle from the disc
+      for (let at = 0; at < 16; at++) {
+        // Spread from -150deg to -30deg (upward fan)
+        const angle = -Math.PI * 0.83 + (at / 15) * Math.PI * 0.67;
+        const tentLen = anemoneR * (0.55 + Math.sin(c.seed + at * 2.3) * 0.2);
+        // Root position on the disc edge
+        const rx = Math.cos(angle + Math.PI * 0.5) * anemoneR * 0.3;
+        const ry = baseY - 2;
+        const sway = Math.sin(t * 0.8 + at * 1.3 + c.seed) * 5;
+
+        ctx.strokeStyle = `hsla(${340 + at * 2},55%,58%,0.4)`;
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(rx, ry);
+        // Tentacles curve upward
+        const tipX = rx + Math.cos(angle) * tentLen + sway;
+        const tipY = ry + Math.sin(angle) * tentLen;
+        ctx.quadraticCurveTo(
+          rx + Math.cos(angle) * tentLen * 0.5 + sway * 0.5,
+          ry + Math.sin(angle) * tentLen * 0.5,
+          tipX, tipY
+        );
+        ctx.stroke();
+
+        // Bulbous tip
+        ctx.fillStyle = `hsla(${340 + at * 2},65%,68%,0.35)`;
+        ctx.beginPath(); ctx.arc(tipX, tipY, 2.5, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Clownfish nestled among upper tentacles
+      const fishOff = Math.sin(t * 2 + c.phase) * 5;
+      const fx = fishOff;
+      const fy = baseY - anemoneR * 0.35 + Math.sin(t * 1.5 + c.phase) * 3;
+      ctx.fillStyle = 'hsla(25,90%,50%,0.85)';
+      ctx.beginPath(); ctx.ellipse(fx, fy, s * 0.6, s * 0.35, 0, 0, Math.PI * 2); ctx.fill();
+      // White stripes with black edges
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.fillRect(fx - s * 0.08, fy - s * 0.35, s * 0.06, s * 0.7);
+      ctx.fillRect(fx + s * 0.18, fy - s * 0.28, s * 0.05, s * 0.56);
+      ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 0.5;
+      ctx.strokeRect(fx - s * 0.08, fy - s * 0.35, s * 0.06, s * 0.7);
+      // Tail
+      ctx.fillStyle = 'hsla(25,80%,55%,0.75)';
+      ctx.beginPath(); ctx.moveTo(fx - s*0.55, fy); ctx.lineTo(fx - s*0.75, fy - s*0.2); ctx.lineTo(fx - s*0.75, fy + s*0.2); ctx.closePath(); ctx.fill();
+      // Eye
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.beginPath(); ctx.arc(fx + s*0.3, fy - s*0.05, s*0.07, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.beginPath(); ctx.arc(fx + s*0.32, fy - s*0.05, s*0.035, 0, Math.PI*2); ctx.fill();
+      break;
+    }
+    case 'sea_turtle': {
+      const flipAngle = swim * 0.4;
+      // Shell
+      ctx.fillStyle = 'hsla(80,40%,30%,0.75)';
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.5, s*0.38, 0, 0, Math.PI*2); ctx.fill();
+      // Shell pattern — hexagons
+      ctx.strokeStyle = 'hsla(80,30%,40%,0.3)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.3, s*0.22, 0, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.15, s*0.1, 0, 0, Math.PI*2); ctx.stroke();
+      for (let a = 0; a < 6; a++) {
+        const angle = a * Math.PI / 3;
+        ctx.beginPath(); ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(angle) * s * 0.3, Math.sin(angle) * s * 0.22); ctx.stroke();
+      }
+      // Head
+      ctx.fillStyle = 'hsla(80,30%,38%,0.65)';
+      ctx.beginPath(); ctx.ellipse(s*0.5, 0, s*0.16, s*0.1, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.arc(s*0.55, -s*0.03, 2, 0, Math.PI*2); ctx.fill();
+      // Flippers
+      ctx.fillStyle = 'hsla(80,30%,33%,0.55)';
+      ctx.save(); ctx.translate(s*0.15, -s*0.28); ctx.rotate(-0.5 + flipAngle);
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.32, s*0.08, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
+      ctx.save(); ctx.translate(s*0.15, s*0.28); ctx.rotate(0.5 - flipAngle);
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.32, s*0.08, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
+      // Rear flippers
+      ctx.save(); ctx.translate(-s*0.35, -s*0.2); ctx.rotate(-0.3 - flipAngle * 0.5);
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.15, s*0.05, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
+      ctx.save(); ctx.translate(-s*0.35, s*0.2); ctx.rotate(0.3 + flipAngle * 0.5);
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.15, s*0.05, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
+      break;
+    }
+    case 'dolphin': {
+      // Sleek grey body
+      ctx.fillStyle = 'hsla(210,15%,45%,0.75)';
+      ctx.beginPath();
+      ctx.moveTo(s*0.7, 0);
+      ctx.quadraticCurveTo(s*0.3, -s*0.25, -s*0.3, -s*0.1);
+      ctx.lineTo(-s*0.6, 0);
+      ctx.lineTo(-s*0.3, s*0.1);
+      ctx.quadraticCurveTo(s*0.3, s*0.3, s*0.7, 0);
+      ctx.fill();
+      // Belly
+      ctx.fillStyle = 'hsla(210,10%,70%,0.3)';
+      ctx.beginPath(); ctx.ellipse(0, s*0.05, s*0.35, s*0.1, 0, 0, Math.PI*2); ctx.fill();
+      // Beak
+      ctx.fillStyle = 'hsla(210,15%,42%,0.7)';
+      ctx.beginPath(); ctx.moveTo(s*0.7, 0); ctx.lineTo(s*0.9, -s*0.02); ctx.lineTo(s*0.9, s*0.02); ctx.closePath(); ctx.fill();
+      // Dorsal fin
+      ctx.fillStyle = 'hsla(210,15%,40%,0.6)';
+      ctx.beginPath(); ctx.moveTo(0, -s*0.1); ctx.quadraticCurveTo(s*0.05, -s*0.4, -s*0.15, -s*0.12); ctx.fill();
+      // Tail fluke
+      ctx.beginPath(); ctx.moveTo(-s*0.55, 0);
+      ctx.lineTo(-s*0.75, -s*0.2 + swim*5); ctx.lineTo(-s*0.6, 0);
+      ctx.lineTo(-s*0.75, s*0.2 + swim*5); ctx.closePath(); ctx.fill();
+      // Eye
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.arc(s*0.45, -s*0.06, 2.5, 0, Math.PI*2); ctx.fill();
+      // Smile line
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(s*0.6, s*0.02, s*0.15, -0.5, 0.5); ctx.stroke();
+      break;
+    }
+    case 'manta': {
+      const wingFlap = swim * 14;
+      ctx.fillStyle = 'hsla(220,30%,22%,0.75)';
+      ctx.beginPath();
+      ctx.moveTo(s*0.6, 0);
+      ctx.quadraticCurveTo(s*0.2, -s*0.5 + wingFlap, -s*0.4, -s*0.15 + wingFlap*0.6);
+      ctx.quadraticCurveTo(-s*0.2, 0, -s*0.4, s*0.15 - wingFlap*0.6);
+      ctx.quadraticCurveTo(s*0.2, s*0.5 - wingFlap, s*0.6, 0);
+      ctx.fill();
+      // Belly
+      ctx.fillStyle = 'hsla(220,15%,65%,0.25)';
+      ctx.beginPath(); ctx.ellipse(s*0.1, 2, s*0.25, s*0.1, 0, 0, Math.PI*2); ctx.fill();
+      // Cephalic fins
+      ctx.fillStyle = 'hsla(220,30%,25%,0.6)';
+      ctx.beginPath(); ctx.moveTo(s*0.5, -s*0.05); ctx.lineTo(s*0.7, -s*0.12); ctx.lineTo(s*0.6, 0); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(s*0.5, s*0.05); ctx.lineTo(s*0.7, s*0.12); ctx.lineTo(s*0.6, 0); ctx.fill();
+      // Eyes
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath(); ctx.arc(s*0.35, -s*0.08, 2, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(s*0.35, s*0.08, 2, 0, Math.PI*2); ctx.fill();
+      // Tail
+      ctx.strokeStyle = 'hsla(220,30%,22%,0.5)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(-s*0.4, 0); ctx.quadraticCurveTo(-s*0.7, swim*6, -s*0.9, swim*10); ctx.stroke();
+      break;
+    }
+    case 'seahorse': {
+      // Curled body
+      ctx.strokeStyle = 'hsla(40,60%,50%,0.7)'; ctx.lineWidth = s * 0.15; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, -s*0.4);
+      ctx.quadraticCurveTo(s*0.2, -s*0.1, s*0.1, s*0.15);
+      ctx.quadraticCurveTo(-s*0.05, s*0.4, -s*0.15, s*0.55);
+      ctx.quadraticCurveTo(-s*0.25, s*0.65, -s*0.2, s*0.5);
+      ctx.stroke();
+      // Head
+      ctx.fillStyle = 'hsla(40,55%,48%,0.7)';
+      ctx.beginPath(); ctx.ellipse(s*0.05, -s*0.45, s*0.12, s*0.08, -0.5, 0, Math.PI*2); ctx.fill();
+      // Snout
+      ctx.strokeStyle = 'hsla(40,50%,45%,0.6)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(s*0.12, -s*0.48); ctx.lineTo(s*0.25, -s*0.52); ctx.stroke();
+      // Eye
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.arc(s*0.05, -s*0.47, 1.5, 0, Math.PI*2); ctx.fill();
+      // Crown
+      ctx.fillStyle = 'hsla(40,60%,55%,0.5)';
+      ctx.beginPath(); ctx.moveTo(-s*0.02, -s*0.5); ctx.lineTo(0, -s*0.6); ctx.lineTo(s*0.05, -s*0.5); ctx.fill();
+      // Dorsal fin
+      ctx.fillStyle = 'hsla(40,40%,55%,0.3)';
+      ctx.beginPath(); ctx.ellipse(s*0.15, -s*0.15, s*0.08, s*0.15, 0.3, 0, Math.PI*2); ctx.fill();
+      break;
+    }
+    case 'siphonophore': {
+      // Long chain creature with glowing segments
+      const chainLen = s * 3;
+      for (let seg = 0; seg < 20; seg++) {
+        const frac = seg / 20;
+        const segX = -frac * chainLen * 0.3 + Math.sin(t * 1.2 + seg * 0.8) * 8;
+        const segY = frac * chainLen * 0.7;
+        const segSize = s * 0.1 * (1 - frac * 0.5);
+        const hue = 200 + seg * 8;
+        // Glow
+        ctx.fillStyle = `hsla(${hue},80%,60%,${0.06 * (1 - frac)})`;
+        ctx.beginPath(); ctx.arc(segX, segY, segSize * 4, 0, Math.PI*2); ctx.fill();
+        // Body segment
+        ctx.fillStyle = `hsla(${hue},70%,55%,${0.4 * (1 - frac * 0.5)})`;
+        ctx.beginPath(); ctx.arc(segX, segY, segSize, 0, Math.PI*2); ctx.fill();
+        // Tentacle from each segment
+        if (seg % 3 === 0) {
+          ctx.strokeStyle = `hsla(${hue},60%,50%,${0.15 * (1 - frac)})`;
+          ctx.lineWidth = 0.5;
+          ctx.beginPath(); ctx.moveTo(segX, segY);
+          ctx.lineTo(segX + Math.sin(t + seg) * 12, segY + 15 + frac * 10); ctx.stroke();
+        }
+      }
+      // Bell at top
+      ctx.fillStyle = 'hsla(200,60%,60%,0.2)';
+      ctx.beginPath(); ctx.ellipse(0, -s*0.2, s*0.2, s*0.3, 0, Math.PI, 0); ctx.fill();
+      break;
+    }
+    case 'barreleye': {
+      // Transparent dome head
+      ctx.fillStyle = 'rgba(40,40,50,0.5)';
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.4, s*0.25, 0, 0, Math.PI*2); ctx.fill();
+      // Transparent dome
+      ctx.strokeStyle = 'rgba(150,200,230,0.2)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(s*0.1, -s*0.05, s*0.25, s*0.2, 0, Math.PI, 0); ctx.stroke();
+      ctx.fillStyle = 'rgba(150,200,230,0.05)';
+      ctx.beginPath(); ctx.ellipse(s*0.1, -s*0.05, s*0.25, s*0.2, 0, Math.PI, 0); ctx.fill();
+      // Tubular eyes inside dome
+      ctx.fillStyle = 'rgba(0,200,100,0.5)';
+      ctx.beginPath(); ctx.arc(s*0.05, -s*0.12, 3, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(s*0.18, -s*0.12, 3, 0, Math.PI*2); ctx.fill();
+      // Mouth
+      ctx.fillStyle = 'rgba(60,60,70,0.5)';
+      ctx.beginPath(); ctx.ellipse(s*0.3, s*0.05, s*0.06, s*0.03, 0, 0, Math.PI*2); ctx.fill();
+      // Tail
+      ctx.fillStyle = 'rgba(40,40,50,0.4)';
+      ctx.beginPath(); ctx.moveTo(-s*0.35, 0); ctx.lineTo(-s*0.55, -s*0.12); ctx.lineTo(-s*0.55, s*0.12); ctx.closePath(); ctx.fill();
+      break;
+    }
+    case 'lanternfish': {
+      // Small school with photophores
+      for (let f = 0; f < 8; f++) {
+        const fx = Math.sin(c.seed + f * 2.1 + t * 0.5) * s;
+        const fy = Math.cos(c.seed + f * 1.7 + t * 0.3) * s * 0.5;
+        const fs = 3 + Math.sin(f * 3.1) * 1;
+        // Body
+        ctx.fillStyle = 'rgba(60,70,90,0.5)';
+        ctx.beginPath(); ctx.ellipse(fx, fy, fs * 1.5, fs * 0.6, 0, 0, Math.PI*2); ctx.fill();
+        // Photophore
+        ctx.fillStyle = 'rgba(100,200,255,0.4)';
+        ctx.beginPath(); ctx.arc(fx + fs * 0.3, fy + fs * 0.2, 1, 0, Math.PI*2); ctx.fill();
+        // Glow
+        ctx.fillStyle = 'rgba(100,200,255,0.05)';
+        ctx.beginPath(); ctx.arc(fx + fs * 0.3, fy + fs * 0.2, 5, 0, Math.PI*2); ctx.fill();
+      }
+      break;
+    }
+    case 'giant_squid': {
+      // Massive, seen at edge of light — tentacles trailing
+      // Body
+      ctx.fillStyle = 'rgba(120,40,50,0.35)';
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.4, s*0.6, 0, 0, Math.PI*2); ctx.fill();
+      // Mantle
+      ctx.fillStyle = 'rgba(100,30,40,0.3)';
+      ctx.beginPath(); ctx.ellipse(0, -s*0.5, s*0.3, s*0.5, 0, 0, Math.PI*2); ctx.fill();
+      // Giant eye
+      ctx.fillStyle = 'rgba(200,200,150,0.4)';
+      ctx.beginPath(); ctx.arc(s*0.2, -s*0.1, s*0.12, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.beginPath(); ctx.arc(s*0.22, -s*0.1, s*0.06, 0, Math.PI*2); ctx.fill();
+      // Tentacles
+      ctx.strokeStyle = 'rgba(120,40,50,0.2)'; ctx.lineWidth = 2;
+      for (let ten = 0; ten < 8; ten++) {
+        const tx = (ten - 3.5) * s * 0.08;
+        ctx.beginPath(); ctx.moveTo(tx, s*0.5);
+        for (let seg = 1; seg <= 6; seg++) {
+          const frac = seg / 6;
+          ctx.lineTo(tx + Math.sin(t * 0.8 + ten + frac * 3) * (10 + frac * 20), s*0.5 + frac * s * 1.5);
+        }
+        ctx.stroke();
+      }
+      // Two long feeding tentacles
+      ctx.strokeStyle = 'rgba(150,50,60,0.15)'; ctx.lineWidth = 1.5;
+      for (let ft = 0; ft < 2; ft++) {
+        const ftx = (ft - 0.5) * s * 0.15;
+        ctx.beginPath(); ctx.moveTo(ftx, s*0.5);
+        for (let seg = 1; seg <= 10; seg++) {
+          const frac = seg / 10;
+          ctx.lineTo(ftx + Math.sin(t * 0.5 + ft * 3 + frac * 4) * (15 + frac * 30), s*0.5 + frac * s * 2.5);
+        }
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'anglerfish': {
+      // Dark bulbous body
+      ctx.fillStyle = 'hsla(220,20%,12%,0.8)';
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.5, s*0.4, 0, 0, Math.PI*2); ctx.fill();
+      // Mouth
+      ctx.fillStyle = 'hsla(0,10%,8%,0.9)';
+      ctx.beginPath(); ctx.ellipse(s*0.3, s*0.05, s*0.25, s*0.2, 0, 0, Math.PI*2); ctx.fill();
+      // Teeth
+      ctx.fillStyle = 'rgba(200,200,180,0.5)';
+      for (let tooth = 0; tooth < 6; tooth++) {
+        const angle = -0.8 + tooth * 0.32;
+        const tx = s*0.3 + Math.cos(angle)*s*0.22;
+        const ty = s*0.05 + Math.sin(angle)*s*0.18;
+        ctx.beginPath(); ctx.moveTo(tx, ty);
+        ctx.lineTo(tx + Math.cos(angle)*4, ty + Math.sin(angle)*4);
+        ctx.lineTo(tx + Math.cos(angle+0.3)*2, ty + Math.sin(angle+0.3)*2); ctx.fill();
+      }
+      // Eye
+      ctx.fillStyle = 'rgba(200,180,100,0.6)'; ctx.beginPath(); ctx.arc(s*0.15, -s*0.15, 3, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.beginPath(); ctx.arc(s*0.16, -s*0.15, 1.5, 0, Math.PI*2); ctx.fill();
+      // Lure
+      const lureX = s*0.4, lureY = -s*0.6 + Math.sin(t*2 + c.phase)*5;
+      ctx.strokeStyle = 'rgba(100,120,140,0.3)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(s*0.1, -s*0.3); ctx.quadraticCurveTo(s*0.2, -s*0.5, lureX, lureY); ctx.stroke();
+      // Lure glow
+      const lg = ctx.createRadialGradient(lureX, lureY, 0, lureX, lureY, s*0.6);
+      lg.addColorStop(0, 'rgba(100,220,255,0.2)'); lg.addColorStop(0.4, 'rgba(80,180,255,0.05)'); lg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = lg; ctx.fillRect(lureX-s, lureY-s, s*2, s*2);
+      ctx.fillStyle = 'rgba(120,220,255,0.6)'; ctx.beginPath(); ctx.arc(lureX, lureY, 4, 0, Math.PI*2); ctx.fill();
+      // Fins
+      ctx.fillStyle = 'hsla(220,20%,15%,0.5)';
+      ctx.beginPath(); ctx.moveTo(-s*0.3, -s*0.15);
+      ctx.quadraticCurveTo(-s*0.5, -s*0.35 + swim*4, -s*0.45, -s*0.1); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-s*0.45, 0); ctx.lineTo(-s*0.65, -s*0.12+swim*3); ctx.lineTo(-s*0.65, s*0.12+swim*3); ctx.closePath(); ctx.fill();
+      break;
+    }
+    case 'vampire_squid': {
+      // Webbed arms with bioluminescent tips
+      ctx.fillStyle = 'hsla(0,40%,20%,0.6)';
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.35, s*0.4, 0, 0, Math.PI*2); ctx.fill();
+      // Webbed arms
+      for (let arm = 0; arm < 8; arm++) {
+        const angle = (arm / 8) * Math.PI * 2 + Math.PI * 0.5;
+        const armLen = s * (0.6 + Math.sin(t + arm) * 0.1);
+        const ex = Math.cos(angle) * armLen + Math.sin(t * 0.8 + arm) * 5;
+        const ey = Math.sin(angle) * armLen;
+        ctx.strokeStyle = 'hsla(0,35%,25%,0.4)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(Math.cos(angle)*s*0.3, Math.sin(angle)*s*0.35);
+        ctx.lineTo(ex, ey); ctx.stroke();
+        // Bioluminescent tip
+        ctx.fillStyle = 'rgba(100,180,255,0.3)'; ctx.beginPath(); ctx.arc(ex, ey, 2, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = 'rgba(100,180,255,0.06)'; ctx.beginPath(); ctx.arc(ex, ey, 8, 0, Math.PI*2); ctx.fill();
+      }
+      // Web between arms (translucent)
+      ctx.fillStyle = 'hsla(0,30%,22%,0.15)';
+      ctx.beginPath();
+      for (let arm = 0; arm < 8; arm++) {
+        const angle = (arm / 8) * Math.PI * 2 + Math.PI * 0.5;
+        const armLen = s * 0.55;
+        const ex = Math.cos(angle) * armLen;
+        const ey = Math.sin(angle) * armLen;
+        if (arm === 0) ctx.moveTo(ex, ey); else ctx.lineTo(ex, ey);
+      }
+      ctx.closePath(); ctx.fill();
+      // Eyes
+      ctx.fillStyle = 'rgba(150,200,255,0.5)'; ctx.beginPath(); ctx.arc(s*0.15, -s*0.1, 3, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(-s*0.15, -s*0.1, 3, 0, Math.PI*2); ctx.fill();
+      break;
+    }
+    case 'giant_isopod': {
+      // Armored pill bug
+      ctx.fillStyle = 'rgba(160,150,130,0.6)';
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.5, s*0.3, 0, 0, Math.PI*2); ctx.fill();
+      // Armor segments
+      ctx.strokeStyle = 'rgba(130,120,100,0.4)'; ctx.lineWidth = 1;
+      for (let seg = -3; seg <= 3; seg++) {
+        ctx.beginPath(); ctx.moveTo(seg * s * 0.12, -s*0.28); ctx.lineTo(seg * s * 0.12, s*0.28); ctx.stroke();
+      }
+      // Head
+      ctx.fillStyle = 'rgba(150,140,120,0.6)';
+      ctx.beginPath(); ctx.ellipse(s*0.4, 0, s*0.15, s*0.2, 0, 0, Math.PI*2); ctx.fill();
+      // Compound eyes
+      ctx.fillStyle = 'rgba(180,180,160,0.5)'; ctx.beginPath(); ctx.arc(s*0.48, -s*0.06, 3, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(s*0.48, s*0.06, 3, 0, Math.PI*2); ctx.fill();
+      // Antennae
+      ctx.strokeStyle = 'rgba(140,130,110,0.4)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(s*0.5, -s*0.08); ctx.lineTo(s*0.75, -s*0.2 + swim*3); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(s*0.5, s*0.08); ctx.lineTo(s*0.75, s*0.2 + swim*3); ctx.stroke();
+      // Legs
+      for (let leg = 0; leg < 7; leg++) {
+        const lx = -s*0.3 + leg * s*0.1;
+        ctx.strokeStyle = 'rgba(140,130,110,0.3)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(lx, s*0.25); ctx.lineTo(lx + swim*2, s*0.4); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(lx, -s*0.25); ctx.lineTo(lx - swim*2, -s*0.4); ctx.stroke();
+      }
+      break;
+    }
+    case 'dragonfish': {
+      // Long dark body with chin barbel
+      ctx.fillStyle = 'rgba(20,20,30,0.7)';
+      ctx.beginPath();
+      ctx.moveTo(s*0.6, 0);
+      ctx.quadraticCurveTo(s*0.3, -s*0.12, -s*0.4, -s*0.05);
+      ctx.lineTo(-s*0.6, 0);
+      ctx.lineTo(-s*0.4, s*0.05);
+      ctx.quadraticCurveTo(s*0.3, s*0.12, s*0.6, 0);
+      ctx.fill();
+      // Jaw with teeth
+      ctx.fillStyle = 'rgba(10,10,15,0.8)';
+      ctx.beginPath(); ctx.ellipse(s*0.5, s*0.04, s*0.15, s*0.08, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(200,200,180,0.4)';
+      for (let tooth = 0; tooth < 5; tooth++) {
+        ctx.beginPath(); ctx.moveTo(s*0.38 + tooth*s*0.05, s*0.02);
+        ctx.lineTo(s*0.38 + tooth*s*0.05 + 1, s*0.08); ctx.lineTo(s*0.38 + tooth*s*0.05 + 2, s*0.02); ctx.fill();
+      }
+      // Chin barbel with light
+      const barbelY = s*0.15 + Math.sin(t*1.5 + c.phase)*5;
+      ctx.strokeStyle = 'rgba(60,60,80,0.3)'; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(s*0.3, s*0.08); ctx.quadraticCurveTo(s*0.2, barbelY, s*0.1, barbelY + 5); ctx.stroke();
+      ctx.fillStyle = 'rgba(200,100,100,0.5)'; ctx.beginPath(); ctx.arc(s*0.1, barbelY + 5, 2, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(200,100,100,0.08)'; ctx.beginPath(); ctx.arc(s*0.1, barbelY + 5, 10, 0, Math.PI*2); ctx.fill();
+      // Photophores along body
+      for (let ph = 0; ph < 6; ph++) {
+        const phx = -s*0.2 + ph * s*0.12;
+        ctx.fillStyle = `rgba(100,200,255,${0.2 + Math.sin(t*2 + ph)*0.1})`;
+        ctx.beginPath(); ctx.arc(phx, s*0.03, 1, 0, Math.PI*2); ctx.fill();
+      }
+      // Eye
+      ctx.fillStyle = 'rgba(150,150,100,0.4)'; ctx.beginPath(); ctx.arc(s*0.4, -s*0.04, 2, 0, Math.PI*2); ctx.fill();
+      break;
+    }
+    case 'dumbo_octopus': {
+      // Translucent body with ear-like fins
+      ctx.fillStyle = 'hsla(20,40%,60%,0.3)';
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.35, s*0.4, 0, 0, Math.PI*2); ctx.fill();
+      // Inner glow
+      ctx.fillStyle = 'hsla(20,50%,70%,0.1)';
+      ctx.beginPath(); ctx.ellipse(0, -s*0.05, s*0.2, s*0.25, 0, 0, Math.PI*2); ctx.fill();
+      // Ear fins
+      const flapAngle = swim * 0.5;
+      ctx.fillStyle = 'hsla(20,35%,55%,0.25)';
+      ctx.save(); ctx.translate(-s*0.25, -s*0.1); ctx.rotate(-0.8 + flapAngle);
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.3, s*0.12, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
+      ctx.save(); ctx.translate(s*0.25, -s*0.1); ctx.rotate(0.8 - flapAngle);
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.3, s*0.12, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
+      // Arms
+      for (let arm = 0; arm < 8; arm++) {
+        const angle = (arm / 8) * Math.PI + Math.PI * 0.25;
+        ctx.strokeStyle = 'hsla(20,35%,55%,0.2)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(Math.cos(angle)*s*0.25, s*0.3 + Math.sin(angle)*s*0.1);
+        ctx.quadraticCurveTo(
+          Math.cos(angle)*s*0.4 + Math.sin(t+arm)*5,
+          s*0.5 + Math.sin(angle)*s*0.2,
+          Math.cos(angle)*s*0.35 + Math.sin(t*0.8+arm)*8,
+          s*0.7
+        ); ctx.stroke();
+      }
+      // Eyes
+      ctx.fillStyle = 'rgba(60,60,80,0.5)'; ctx.beginPath(); ctx.arc(-s*0.08, -s*0.05, 3, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(s*0.08, -s*0.05, 3, 0, Math.PI*2); ctx.fill();
+      break;
+    }
+    case 'tube_worms': {
+      // Cluster of tubes with red plumes
+      for (let tw = 0; tw < 8; tw++) {
+        const twx = (tw - 3.5) * s * 0.12;
+        const twh = s * (0.5 + Math.sin(c.seed + tw * 2.3) * 0.2);
+        // Tube
+        ctx.fillStyle = 'rgba(180,170,160,0.5)';
+        ctx.fillRect(twx - 2, -twh, 4, twh);
+        // Red plume
+        ctx.fillStyle = `rgba(200,30,30,${0.4 + Math.sin(t + tw) * 0.1})`;
+        ctx.beginPath();
+        for (let p = 0; p < 6; p++) {
+          const pa = (p / 6) * Math.PI * 2;
+          const pr = s * 0.08 + Math.sin(t * 1.5 + tw + p) * 2;
+          const px = twx + Math.cos(pa) * pr;
+          const py = -twh - 3 + Math.sin(pa) * pr * 0.5;
+          if (p === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath(); ctx.fill();
+      }
+      // Vent shimmer beneath
+      ctx.fillStyle = 'rgba(255,200,100,0.04)';
+      ctx.beginPath(); ctx.ellipse(0, s*0.1, s*0.3, s*0.5, 0, 0, Math.PI*2); ctx.fill();
+      break;
+    }
+    case 'yeti_crab': {
+      // Body
+      ctx.fillStyle = 'rgba(200,190,170,0.5)';
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.3, s*0.25, 0, 0, Math.PI*2); ctx.fill();
+      // Hairy claws
+      ctx.strokeStyle = 'rgba(220,210,190,0.4)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(s*0.25, -s*0.1); ctx.lineTo(s*0.5, -s*0.25 + swim*3); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(s*0.25, s*0.1); ctx.lineTo(s*0.5, s*0.25 + swim*3); ctx.stroke();
+      // Hair on claws
+      ctx.strokeStyle = 'rgba(230,220,200,0.25)'; ctx.lineWidth = 0.5;
+      for (let h = 0; h < 8; h++) {
+        const hx = s*0.3 + h * s*0.025;
+        ctx.beginPath(); ctx.moveTo(hx, -s*0.15); ctx.lineTo(hx + Math.sin(t+h)*2, -s*0.22); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(hx, s*0.15); ctx.lineTo(hx + Math.sin(t+h)*2, s*0.22); ctx.stroke();
+      }
+      // Legs
+      for (let leg = 0; leg < 4; leg++) {
+        const lx = -s*0.1 + leg * s*0.1;
+        ctx.strokeStyle = 'rgba(190,180,160,0.3)'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(lx, s*0.2); ctx.lineTo(lx, s*0.38); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(lx, -s*0.2); ctx.lineTo(lx, -s*0.38); ctx.stroke();
+      }
+      // Eyes
+      ctx.fillStyle = 'rgba(180,180,180,0.4)'; ctx.beginPath(); ctx.arc(s*0.2, -s*0.06, 2, 0, Math.PI*2); ctx.fill();
+      break;
+    }
+    case 'snailfish': {
+      // Translucent, simple
+      ctx.fillStyle = 'rgba(200,180,200,0.2)';
+      ctx.beginPath(); ctx.ellipse(0, 0, s*0.5, s*0.2, 0, 0, Math.PI*2); ctx.fill();
+      // Visible skeleton/organs
+      ctx.fillStyle = 'rgba(180,160,180,0.15)';
+      ctx.beginPath(); ctx.ellipse(s*0.05, 0, s*0.2, s*0.1, 0, 0, Math.PI*2); ctx.fill();
+      // Tail
+      ctx.fillStyle = 'rgba(200,180,200,0.15)';
+      ctx.beginPath(); ctx.moveTo(-s*0.45, 0); ctx.lineTo(-s*0.7, -s*0.1+swim*3); ctx.lineTo(-s*0.7, s*0.1+swim*3); ctx.closePath(); ctx.fill();
+      // Eye
+      ctx.fillStyle = 'rgba(50,50,60,0.3)'; ctx.beginPath(); ctx.arc(s*0.3, -s*0.03, 2, 0, Math.PI*2); ctx.fill();
+      break;
+    }
+    case 'amphipod': {
+      // Swarm of small crustaceans
+      for (let a = 0; a < 6; a++) {
+        const ax = Math.sin(c.seed + a * 3.1 + t*0.3) * s;
+        const ay = Math.cos(c.seed + a * 2.3 + t*0.2) * s * 0.4;
+        ctx.fillStyle = 'rgba(200,180,170,0.3)';
+        ctx.beginPath(); ctx.ellipse(ax, ay, 4, 2, Math.sin(t+a)*0.3, 0, Math.PI*2); ctx.fill();
+        // Legs
+        ctx.strokeStyle = 'rgba(180,160,150,0.2)'; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(ax, ay+2); ctx.lineTo(ax+Math.sin(t*3+a)*2, ay+5); ctx.stroke();
+      }
+      break;
+    }
+  }
+
+  ctx.restore();
+}
+
+// ============================================================
+// CAMERA / PHOTOGRAPHY
+// ============================================================
+// Get the viewfinder position — in front of sub, within headlight beam
+function getViewfinderRect() {
+  const f = sub.facing;
+  const subScreenX = sub.x - camX;
+  const subScreenY = sub.y - camY;
+  const vw = W * 0.25, vh = H * 0.3;
+  // Offset in the direction the sub faces, within the headlight cone
+  const offsetX = f * 120;
+  const vx = subScreenX + offsetX - vw / 2;
+  const vy = subScreenY - vh / 2;
+  return { vx, vy, vw, vh };
+}
+
+function getFramedCreature() {
+  const vf = getViewfinderRect();
+  // Convert viewfinder to world coordinates
+  const worldCx = vf.vx + vf.vw / 2 + camX;
+  const worldCy = vf.vy + vf.vh / 2 + camY;
+  // Find the creature closest to viewfinder center among valid candidates
+  let best = null, bestDist = Infinity;
+  for (const c of creatures) {
+    const dx = c.x - sub.x;
+    const dy = c.y - sub.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    // Must be in front (same direction as facing)
+    if (dx * sub.facing < 0) continue;
+    // Must be within headlight range
+    if (dist > 220) continue;
+    // Must be within viewfinder rectangle
+    if (Math.abs(c.x - worldCx) < vf.vw * 0.4 && Math.abs(c.y - worldCy) < vf.vh * 0.4) {
+      const toCenterDist = (c.x - worldCx) * (c.x - worldCx) + (c.y - worldCy) * (c.y - worldCy);
+      if (toCenterDist < bestDist) {
+        best = c;
+        bestDist = toCenterDist;
+      }
+    }
+  }
+  return best;
+}
+
+function drawViewfinder() {
+  if (!cameraMode) return;
+  const vf = getViewfinderRect();
+  const { vx, vy, vw, vh } = vf;
+
+  // Darken outside viewfinder
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(0, 0, W, vy);
+  ctx.fillRect(0, vy + vh, W, H - vy - vh);
+  ctx.fillRect(0, vy, vx, vh);
+  ctx.fillRect(vx + vw, vy, W - vx - vw, vh);
+
+  // Viewfinder frame
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(vx, vy, vw, vh);
+  // Corner brackets
+  const cb = 15;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.beginPath(); ctx.moveTo(vx, vy + cb); ctx.lineTo(vx, vy); ctx.lineTo(vx + cb, vy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(vx + vw - cb, vy); ctx.lineTo(vx + vw, vy); ctx.lineTo(vx + vw, vy + cb); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(vx, vy + vh - cb); ctx.lineTo(vx, vy + vh); ctx.lineTo(vx + cb, vy + vh); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(vx + vw - cb, vy + vh); ctx.lineTo(vx + vw, vy + vh); ctx.lineTo(vx + vw, vy + vh - cb); ctx.stroke();
+
+  // Crosshair
+  const vcx = vx + vw / 2, vcy = vy + vh / 2;
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(vcx, vy); ctx.lineTo(vcx, vy + vh); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(vx, vcy); ctx.lineTo(vx + vw, vcy); ctx.stroke();
+
+  const framedCreature = getFramedCreature();
+  if (framedCreature) {
+    ctx.fillStyle = 'rgba(100,255,100,0.12)';
+    ctx.fillRect(vx, vy, vw, vh);
+    ctx.font = Math.min(14, W * 0.02) + 'px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(100,255,100,0.7)';
+    ctx.fillText(framedCreature.species.name, vcx, vy + vh + 20);
+  } else {
+    ctx.font = Math.min(11, W * 0.016) + 'px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,200,100,0.4)';
+    ctx.fillText('Aim at a creature in the headlight', vcx, vy + vh + 18);
+  }
+}
+
+function takePhoto() {
+  if (!cameraMode) return;
+  const framed = getFramedCreature();
+  if (framed) {
+    const j = journal[framed.speciesId];
+    if (!j.discovered) {
+      j.discovered = true;
+      SFX.discover();
+    }
+    j.photoCount++;
+    const photoCreature = createCreature(framed.species, 0, 0);
+    photoCreature.vx = 1;
+    lastPhoto = { species: framed.species, timer: 3, creature: photoCreature };
+  }
+  SFX.shutter();
+  cameraMode = false;
+}
+
+function drawPhotoNotification() {
+  if (!lastPhoto || lastPhoto.timer <= 0) return;
+  const a = Math.min(1, lastPhoto.timer);
+  // Slide in from right
+  const slideIn = Math.min(1, (3 - lastPhoto.timer) * 4);
+  const slideX = (1 - slideIn) * 250;
+  ctx.globalAlpha = a;
+
+  // Larger polaroid
+  const pw = 220, ph = 240;
+  const px = W - pw - 20 + slideX, py = 40;
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(px + 4, py + 4, pw, ph);
+
+  // Polaroid white frame
+  ctx.fillStyle = '#f5f0e8';
+  ctx.fillRect(px, py, pw, ph);
+
+  // Photo area — dark ocean background
+  const imgX = px + 12, imgY = py + 12, imgW = pw - 24, imgH = ph - 70;
+  // Gradient background matching creature's depth zone
+  const sp = lastPhoto.species;
+  const depthMid = (sp.depth[0] + sp.depth[1]) / 2;
+  const bg1 = waterColor(depthMid - 50);
+  const bg2 = waterColor(depthMid + 50);
+  const bgGrad = ctx.createLinearGradient(imgX, imgY, imgX, imgY + imgH);
+  bgGrad.addColorStop(0, bg1);
+  bgGrad.addColorStop(1, bg2);
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(imgX, imgY, imgW, imgH);
+
+  // Draw the creature large and centered in the photo (reuse stored creature)
+  const previewCreature = lastPhoto.creature;
+  previewCreature.size = Math.min(imgW * 0.3, imgH * 0.35);
+  previewCreature.x = imgX + imgW / 2;
+  previewCreature.y = imgY + imgH / 2;
+
+  const savedCamX = camX, savedCamY = camY;
+  camX = 0; camY = 0;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(imgX, imgY, imgW, imgH);
+  ctx.clip();
+  drawCreature(previewCreature);
+  ctx.restore();
+  camX = savedCamX; camY = savedCamY;
+
+  // Photo border
+  ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(imgX, imgY, imgW, imgH);
+
+  // Species name — handwritten style
+  ctx.font = 'bold 14px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillText(sp.name, px + pw / 2, py + ph - 35);
+
+  // Depth range
+  ctx.font = '11px Segoe UI';
+  ctx.fillStyle = '#666';
+  ctx.fillText(sp.depth[0] + '-' + sp.depth[1] + 'm  •  ' + ZONES[sp.zone].name, px + pw / 2, py + ph - 18);
+
+  // New discovery badge
+  if (journal[sp.id].photoCount <= 1) {
+    ctx.fillStyle = 'rgba(40,160,80,0.9)';
+    ctx.beginPath();
+    ctx.roundRect(px + pw / 2 - 45, py + ph - 60, 90, 18, 4);
+    ctx.fill();
+    ctx.font = 'bold 10px Segoe UI';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('NEW DISCOVERY!', px + pw / 2, py + ph - 48);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ============================================================
+// JOURNAL
+// ============================================================
+function drawJournal() {
+  if (!journalOpen) return;
+  if (journalDetail) { drawJournalDetail(); return; }
+  journalCards = [];
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.font = 'bold ' + Math.min(28, W * 0.04) + 'px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#88ccdd';
+  ctx.fillText('SPECIES JOURNAL', W / 2, 40);
+
+  const discovered = SPECIES.filter(sp => journal[sp.id].discovered).length;
+  ctx.font = Math.min(14, W * 0.02) + 'px Segoe UI';
+  ctx.fillStyle = '#668';
+  ctx.fillText(discovered + ' / ' + SPECIES.length + ' discovered', W / 2, 62);
+
+  // Grid of species cards — with illustration area
+  const cardW = Math.min(200, (W - 50) / 4);
+  const previewH = cardW * 0.45; // illustration area
+  const infoH = 70;
+  const cardH = previewH + infoH;
+  const cols = Math.max(2, Math.floor((W - 30) / (cardW + 8)));
+  const startX = (W - cols * (cardW + 8) + 8) / 2;
+  let row = 0, col = 0;
+
+  for (const sp of SPECIES) {
+    const j = journal[sp.id];
+    const cx = startX + col * (cardW + 8);
+    const cy = 80 + row * (cardH + 8);
+    if (cy + cardH > H - 30) break;
+
+    // Card background
+    ctx.fillStyle = j.discovered ? 'rgba(25,35,45,0.85)' : 'rgba(12,12,18,0.6)';
+    ctx.fillRect(cx, cy, cardW, cardH);
+    ctx.strokeStyle = j.discovered ? 'rgba(80,180,200,0.25)' : 'rgba(40,40,50,0.25)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx, cy, cardW, cardH);
+
+    // Zone color bar
+    const zoneColors = ['#44aacc','#2266aa','#113366','#0a1a33','#050510'];
+    ctx.fillStyle = j.discovered ? zoneColors[sp.zone] : 'rgba(30,30,40,0.4)';
+    ctx.fillRect(cx, cy, 3, cardH);
+
+    if (j.discovered) {
+      // Illustration area — dark background for creature preview
+      ctx.fillStyle = 'rgba(10,20,30,0.6)';
+      ctx.fillRect(cx + 4, cy + 3, cardW - 7, previewH - 3);
+
+      // Draw the creature as a preview (cached for stable animation)
+      const previewCreature = getPreviewCreature(sp);
+      previewCreature.size = Math.min(20, previewH * 0.35);
+      const savedCamX = camX, savedCamY = camY;
+      camX = 0; camY = 0;
+      previewCreature.x = cx + cardW / 2;
+      previewCreature.y = cy + previewH / 2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(cx + 4, cy + 3, cardW - 7, previewH - 3);
+      ctx.clip();
+      drawCreature(previewCreature);
+      ctx.restore();
+      camX = savedCamX; camY = savedCamY;
+
+      // Name
+      ctx.font = 'bold ' + Math.min(11, cardW * 0.06) + 'px Segoe UI';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ccc';
+      ctx.fillText(sp.name, cx + 8, cy + previewH + 14);
+
+      // Depth + zone
+      ctx.font = Math.min(9, cardW * 0.05) + 'px Segoe UI';
+      ctx.fillStyle = '#778';
+      ctx.fillText(sp.depth[0] + '-' + sp.depth[1] + 'm  |  ' + ZONES[sp.zone].name, cx + 8, cy + previewH + 27);
+
+      // Fact (wrapped to 2 lines max)
+      ctx.fillStyle = '#8899aa';
+      ctx.font = Math.min(8, cardW * 0.045) + 'px Segoe UI';
+      const words = sp.fact.split(' ');
+      let line = '', ly = cy + previewH + 40;
+      for (const word of words) {
+        const test = line + word + ' ';
+        if (ctx.measureText(test).width > cardW - 16 && line) {
+          ctx.fillText(line, cx + 8, ly);
+          line = word + ' '; ly += 11;
+          if (ly > cy + cardH - 5) break;
+        } else line = test;
+      }
+      if (ly <= cy + cardH - 5) ctx.fillText(line, cx + 8, ly);
+
+      // Photo count badge
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#556';
+      ctx.font = Math.min(9, cardW * 0.045) + 'px Segoe UI';
+      ctx.fillText(j.photoCount + '\u{1F4F7}', cx + cardW - 6, cy + previewH + 14);
+    } else {
+      // Undiscovered — silhouette
+      ctx.fillStyle = 'rgba(10,20,30,0.5)';
+      ctx.fillRect(cx + 4, cy + 3, cardW - 7, previewH - 3);
+      ctx.font = Math.min(30, previewH * 0.5) + 'px Segoe UI';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fillText('?', cx + cardW / 2, cy + previewH / 2 + 10);
+
+      ctx.font = Math.min(10, cardW * 0.055) + 'px Segoe UI';
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.textAlign = 'center';
+      ctx.fillText(sp.depth[0] + '-' + sp.depth[1] + 'm', cx + cardW / 2, cy + previewH + 18);
+      ctx.fillText(ZONES[sp.zone].name, cx + cardW / 2, cy + previewH + 32);
+    }
+
+    // Store card rect for tap detection
+    if (j.discovered) journalCards.push({ x: cx, y: cy, w: cardW, h: cardH, species: sp });
+
+    col++;
+    if (col >= cols) { col = 0; row++; }
+  }
+
+  // Close hint
+  ctx.font = Math.min(14, W * 0.02) + 'px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.fillText('Tap a species for details  |  Press J or Esc to close', W / 2, H - 15);
+}
+
+// Journal detail page — full info on one species
+function drawJournalDetail() {
+  if (!journalDetail) return;
+  const sp = journalDetail;
+  const j = journal[sp.id];
+
+  ctx.fillStyle = 'rgba(0,5,15,0.92)';
+  ctx.fillRect(0, 0, W, H);
+
+  const mx = W / 2;
+  const contentW = Math.min(500, W - 40);
+  const leftX = mx - contentW / 2;
+
+  // Creature preview at top
+  const previewH = Math.min(160, H * 0.2);
+  const bgGrad = ctx.createLinearGradient(leftX, 30, leftX, 30 + previewH);
+  const depthMid = (sp.depth[0] + sp.depth[1]) / 2;
+  bgGrad.addColorStop(0, waterColor(depthMid - 100));
+  bgGrad.addColorStop(1, waterColor(depthMid + 100));
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(leftX, 30, contentW, previewH);
+
+  // Draw creature (cached for stable animation)
+  const previewCreature = getPreviewCreature(sp);
+  previewCreature.size = Math.min(35, previewH * 0.3);
+  previewCreature.x = mx;
+  previewCreature.y = 30 + previewH / 2;
+  const savedCamX = camX, savedCamY = camY;
+  camX = 0; camY = 0;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(leftX, 30, contentW, previewH); ctx.clip();
+  drawCreature(previewCreature);
+  ctx.restore();
+  camX = savedCamX; camY = savedCamY;
+
+  ctx.strokeStyle = 'rgba(100,180,200,0.3)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(leftX, 30, contentW, previewH);
+
+  // Name
+  let ty = 30 + previewH + 30;
+  ctx.font = 'bold ' + Math.min(24, W * 0.04) + 'px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#aaddee';
+  ctx.fillText(sp.name, mx, ty);
+  ty += 8;
+
+  // Zone and depth
+  ctx.font = Math.min(13, W * 0.02) + 'px Segoe UI';
+  ctx.fillStyle = '#668';
+  ty += 18;
+  ctx.fillText(ZONES[sp.zone].name + '  •  ' + sp.depth[0] + '-' + sp.depth[1] + 'm  •  Photos: ' + j.photoCount, mx, ty);
+  ty += 30;
+
+  // Info sections — left-aligned, word-wrapped
+  ctx.textAlign = 'left';
+  function drawSection(title, text) {
+    ctx.font = 'bold ' + Math.min(13, W * 0.019) + 'px Segoe UI';
+    ctx.fillStyle = '#88bbcc';
+    ctx.fillText(title, leftX + 10, ty);
+    ty += 18;
+    ctx.font = Math.min(12, W * 0.017) + 'px Segoe UI';
+    ctx.fillStyle = '#99aabb';
+    const words = text.split(' ');
+    let line = '';
+    for (const word of words) {
+      const test = line + word + ' ';
+      if (ctx.measureText(test).width > contentW - 20 && line) {
+        ctx.fillText(line, leftX + 10, ty);
+        line = word + ' '; ty += 16;
+        if (ty > H - 40) return;
+      } else line = test;
+    }
+    if (line && ty < H - 40) { ctx.fillText(line, leftX + 10, ty); ty += 16; }
+    ty += 10;
+  }
+
+  drawSection('HABITAT', sp.habitat === 'reef' ? 'Coral reefs and rocky substrates in shallow waters' :
+    sp.habitat === 'seafloor' ? 'On or near the ocean floor' :
+    sp.habitat === 'vent' ? 'Hydrothermal vent communities' : 'Open water column');
+  if (sp.diet) drawSection('DIET', sp.diet);
+  if (sp.behaviour) drawSection('BEHAVIOUR', sp.behaviour);
+  if (sp.details) drawSection('DETAILS', sp.details);
+  drawSection('KEY FACT', sp.fact);
+
+  // Back button
+  ctx.font = Math.min(14, W * 0.02) + 'px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.fillText('Tap or press Esc to go back', mx, H - 15);
+}
+
+// ============================================================
+// HUD
+// ============================================================
+function drawHUD() {
+  const depthM = Math.floor(sub.y / M);
+  const zi = getZoneAtDepth(depthM);
+
+  // Depth
+  ctx.font = Math.min(16, W * 0.022) + 'px Segoe UI';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(150,200,220,0.4)';
+  ctx.fillText('Depth: ' + depthM + 'm', 14, 24);
+
+  // Zone name
+  ctx.fillStyle = 'rgba(150,200,220,0.25)';
+  ctx.fillText(ZONES[zi].name, 14, 42);
+
+  // Species count
+  const discovered = SPECIES.filter(sp => journal[sp.id].discovered).length;
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(150,200,220,0.3)';
+  ctx.fillText('Species: ' + discovered + '/' + SPECIES.length + '  [J]ournal  [C]amera', W - 14, 24);
+
+  // Depth gauge
+  const gaugeH = H * 0.5;
+  const gaugeY = H * 0.25;
+  const gaugeX = W - 10;
+  // Zone colors on gauge
+  for (let z = 0; z < ZONES.length; z++) {
+    const zy1 = gaugeY + (ZONES[z].minD / MAX_DEPTH) * gaugeH;
+    const zy2 = gaugeY + (ZONES[z].maxD / MAX_DEPTH) * gaugeH;
+    ctx.fillStyle = `rgba(${ZONES[z].col1[0]*3},${ZONES[z].col1[1]*2},${ZONES[z].col1[2]},0.3)`;
+    ctx.fillRect(gaugeX - 4, zy1, 8, zy2 - zy1);
+  }
+  // Player position
+  const gaugeFrac = depthM / MAX_DEPTH;
+  ctx.fillStyle = 'rgba(150,220,255,0.6)';
+  ctx.fillRect(gaugeX - 5, gaugeY + gaugeFrac * gaugeH - 2, 10, 4);
+
+  // Zone transition announcement
+  if (zoneAnnounce.timer > 0) {
+    ctx.globalAlpha = Math.min(1, zoneAnnounce.timer);
+    ctx.font = 'bold ' + Math.min(24, W * 0.035) + 'px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(150,200,220,0.5)';
+    ctx.fillText(zoneAnnounce.text, W / 2, H * 0.15);
+    ctx.globalAlpha = 1;
+  }
+
+  // Controls hint
+  if (time < 8) {
+    ctx.globalAlpha = Math.max(0, 1 - time / 7) * 0.4;
+    ctx.font = Math.min(13, W * 0.018) + 'px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#aaccdd';
+    ctx.fillText('Arrow keys or touch to explore  |  C = camera  |  J = journal', W / 2, H - 18);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  SFX._get();
+  if (e.key === 'j' || e.key === 'J') { journalOpen = !journalOpen; journalDetail = null; canvas.classList.toggle('journal-open', journalOpen); }
+  if (e.key === 'c' || e.key === 'C') {
+    if (cameraMode) takePhoto();
+    else cameraMode = true;
+  }
+  if (e.key === ' ' || e.key === 'Enter') {
+    if (cameraMode) takePhoto();
+  }
+  if (e.key === 'Escape') { if (journalDetail) { journalDetail = null; } else { cameraMode = false; journalOpen = false; canvas.classList.remove('journal-open'); } }
+});
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+let touchActive = false, touchX = 0, touchY = 0;
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault(); SFX._get();
+  if (journalOpen) {
+    if (journalDetail) { journalDetail = null; return; }
+    // Check if tapping a journal card
+    const t = e.touches[0], r = canvas.getBoundingClientRect();
+    const tx = (t.clientX - r.left) / r.width * W, ty2 = (t.clientY - r.top) / r.height * H;
+    for (const card of journalCards) {
+      if (tx >= card.x && tx <= card.x + card.w && ty2 >= card.y && ty2 <= card.y + card.h) {
+        journalDetail = card.species; return;
+      }
+    }
+    journalOpen = false; canvas.classList.remove('journal-open'); return;
+  }
+  touchActive = true;
+  const t = e.touches[0]; touchX = t.clientX; touchY = t.clientY;
+}, { passive: false });
+canvas.addEventListener('touchmove', e => { e.preventDefault(); const t = e.touches[0]; touchX = t.clientX; touchY = t.clientY; }, { passive: false });
+canvas.addEventListener('touchend', e => { e.preventDefault(); touchActive = false; }, { passive: false });
+
+// Double-tap for camera
+let lastTapTime = 0;
+canvas.addEventListener('click', (e) => {
+  SFX._get();
+  if (journalOpen) {
+    if (journalDetail) { journalDetail = null; return; }
+    const tx = e.offsetX * W / canvas.clientWidth, ty = e.offsetY * H / canvas.clientHeight;
+    for (const card of journalCards) {
+      if (tx >= card.x && tx <= card.x + card.w && ty >= card.y && ty <= card.y + card.h) {
+        journalDetail = card.species; return;
+      }
+    }
+    journalOpen = false; canvas.classList.remove('journal-open'); return;
+  }
+  const now = performance.now();
+  if (now - lastTapTime < 350) {
+    if (cameraMode) takePhoto();
+    else cameraMode = true;
+  }
+  lastTapTime = now;
+});
+
+// ============================================================
+// UPDATE
+// ============================================================
+function update(dt) {
+  time += dt;
+
+  if (journalOpen) return;
+
+  // Sub movement
+  const accel = 200;
+  sub.targetVx = 0; sub.targetVy = 0;
+  if (keys['ArrowLeft'] || keys['a'] || keys['A']) sub.targetVx = -accel;
+  if (keys['ArrowRight'] || keys['d'] || keys['D']) sub.targetVx = accel;
+  if (keys['ArrowUp'] || keys['w'] || keys['W']) sub.targetVy = -accel;
+  if (keys['ArrowDown'] || keys['s'] || keys['S']) sub.targetVy = accel;
+  if (touchActive) {
+    const tdx = touchX - W/2, tdy = touchY - H/2;
+    const td = Math.sqrt(tdx*tdx + tdy*tdy);
+    if (td > 20) { sub.targetVx = (tdx/td)*accel; sub.targetVy = (tdy/td)*accel; }
+  }
+
+  sub.vx += (sub.targetVx - sub.vx) * 3 * dt;
+  sub.vy += (sub.targetVy - sub.vy) * 3 * dt;
+  sub.x += sub.vx * dt;
+  sub.y += sub.vy * dt;
+
+  // Clamp to world bounds and terrain
+  // Keep sub in deep enough water — can't go onto the beach
+  // Find minimum X where depth is at least 20m
+  sub.x = Math.max(250, Math.min(WORLD_W - 250, sub.x));
+  sub.y = Math.max(30 * M, sub.y); // at least 30m depth
+  const floorDepth = getTerrainDepth(sub.x) * M;
+  sub.y = Math.min(floorDepth - 30, sub.y);
+
+  if (sub.vx > 10) sub.facing = 1;
+  if (sub.vx < -10) sub.facing = -1;
+
+  // Camera
+  camX += (sub.x - W/2 - camX) * 3 * dt;
+  camY += (sub.y - H/2 - camY) * 3 * dt;
+
+  // Zone transition
+  const depthM = sub.y / M;
+  const zi = getZoneAtDepth(depthM);
+  if (zi !== zoneAnnounce.lastZone) {
+    zoneAnnounce.lastZone = zi;
+    zoneAnnounce.text = 'Entering: ' + ZONES[zi].name;
+    zoneAnnounce.timer = 3;
+  }
+  if (zoneAnnounce.timer > 0) zoneAnnounce.timer -= dt;
+
+  // Bubbles
+  sub.bubbleTimer -= dt;
+  if (sub.bubbleTimer <= 0 && (Math.abs(sub.vx) > 10 || Math.abs(sub.vy) > 10)) {
+    sub.bubbleTimer = 0.1 + Math.random() * 0.15;
+    bubbles.push({
+      x: sub.x - sub.facing * 28 + (Math.random()-0.5)*6,
+      y: sub.y + (Math.random()-0.5)*6,
+      vx: -sub.facing * (10+Math.random()*15), vy: -10-Math.random()*15,
+      size: 2+Math.random()*3, life: 1.5+Math.random(), maxLife: 2.5,
+    });
+  }
+  for (const b of bubbles) { b.x += b.vx*dt; b.y += b.vy*dt; b.vy -= 20*dt; b.vx *= 0.98; b.size += dt*0.5; b.life -= dt; }
+  bubbles = bubbles.filter(b => b.life > 0);
+
+  // Creatures — species-appropriate movement
+  for (const c of creatures) {
+    const dx = c.x - sub.x, dy = c.y - sub.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    // Flee if sub gets too close
+    const isStationary = c.speciesId === 'tube_worms' || c.speciesId === 'clownfish';
+    const fleeing = dist < 80 && !isStationary;
+
+    switch (c.speciesId) {
+      case 'seahorse':
+        // Upright bobbing, slow vertical drift, occasional sideways nudge
+        c.y += Math.sin(time * 1.2 + c.phase) * 12 * dt; // gentle bob
+        c.x += Math.sin(time * 0.3 + c.phase * 2) * 4 * dt; // slight drift
+        if (fleeing) { c.x += (dx / dist) * 20 * dt; c.y += (dy / dist) * 20 * dt; }
+        break;
+      case 'dolphin':
+        // Arcing leaps — sine wave path
+        c.x += c.vx * dt;
+        c.y += Math.sin(time * 2 + c.phase) * 30 * dt;
+        if (fleeing) c.vx += (dx / dist) * 50 * dt;
+        break;
+      case 'manta':
+        // Graceful slow gliding with gentle banking
+        c.x += c.vx * 0.7 * dt;
+        c.y += Math.sin(time * 0.4 + c.phase) * 8 * dt;
+        if (fleeing) c.vx += (dx / dist) * 25 * dt;
+        break;
+      case 'sea_turtle':
+        // Steady cruise with gentle up/down
+        c.x += c.vx * 0.6 * dt;
+        c.y += Math.sin(time * 0.6 + c.phase) * 6 * dt;
+        if (fleeing) c.vx += (dx / dist) * 20 * dt;
+        break;
+      case 'jellyfish':
+      case 'siphonophore':
+        // Pulse-driven vertical drift, slow horizontal
+        c.y += Math.sin(time * 1.5 + c.phase) * 15 * dt;
+        c.x += Math.sin(time * 0.2 + c.phase * 3) * 5 * dt;
+        if (fleeing) { c.x += (dx / dist) * 15 * dt; c.y += (dy / dist) * 15 * dt; }
+        break;
+      case 'giant_squid':
+        // Slow lurking drift
+        c.x += c.vx * 0.3 * dt;
+        c.y += Math.sin(time * 0.3 + c.phase) * 5 * dt;
+        c.vx *= 0.98; // dampen velocity
+        if (fleeing) { c.vx += (dx / dist) * 15 * dt; }
+        break;
+      case 'vampire_squid':
+        // Drifting, rotating, slow
+        c.x += Math.sin(time * 0.4 + c.phase) * 8 * dt;
+        c.y += Math.cos(time * 0.3 + c.phase) * 6 * dt;
+        if (fleeing) { c.x += (dx / dist) * 25 * dt; }
+        break;
+      case 'dumbo_octopus':
+        // Gentle ear-fin flapping, slow descent/ascent
+        c.x += c.vx * 0.4 * dt;
+        c.y += Math.sin(time * 0.8 + c.phase) * 10 * dt;
+        if (fleeing) { c.x += (dx / dist) * 15 * dt; c.y += (dy / dist) * 15 * dt; }
+        break;
+      case 'clownfish':
+        // Stationary — stays in anemone, tiny darts only
+        break;
+      case 'tube_worms':
+        // Stationary — attached to seafloor
+        break;
+      case 'amphipod':
+        // Erratic darting
+        c.x += c.vx * dt + Math.sin(time * 4 + c.seed) * 15 * dt;
+        c.y += Math.cos(time * 3 + c.seed) * 10 * dt;
+        break;
+      default:
+        // Standard swimming
+        c.x += c.vx * dt;
+        c.y += Math.sin(time * 0.5 + c.phase) * 5 * dt;
+        if (fleeing) c.vx += (dx / dist) * 30 * dt;
+        break;
+    }
+
+    // Clamp creatures to terrain — never go below the seafloor
+    // Hard clamp — creature center must be at least its own size above the floor
+    const creatureFloor = getTerrainDepth(Math.max(0, Math.min(WORLD_W, c.x))) * M;
+    const minAbove = c.size + 10;
+    if (c.y > creatureFloor - minAbove) c.y = creatureFloor - minAbove;
+    // Keep above surface
+    if (c.y < 20) c.y = 20;
+    // Keep in world bounds horizontally
+    c.x = Math.max(50, Math.min(WORLD_W - 50, c.x));
+  }
+  spawnCreatures();
+
+  // Ambient sounds
+  creakTimer -= dt;
+  if (creakTimer <= 0 && depthM > 500) {
+    creakTimer = 5 + Math.random() * 10;
+    SFX.creak();
+  }
+  sonarTimer -= dt;
+  if (sonarTimer <= 0) {
+    sonarTimer = 12 + Math.random() * 8;
+    SFX.sonar();
+  }
+
+  // Photo notification
+  if (lastPhoto) { lastPhoto.timer -= dt; if (lastPhoto.timer <= 0) lastPhoto = null; }
+}
+
+// ============================================================
+// DRAW
+// ============================================================
+function draw() {
+  // Water background
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, waterColor(camY / M));
+  bgGrad.addColorStop(1, waterColor((camY + H) / M));
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  drawLightRays();
+  drawTerrain();
+  drawSeafloorDecor();
+
+  // Ambient particles
+  ctx.fillStyle = 'rgba(200,220,240,0.12)';
+  for (let i = 0; i < 30; i++) {
+    const px = ((i*173.7 + time*3 + camX*0.3) % (W+40)) - 20;
+    const py = ((i*91.3 + time*5 + camY*0.2) % (H+40)) - 20;
+    ctx.globalAlpha = 0.06 + Math.sin(time + i*3.1) * 0.03;
+    ctx.beginPath(); ctx.arc(px, py, 1 + Math.sin(i*7.3)*0.5, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Creatures
+  const sortedC = [...creatures].sort((a, b) => a.y - b.y);
+  for (const c of sortedC) drawCreature(c);
+
+  // Bubbles
+  for (const b of bubbles) {
+    const bx = b.x-camX, by = b.y-camY;
+    if (bx < -20 || bx > W+20 || by < -20 || by > H+20) continue;
+    const a = Math.max(0, b.life/b.maxLife);
+    ctx.strokeStyle = `rgba(180,220,255,${a*0.3})`; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(bx, by, b.size, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = `rgba(220,240,255,${a*0.12})`;
+    ctx.beginPath(); ctx.arc(bx-b.size*0.2, by-b.size*0.2, b.size*0.35, 0, Math.PI*2); ctx.fill();
+  }
+
+  drawSubmarine();
+
+  // Depth darkness
+  const darkness = depthDarkness(sub.y / M);
+  ctx.fillStyle = `rgba(0,3,10,${darkness})`;
+  ctx.fillRect(0, 0, W, H);
+
+  drawViewfinder();
+  drawPhotoNotification();
+  drawHUD();
+  drawJournal();
+}
+
+// ============================================================
+// LOOP
+// ============================================================
+let lastTime = performance.now();
+function loop() {
+  const now = performance.now();
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+
+})();
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,20,0.5);color:rgba(150,200,220,0.4);font:11px 'Segoe UI',Arial,sans-serif;padding:3px 12px;border-radius:10px;z-index:9999;pointer-events:none;white-space:nowrap;">
+  <span id="vc-count">...</span> Divers
+</div>
+<script>
+(function(){
+  var G='deep-blue',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

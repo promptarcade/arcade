@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Fire Rescue — LCD Classic</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{overflow:hidden;touch-action:none;background:#1a1a2e;width:100%;height:100%}
+body{display:flex;justify-content:center;align-items:center;font-family:'Courier New',monospace}
+canvas{display:block;touch-action:none}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<script>
+'use strict';
+// ═══════════════════════════════════════════════════════
+// FIRE RESCUE — Game & Watch "Fire" LCD Recreation
+// ═══════════════════════════════════════════════════════
+
+var _SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',_SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(g,s){var n=prompt('Score: '+s+'! Enter initials (max 5):');if(!n)return;n=n.trim().slice(0,5).toUpperCase();if(!n)return;try{await fetch(_SU+'/rest/v1/high_scores',{method:'POST',headers:{'apikey':_SK,'Authorization':'Bearer '+_SK,'Content-Type':'application/json'},body:JSON.stringify({game:g,initials:n,score:s})})}catch(e){}}
+
+var canvas=document.getElementById('C'),ctx=canvas.getContext('2d');
+
+// ── AUDIO ──
+var audioCtx=null;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+function beep(f,d,v){if(!audioCtx)return;var o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type='square';o.frequency.value=f;g.gain.value=v||0.1;g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d)}
+function sfxBounce(){beep(500,0.06,0.1);setTimeout(function(){beep(700,0.04,0.08)},40)}
+function sfxSave(){beep(800,0.08,0.12);setTimeout(function(){beep(1000,0.06,0.1)},60);setTimeout(function(){beep(1200,0.08,0.12)},120)}
+function sfxMiss(){beep(150,0.2,0.15);setTimeout(function(){beep(80,0.25,0.12)},100)}
+function sfxGameOver(){[300,250,200,150,100].forEach(function(f,i){setTimeout(function(){beep(f,0.2,0.12)},i*180)})}
+
+// ── COLOURS ──
+var LCD_BG='#9aad86',LCD_GHOST='#889a75',LCD_ON='#1a2a12',LCD_STRUCT='#708060';
+
+// ── LAYOUT ──
+var D={},S={},btnL,btnR;
+function calcLayout(){
+  var vw=window.innerWidth,vh=window.innerHeight;
+  canvas.width=vw;canvas.height=vh;
+  var asp=5/3;D.w=vw*0.94;D.h=D.w/asp;
+  if(D.h>vh*0.94){D.h=vh*0.94;D.w=D.h*asp}
+  D.x=(vw-D.w)/2;D.y=(vh-D.h)/2;
+  S.w=D.w*0.85;S.h=D.h*0.68;
+  S.x=D.x+(D.w-S.w)/2;S.y=D.y+D.h*0.08;
+}
+
+// ── STATE ──
+// Person bounces from building → pos 0 → pos 1 → pos 2 → ambulance
+// Net has 3 positions (0, 1, 2). Net must match person's current catch point.
+// Person at a catch point: if net matches → bounce to next. If not → miss.
+var score,hiScore,misses,netPos;
+var person; // {step, floor} step: 0-6 (0=at window, 1=falling, 2=catch0, 3=arc, 4=catch1, 5=arc, 6=catch2, 7=saved)
+var personActive,personFloor;
+var tickRate,accumulator,spawnDelay;
+var flameFrame;
+var flameWindows; // which windows have active flames
+var warningPhase; // true = fire showing at window, person hasn't jumped yet
+var state,scoreSubmitted;
+
+function loadHi(){try{hiScore=parseInt(localStorage.getItem('fire_hi'))||0}catch(e){hiScore=0}}
+function saveHi(){try{localStorage.setItem('fire_hi',score)}catch(e){}}
+
+function initGame(){
+  score=0;misses=0;netPos=1;
+  personActive=false;person={step:0,floor:0};
+  tickRate=700;accumulator=0;spawnDelay=2;
+  flameFrame=0;flameWindows=[false,false,false];
+  warningPhase=false;
+  state='title';scoreSubmitted=false;
+}
+function startGame(){initGame();state='play'}
+
+// ── GAME LOGIC ──
+function gameTick(){
+  if(state!=='play')return;
+  flameFrame=1-flameFrame;
+
+  if(!personActive){
+    spawnDelay--;
+    if(spawnDelay<=0){
+      if(!warningPhase){
+        // First: fire appears at a window (warning — danger!)
+        person.floor=Math.floor(Math.random()*3);
+        flameWindows[person.floor]=true;
+        warningPhase=true;
+        spawnDelay=2; // fire shows for 2 ticks before person appears
+      } else {
+        // Then: person appears at that window, fire goes away, person jumps
+        personActive=true;
+        person.step=0;
+        flameWindows[person.floor]=false; // fire clears when person jumps
+        warningPhase=false;
+        spawnDelay=2;
+      }
+    }
+    return;
+  }
+
+  // Advance person
+  person.step++;
+
+  // Check catches at the 3 catch points
+  // step 2 = catch point 0 (need net at 0)
+  // step 4 = catch point 1 (need net at 1)
+  // step 6 = catch point 2 (need net at 2)
+  if(person.step===2){
+    if(netPos===0){sfxBounce()}else{personMissed();return}
+  }else if(person.step===4){
+    if(netPos===1){sfxBounce()}else{personMissed();return}
+  }else if(person.step===6){
+    if(netPos===2){sfxBounce()}else{personMissed();return}
+  }else if(person.step>=7){
+    // Reached ambulance — saved!
+    score++;sfxSave();
+    personActive=false;
+    updateDifficulty();
+    return;
+  }
+}
+
+function personMissed(){
+  misses++;sfxMiss();personActive=false;
+  if(misses>=3){
+    state='over';
+    if(score>hiScore){hiScore=score;saveHi()}
+    if(score>0&&!scoreSubmitted){scoreSubmitted=true;submitScore('fire-rescue',score)}
+    sfxGameOver();
+  }
+}
+
+function updateDifficulty(){
+  if(score>=30){tickRate=280;spawnDelay=1}
+  else if(score>=20){tickRate=350;spawnDelay=1}
+  else if(score>=12){tickRate=420;spawnDelay=1}
+  else if(score>=6){tickRate=520;spawnDelay=2}
+  else if(score>=3){tickRate=600;spawnDelay=2}
+}
+
+// ── INPUT ──
+function moveLeft(){if(state==='play'&&netPos>0)netPos--}
+function moveRight(){if(state==='play'&&netPos<2)netPos++}
+function doStart(){initAudio();if(state!=='play')startGame()}
+
+window.addEventListener('keydown',function(e){
+  if(e.key==='ArrowLeft'||e.key==='a'){e.preventDefault();moveLeft()}
+  if(e.key==='ArrowRight'||e.key==='d'){e.preventDefault();moveRight()}
+  if(e.key===' '||e.key==='Enter'){e.preventDefault();doStart()}
+});
+function hitTest(x,y){
+  if(state!=='play'){doStart();return}
+  if(btnL&&x>=btnL.x&&x<=btnL.x+btnL.w&&y>=btnL.y&&y<=btnL.y+btnL.h){moveLeft();return}
+  if(btnR&&x>=btnR.x&&x<=btnR.x+btnR.w&&y>=btnR.y&&y<=btnR.y+btnR.h){moveRight();return}
+  if(x<canvas.width/2)moveLeft();else moveRight();
+}
+canvas.addEventListener('mousedown',function(e){hitTest(e.clientX,e.clientY)});
+canvas.addEventListener('touchstart',function(e){e.preventDefault();for(var i=0;i<e.touches.length;i++)hitTest(e.touches[i].clientX,e.touches[i].clientY)},{passive:false});
+
+// ═══════════════════════════════════════════════════════
+// DRAWING — filled LCD silhouettes
+// ═══════════════════════════════════════════════════════
+
+var SEGS=[0x7E,0x30,0x6D,0x79,0x33,0x5B,0x5F,0x70,0x7F,0x7B];
+function draw7Seg(cx,cy,h,val,col){
+  var w=h*0.55,t=h*0.09,g=h*0.04;ctx.fillStyle=col;var s=SEGS[val]||0;
+  if(s&0x40)ctx.fillRect(cx-w/2+g,cy-h/2,w-g*2,t);
+  if(s&0x20)ctx.fillRect(cx+w/2-t,cy-h/2+g,t,h/2-g*2);
+  if(s&0x10)ctx.fillRect(cx+w/2-t,cy+g,t,h/2-g*2);
+  if(s&0x08)ctx.fillRect(cx-w/2+g,cy+h/2-t,w-g*2,t);
+  if(s&0x04)ctx.fillRect(cx-w/2,cy+g,t,h/2-g*2);
+  if(s&0x02)ctx.fillRect(cx-w/2,cy-h/2+g,t,h/2-g*2);
+  if(s&0x01)ctx.fillRect(cx-w/2+g,cy-t/2,w-g*2,t);
+}
+function drawScore(x,y,h,val){
+  var ds=[Math.floor(val/100)%10,Math.floor(val/10)%10,val%10],dw=h*0.7;
+  for(var i=0;i<3;i++){draw7Seg(x+i*dw,y,h,8,LCD_GHOST);draw7Seg(x+i*dw,y,h,ds[i],LCD_ON)}
+}
+function drawMissMarks(x,y,sz){
+  for(var i=0;i<3;i++){
+    var mx=x+i*sz*1.5,col=(i<misses&&state!=='title')?LCD_ON:LCD_GHOST;
+    ctx.fillStyle=col;
+    ctx.save();ctx.translate(mx,y);ctx.rotate(Math.PI/4);ctx.fillRect(-sz*0.4,-sz*0.08,sz*0.8,sz*0.16);ctx.restore();
+    ctx.save();ctx.translate(mx,y);ctx.rotate(-Math.PI/4);ctx.fillRect(-sz*0.4,-sz*0.08,sz*0.8,sz*0.16);ctx.restore();
+  }
+}
+
+// ── BUILDING — 3 floors with windows and flames ──
+function drawBuilding(bx,by,bw,bh,col){
+  ctx.fillStyle=col;
+  // Main structure
+  ctx.fillRect(bx,by,bw,bh);
+  // Roof peak
+  ctx.beginPath();
+  ctx.moveTo(bx-bw*0.05,by);
+  ctx.lineTo(bx+bw*0.5,by-bh*0.1);
+  ctx.lineTo(bx+bw*1.05,by);
+  ctx.fill();
+  // Window cutouts (3 floors)
+  ctx.fillStyle=LCD_BG;
+  var winW=bw*0.5,winH=bh*0.15;
+  for(var f=0;f<3;f++){
+    var wy=by+bh*0.12+f*bh*0.28;
+    ctx.fillRect(bx+bw*0.25,wy,winW,winH);
+    // Window cross
+    ctx.fillStyle=col;
+    ctx.fillRect(bx+bw*0.48,wy,bw*0.04,winH);
+    ctx.fillRect(bx+bw*0.25,wy+winH*0.45,winW,winH*0.1);
+    ctx.fillStyle=LCD_BG;
+  }
+}
+
+// ── FLAMES ──
+function drawFlame(cx,cy,w,h,col,frame){
+  ctx.fillStyle=col;
+  ctx.beginPath();
+  if(frame===0){
+    ctx.moveTo(cx,cy-h*0.5);
+    ctx.quadraticCurveTo(cx+w*0.3,cy-h*0.15,cx+w*0.15,cy+h*0.1);
+    ctx.lineTo(cx+w*0.25,cy-h*0.1);
+    ctx.quadraticCurveTo(cx+w*0.4,cy+h*0.2,cx+w*0.15,cy+h*0.4);
+    ctx.lineTo(cx-w*0.15,cy+h*0.4);
+    ctx.quadraticCurveTo(cx-w*0.4,cy+h*0.2,cx-w*0.25,cy-h*0.1);
+    ctx.lineTo(cx-w*0.15,cy+h*0.1);
+    ctx.quadraticCurveTo(cx-w*0.3,cy-h*0.15,cx,cy-h*0.5);
+  }else{
+    ctx.moveTo(cx-w*0.05,cy-h*0.45);
+    ctx.quadraticCurveTo(cx+w*0.25,cy-h*0.1,cx+w*0.2,cy+h*0.15);
+    ctx.quadraticCurveTo(cx+w*0.35,cy+h*0.25,cx+w*0.1,cy+h*0.4);
+    ctx.lineTo(cx-w*0.1,cy+h*0.4);
+    ctx.quadraticCurveTo(cx-w*0.35,cy+h*0.25,cx-w*0.2,cy+h*0.15);
+    ctx.quadraticCurveTo(cx-w*0.25,cy-h*0.1,cx-w*0.05,cy-h*0.45);
+  }
+  ctx.fill();
+}
+
+// ── PERSON — detailed LCD silhouette of panicking figure ──
+function drawPerson(cx,cy,w,h,col){
+  ctx.fillStyle=col;
+  // Single filled path: head → neck → shoulders → raised arms with hands →
+  // torso → hips → left leg → foot → back up → right leg → foot → close
+  ctx.beginPath();
+  // Head (rounded)
+  ctx.moveTo(cx-w*0.1,cy-h*0.28);
+  ctx.quadraticCurveTo(cx-w*0.12,cy-h*0.45,cx,cy-h*0.47);
+  ctx.quadraticCurveTo(cx+w*0.12,cy-h*0.45,cx+w*0.1,cy-h*0.28);
+  // Neck into right shoulder
+  ctx.lineTo(cx+w*0.15,cy-h*0.22);
+  // Right arm raised up with hand
+  ctx.lineTo(cx+w*0.18,cy-h*0.2);
+  ctx.lineTo(cx+w*0.28,cy-h*0.4);
+  ctx.lineTo(cx+w*0.35,cy-h*0.42);
+  ctx.lineTo(cx+w*0.35,cy-h*0.38); // hand
+  ctx.lineTo(cx+w*0.3,cy-h*0.36);
+  ctx.lineTo(cx+w*0.22,cy-h*0.18);
+  // Right side of torso
+  ctx.lineTo(cx+w*0.16,cy+h*0.12);
+  // Right hip → right leg
+  ctx.lineTo(cx+w*0.15,cy+h*0.14);
+  ctx.lineTo(cx+w*0.12,cy+h*0.34);
+  ctx.lineTo(cx+w*0.16,cy+h*0.38); // right foot
+  ctx.lineTo(cx+w*0.04,cy+h*0.38);
+  ctx.lineTo(cx+w*0.04,cy+h*0.34);
+  ctx.lineTo(cx+w*0.02,cy+h*0.14);
+  // Crotch → left leg
+  ctx.lineTo(cx-w*0.02,cy+h*0.14);
+  ctx.lineTo(cx-w*0.04,cy+h*0.34);
+  ctx.lineTo(cx-w*0.04,cy+h*0.38); // left foot
+  ctx.lineTo(cx-w*0.16,cy+h*0.38);
+  ctx.lineTo(cx-w*0.12,cy+h*0.34);
+  ctx.lineTo(cx-w*0.15,cy+h*0.14);
+  // Left hip → left side of torso
+  ctx.lineTo(cx-w*0.16,cy+h*0.12);
+  ctx.lineTo(cx-w*0.22,cy-h*0.18);
+  // Left arm raised up with hand
+  ctx.lineTo(cx-w*0.3,cy-h*0.36);
+  ctx.lineTo(cx-w*0.35,cy-h*0.38);
+  ctx.lineTo(cx-w*0.35,cy-h*0.42); // hand
+  ctx.lineTo(cx-w*0.28,cy-h*0.4);
+  ctx.lineTo(cx-w*0.18,cy-h*0.2);
+  // Left shoulder back to neck
+  ctx.lineTo(cx-w*0.15,cy-h*0.22);
+  ctx.closePath();
+  ctx.fill();
+  // Eye cutout (makes face readable)
+  ctx.fillStyle=LCD_BG;
+  ctx.fillRect(cx-w*0.05,cy-h*0.37,w*0.04,h*0.03);
+  ctx.fillRect(cx+w*0.01,cy-h*0.37,w*0.04,h*0.03);
+}
+
+// ── NET — two firemen holding a life net (single-path silhouettes) ──
+function drawFireman(fx,cy,w,h,col,faceRight){
+  ctx.fillStyle=col;
+  var d=faceRight?1:-1;
+  // Single path: helmet → head → body → legs → arm reaching out
+  ctx.beginPath();
+  // Helmet dome
+  ctx.moveTo(fx-w*0.08,cy-h*0.32);
+  ctx.quadraticCurveTo(fx-w*0.08,cy-h*0.52,fx,cy-h*0.54);
+  ctx.quadraticCurveTo(fx+w*0.08,cy-h*0.52,fx+w*0.08,cy-h*0.32);
+  // Helmet brim
+  ctx.lineTo(fx+w*0.12,cy-h*0.32);
+  ctx.lineTo(fx+w*0.12,cy-h*0.28);
+  ctx.lineTo(fx-w*0.12,cy-h*0.28);
+  ctx.lineTo(fx-w*0.12,cy-h*0.32);
+  ctx.lineTo(fx-w*0.08,cy-h*0.32);
+  ctx.fill();
+  // Head
+  ctx.beginPath();
+  ctx.arc(fx,cy-h*0.2,w*0.07,0,Math.PI*2);ctx.fill();
+  // Body (torso with jacket)
+  ctx.fillRect(fx-w*0.08,cy-h*0.12,w*0.16,h*0.32);
+  // Arm extending toward net
+  ctx.beginPath();
+  ctx.moveTo(fx+d*w*0.08,cy-h*0.08);
+  ctx.lineTo(fx+d*w*0.35,cy-h*0.05);
+  ctx.lineTo(fx+d*w*0.35,cy+h*0.05);
+  ctx.lineTo(fx+d*w*0.08,cy+h*0.02);
+  ctx.fill();
+  // Other arm at side
+  ctx.fillRect(fx-d*w*0.13,cy-h*0.08,w*0.05,h*0.18);
+  // Legs
+  ctx.fillRect(fx-w*0.06,cy+h*0.2,w*0.05,h*0.2);
+  ctx.fillRect(fx+w*0.01,cy+h*0.2,w*0.05,h*0.2);
+  // Boots
+  ctx.fillRect(fx-w*0.08,cy+h*0.38,w*0.08,h*0.05);
+  ctx.fillRect(fx,cy+h*0.38,w*0.08,h*0.05);
+}
+
+function drawNet(cx,cy,w,h,col){
+  var lx=cx-w*0.38,rx=cx+w*0.38;
+  // Left fireman facing right
+  drawFireman(lx,cy,w*0.4,h,col,true);
+  // Right fireman facing left
+  drawFireman(rx,cy,w*0.4,h,col,false);
+  // Life net — curved sheet between them
+  ctx.fillStyle=col;
+  ctx.beginPath();
+  ctx.moveTo(lx+w*0.4*0.35,cy-h*0.02);
+  ctx.quadraticCurveTo(cx,cy+h*0.15,rx-w*0.4*0.35,cy-h*0.02);
+  ctx.lineTo(rx-w*0.4*0.35,cy+h*0.08);
+  ctx.quadraticCurveTo(cx,cy+h*0.25,lx+w*0.4*0.35,cy+h*0.08);
+  ctx.fill();
+  // Net cross-hatch pattern cutout
+  ctx.fillStyle=LCD_BG;
+  var nw=w*0.35,nx=cx-nw/2;
+  for(var ny2=0;ny2<3;ny2++){
+    for(var nx2=0;nx2<3;nx2++){
+      ctx.fillRect(nx+nx2*nw*0.33+nw*0.05,cy+h*0.02+ny2*h*0.05,nw*0.12,h*0.02);
+    }
+  }
+}
+
+// ── AMBULANCE silhouette ──
+function drawAmbulance(cx,cy,w,h,col){
+  ctx.fillStyle=col;
+  // Box body
+  ctx.fillRect(cx-w*0.35,cy-h*0.25,w*0.55,h*0.35);
+  // Cab
+  ctx.beginPath();
+  ctx.moveTo(cx+w*0.2,cy-h*0.25);
+  ctx.lineTo(cx+w*0.2,cy-h*0.4);
+  ctx.lineTo(cx+w*0.4,cy-h*0.25);
+  ctx.lineTo(cx+w*0.4,cy+h*0.1);
+  ctx.lineTo(cx+w*0.2,cy+h*0.1);
+  ctx.fill();
+  // Wheels
+  ctx.beginPath();ctx.arc(cx-w*0.2,cy+h*0.15,w*0.08,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(cx+w*0.25,cy+h*0.15,w*0.08,0,Math.PI*2);ctx.fill();
+  // Wheel hubs (cutout)
+  ctx.fillStyle=LCD_BG;
+  ctx.beginPath();ctx.arc(cx-w*0.2,cy+h*0.15,w*0.03,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(cx+w*0.25,cy+h*0.15,w*0.03,0,Math.PI*2);ctx.fill();
+  // Cross symbol
+  ctx.fillRect(cx-w*0.12,cy-h*0.17,w*0.12,h*0.03);
+  ctx.fillRect(cx-w*0.08,cy-h*0.22,w*0.04,h*0.13);
+  // Windshield cutout
+  ctx.fillRect(cx+w*0.22,cy-h*0.35,w*0.12,h*0.12);
+  // Roof light
+  ctx.fillStyle=col;
+  ctx.fillRect(cx-w*0.05,cy-h*0.3,w*0.1,h*0.06);
+}
+
+// ── HELPERS ──
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);
+  ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);
+  ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);
+  ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
+}
+function drawButton(r,label){
+  ctx.fillStyle='#6a2818';roundRect(r.x,r.y+2,r.w,r.h,r.h*0.3);ctx.fill();
+  ctx.fillStyle='#8a3828';roundRect(r.x,r.y,r.w,r.h,r.h*0.3);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.08)';roundRect(r.x+r.w*0.1,r.y+1,r.w*0.8,r.h*0.35,r.h*0.2);ctx.fill();
+  ctx.fillStyle='#e8a888';ctx.font='bold '+(r.h*0.5)+'px sans-serif';ctx.textAlign='center';
+  ctx.fillText(label,r.x+r.w/2,r.y+r.h*0.65);
+}
+
+// ═══════════════════════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════════════════════
+function render(){
+  var vw=canvas.width,vh=canvas.height;
+  ctx.fillStyle='#1a1a2e';ctx.fillRect(0,0,vw,vh);
+
+  // Device casing — orange/red
+  var grad=ctx.createLinearGradient(D.x,D.y,D.x,D.y+D.h);
+  grad.addColorStop(0,'#c86030');grad.addColorStop(0.4,'#b85028');grad.addColorStop(1,'#a04020');
+  ctx.fillStyle=grad;roundRect(D.x,D.y,D.w,D.h,D.w*0.025);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.1)';roundRect(D.x,D.y,D.w,D.h*0.015,D.w*0.025);ctx.fill();
+  // Screws
+  var sr=D.w*0.01,si=D.w*0.035;
+  [[D.x+si,D.y+si],[D.x+D.w-si,D.y+si],[D.x+si,D.y+D.h-si],[D.x+D.w-si,D.y+D.h-si]].forEach(function(p){
+    ctx.fillStyle='#803018';ctx.beginPath();ctx.arc(p[0],p[1],sr,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#602010';ctx.fillRect(p[0]-sr*0.6,p[1]-sr*0.15,sr*1.2,sr*0.3);
+  });
+  // Title
+  ctx.fillStyle='#f0d0b0';ctx.font='bold '+(D.w*0.032)+'px sans-serif';ctx.textAlign='center';
+  ctx.fillText('FIRE RESCUE',D.x+D.w/2,D.y+D.h*0.055);
+
+  // Screen bezel
+  ctx.fillStyle='#301810';roundRect(S.x-4,S.y-4,S.w+8,S.h+8,3);ctx.fill();
+  ctx.fillStyle=LCD_BG;ctx.fillRect(S.x,S.y,S.w,S.h);
+
+  // ── Screen layout ──
+  var buildX=S.x+S.w*0.02;
+  var buildW=S.w*0.14,buildH=S.h*0.8;
+  var buildY=S.y+S.h*0.12;
+
+  // 3 catch positions (left to right)
+  var catchX=[S.x+S.w*0.3, S.x+S.w*0.52, S.x+S.w*0.72];
+  var catchY=S.y+S.h*0.72; // catch level
+  var arcY=S.y+S.h*0.4; // top of bounce arc
+  // Window Y positions (3 floors, top to bottom)
+  var winY=[buildY+buildH*0.12, buildY+buildH*0.4, buildY+buildH*0.68];
+  var winX=buildX+buildW*0.5;
+
+  var netW=S.w*0.12,netH=S.h*0.2;
+  var netY=S.y+S.h*0.85;
+  var personW=S.w*0.05,personH=S.h*0.1;
+
+  var ambX=S.x+S.w*0.88,ambY=S.y+S.h*0.72;
+  var ambW=S.w*0.14,ambH=S.h*0.2;
+
+  // Score
+  drawScore(S.x+S.w*0.35,S.y+S.h*0.06,S.h*0.09,score);
+  // Misses
+  drawMissMarks(S.x+S.w*0.78,S.y+S.h*0.06,S.h*0.09*0.4);
+
+  // Building (structural, always visible)
+  drawBuilding(buildX,buildY,buildW,buildH,LCD_STRUCT);
+  // Flames — only at windows where person has jumped
+  for(var fi=0;fi<3;fi++){
+    if(flameWindows[fi]){
+      drawFlame(buildX+buildW*1.05,winY[fi]+buildH*0.06,S.w*0.04,S.h*0.07,LCD_ON,flameFrame);
+    }
+  }
+
+  // Ambulance (structural)
+  drawAmbulance(ambX,ambY,ambW,ambH,LCD_STRUCT);
+
+  // Ground line
+  ctx.fillStyle=LCD_STRUCT;
+  ctx.fillRect(S.x+S.w*0.01,S.y+S.h*0.92,S.w*0.98,S.h*0.008);
+
+  // ── GHOST SEGMENTS ──
+  // Person at each window
+  for(var gw=0;gw<3;gw++){
+    drawPerson(winX,winY[gw]+buildH*0.08,personW,personH,LCD_GHOST);
+  }
+  // Person at each catch position (at catch level)
+  for(var gc=0;gc<3;gc++){
+    drawPerson(catchX[gc],catchY,personW,personH,LCD_GHOST);
+  }
+  // Person at arc heights between catches
+  for(var ga=0;ga<2;ga++){
+    drawPerson((catchX[ga]+catchX[ga+1])/2,arcY,personW,personH,LCD_GHOST);
+  }
+  // Person at ambulance
+  drawPerson(ambX,ambY-ambH*0.3,personW*0.8,personH*0.8,LCD_GHOST);
+
+  // All 3 net positions
+  for(var gn=0;gn<3;gn++){
+    drawNet(catchX[gn],netY,netW,netH,LCD_GHOST);
+  }
+
+  // ── ACTIVE ELEMENTS ──
+  if(state==='play'||state==='over'){
+    // Active net
+    drawNet(catchX[netPos],netY,netW,netH,LCD_ON);
+
+    // Active person
+    if(personActive){
+      var px,py;
+      if(person.step===0){
+        // At window
+        px=winX;py=winY[person.floor]+buildH*0.08;
+      }else if(person.step===1){
+        // Falling from building toward catch 0
+        px=(winX+catchX[0])/2;py=(winY[person.floor]+buildH*0.08+catchY)/2;
+      }else if(person.step===2){
+        // At catch 0
+        px=catchX[0];py=catchY;
+      }else if(person.step===3){
+        // Arc between catch 0 and 1
+        px=(catchX[0]+catchX[1])/2;py=arcY;
+      }else if(person.step===4){
+        // At catch 1
+        px=catchX[1];py=catchY;
+      }else if(person.step===5){
+        // Arc between catch 1 and 2
+        px=(catchX[1]+catchX[2])/2;py=arcY;
+      }else if(person.step===6){
+        // At catch 2
+        px=catchX[2];py=catchY;
+      }else{
+        // At ambulance
+        px=ambX;py=ambY-ambH*0.3;
+      }
+      drawPerson(px,py,personW,personH,LCD_ON);
+    }
+  }
+
+  // ── BUTTONS ──
+  var btnW=D.w*0.12,btnH=D.h*0.12;
+  var btnCY=S.y+S.h+D.h*0.04+btnH*0.4;
+  btnL={x:D.x+D.w*0.22-btnW/2,y:btnCY-btnH*0.3,w:btnW,h:btnH*0.6};
+  btnR={x:D.x+D.w*0.78-btnW/2,y:btnCY-btnH*0.3,w:btnW,h:btnH*0.6};
+  drawButton(btnL,'◀');drawButton(btnR,'▶');
+
+  // ── TITLE / GAME OVER ──
+  if(state==='title'){
+    ctx.fillStyle=LCD_ON;ctx.font='bold '+(S.h*0.08)+'px sans-serif';ctx.textAlign='center';
+    ctx.fillText('FIRE RESCUE',S.x+S.w/2,S.y+S.h*0.35);
+    ctx.font=(S.h*0.04)+'px sans-serif';
+    ctx.fillText('← → to move net',S.x+S.w/2,S.y+S.h*0.47);
+    ctx.fillText('Catch people bouncing from the building!',S.x+S.w/2,S.y+S.h*0.53);
+    ctx.fillText('Tap or SPACE to start',S.x+S.w/2,S.y+S.h*0.63);
+    if(hiScore>0)ctx.fillText('Hi Score: '+hiScore,S.x+S.w/2,S.y+S.h*0.73);
+  }
+  if(state==='over'){
+    ctx.fillStyle='rgba(154,173,134,0.88)';ctx.fillRect(S.x+S.w*0.15,S.y+S.h*0.28,S.w*0.7,S.h*0.44);
+    ctx.fillStyle=LCD_ON;ctx.font='bold '+(S.h*0.07)+'px sans-serif';ctx.textAlign='center';
+    ctx.fillText('GAME OVER',S.x+S.w/2,S.y+S.h*0.43);
+    ctx.font=(S.h*0.05)+'px sans-serif';
+    ctx.fillText('Score: '+score,S.x+S.w/2,S.y+S.h*0.54);
+    if(score>=hiScore&&score>0)ctx.fillText('NEW HIGH SCORE!',S.x+S.w/2,S.y+S.h*0.62);
+    ctx.font=(S.h*0.035)+'px sans-serif';
+    ctx.fillText('Tap or SPACE to restart',S.x+S.w/2,S.y+S.h*0.7);
+  }
+}
+
+// ── MAIN LOOP ──
+var lastTime=0;
+function loop(now){
+  if(!lastTime)lastTime=now;
+  var dt=now-lastTime;lastTime=now;
+  if(state==='play'){accumulator+=dt;while(accumulator>=tickRate){accumulator-=tickRate;gameTick()}}
+  render();requestAnimationFrame(loop);
+}
+
+loadHi();initGame();calcLayout();
+window.addEventListener('resize',calcLayout);
+requestAnimationFrame(loop);
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px 'Segoe UI',Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px;">
+  <span id="vc-count">...</span> Heroes
+</div>
+<script>
+(function(){
+  var G='fire-rescue',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

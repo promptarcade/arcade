@@ -1,0 +1,43 @@
+{
+  "request": "a tower defense game where you place turrets to stop waves of bugs",
+  "spec": {
+    "title": "Bug Barrier",
+    "genre": "tower defense",
+    "coreLoop": [
+      "placement",
+      "wave-spawning",
+      "resource-management"
+    ],
+    "controls": {
+      "keyboard": [
+        "arrow keys",
+        "spacebar",
+        "number keys"
+      ],
+      "touch": [
+        "tap",
+        "drag",
+        "pinch"
+      ]
+    },
+    "theme": "insect invasion",
+    "visualStyle": "cartoonish"
+  },
+  "benchmarks": {
+    "avgEntityCount": 52,
+    "commonMechanics": [
+      "placement",
+      "wave-spawning",
+      "resource-management"
+    ],
+    "avgSessionLength": 1860,
+    "recommendedDifficulty": "stepped",
+    "corroboratedProducts": 4
+  },
+  "entityCount": 9,
+  "spriteCount": 9,
+  "mechanicCount": 3,
+  "cost": 2.0156433,
+  "elapsed": "1530.8",
+  "timestamp": "2026-03-23T06:46:55.316Z"
+}

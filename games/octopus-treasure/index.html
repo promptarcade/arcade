@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Octopus Treasure — LCD Classic</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{overflow:hidden;touch-action:none;background:#1a1a2e;width:100%;height:100%}
+body{display:flex;justify-content:center;align-items:center;font-family:'Courier New',monospace}
+canvas{display:block;touch-action:none}
+</style>
+</head>
+<body>
+<canvas id="C"></canvas>
+<script>
+'use strict';
+// ═══════════════════════════════════════════════════════
+// OCTOPUS TREASURE — Game & Watch "Octopus" (1981)
+//
+// Boat top-left, treasure bottom-right, octopus in middle.
+// Diver goes: down rope → across seabed → grab treasure → return.
+// 4 tentacles grow/shrink to block the path. 2 buttons (←→).
+// 1 pt per treasure grab, 3 pts for returning to boat. 3 lives.
+// ═══════════════════════════════════════════════════════
+
+var _SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',_SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(g,s){var n=prompt('Score: '+s+'! Enter initials (max 5):');if(!n)return;n=n.trim().slice(0,5).toUpperCase();if(!n)return;try{await fetch(_SU+'/rest/v1/high_scores',{method:'POST',headers:{'apikey':_SK,'Authorization':'Bearer '+_SK,'Content-Type':'application/json'},body:JSON.stringify({game:g,initials:n,score:s})})}catch(e){}}
+
+var canvas=document.getElementById('C'),ctx=canvas.getContext('2d');
+
+// ── AUDIO ──
+var audioCtx=null;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+function beep(f,d,v){if(!audioCtx)return;var o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type='square';o.frequency.value=f;g.gain.value=v||0.1;g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d)}
+function sfxStep(){beep(200,0.04,0.07)}
+function sfxGrab(){beep(500,0.06,0.1);setTimeout(function(){beep(650,0.05,0.08)},40)}
+function sfxReturn(){beep(600,0.08,0.12);setTimeout(function(){beep(800,0.06,0.1)},60);setTimeout(function(){beep(1000,0.08,0.12)},120)}
+function sfxCaught(){beep(120,0.25,0.18);setTimeout(function(){beep(80,0.3,0.15)},120)}
+function sfxGameOver(){[300,250,200,150,100].forEach(function(f,i){setTimeout(function(){beep(f,0.2,0.12)},i*180)})}
+
+var LCD_BG='#9aad86',LCD_GHOST='#889a75',LCD_ON='#1a2a12',LCD_STRUCT='#708060';
+
+// ── LAYOUT ──
+var D={},S={},btnL,btnR;
+function calcLayout(){
+  var vw=window.innerWidth,vh=window.innerHeight;
+  canvas.width=vw;canvas.height=vh;
+  var asp=5/3;D.w=vw*0.94;D.h=D.w/asp;
+  if(D.h>vh*0.94){D.h=vh*0.94;D.w=D.h*asp}
+  D.x=(vw-D.w)/2;D.y=(vh-D.h)/2;
+  S.w=D.w*0.85;S.h=D.h*0.68;
+  S.x=D.x+(D.w-S.w)/2;S.y=D.y+D.h*0.08;
+}
+
+// ── STATE ──
+// Diver path: 8 positions
+// 0 = in boat, 1-2 = on rope going down, 3-5 = across seabed, 6 = at treasure, 7 = grabbing
+// Going back reverses: 6→5→4→3→2→1→0
+var score,hiScore,lives,diverPos,hasTreasure,treasureCount;
+var tentacles; // [0-2] length for each of 4 tentacles (0=retracted, 1=mid, 2=extended)
+var tentTargets; // target lengths
+var tickRate,accumulator;
+var state,scoreSubmitted;
+
+function loadHi(){try{hiScore=parseInt(localStorage.getItem('oct_hi'))||0}catch(e){hiScore=0}}
+function saveHi(){try{localStorage.setItem('oct_hi',score)}catch(e){}}
+
+function initGame(){
+  score=0;lives=3;diverPos=0;hasTreasure=false;treasureCount=0;
+  tentacles=[0,0,0,0];tentTargets=[0,0,0,0];
+  tickRate=600;accumulator=0;
+  state='title';scoreSubmitted=false;
+}
+function startGame(){initGame();state='play';lives=3;diverPos=0}
+
+// ── DIVER PATH COORDINATES (relative to screen) ──
+// Position 0=boat, 1=rope top, 2=rope bottom, 3-5=seabed left to right, 6=at chest
+function diverXY(pos){
+  var positions=[
+    {x:0.12,y:0.12}, // 0: in boat
+    {x:0.12,y:0.35}, // 1: rope - upper
+    {x:0.14,y:0.58}, // 2: rope - lower
+    {x:0.28,y:0.75}, // 3: seabed left
+    {x:0.45,y:0.78}, // 4: seabed middle
+    {x:0.62,y:0.78}, // 5: seabed right
+    {x:0.78,y:0.72}, // 6: at treasure chest
+  ];
+  var p=positions[Math.min(pos,6)];
+  return {x:S.x+S.w*p.x, y:S.y+S.h*p.y};
+}
+
+// ── TENTACLE DANGER ZONES — which diver positions each tentacle threatens ──
+// Tentacle 0 (leftmost): can reach rope positions 1-2
+// Tentacle 1: threatens seabed position 3
+// Tentacle 2: threatens seabed position 4-5
+// Tentacle 3: threatens position 5-6
+function isDiverCaught(){
+  if(diverPos<=0)return false; // safe in boat
+  // Tentacle 0 reaches rope when extended
+  if(tentacles[0]>=2&&(diverPos===1||diverPos===2))return true;
+  // Tentacle 1 reaches seabed left
+  if(tentacles[1]>=2&&diverPos===3)return true;
+  // Tentacle 2 reaches seabed middle
+  if(tentacles[2]>=2&&(diverPos===4||diverPos===5))return true;
+  // Tentacle 3 reaches near treasure
+  if(tentacles[3]>=2&&(diverPos===5||diverPos===6))return true;
+  return false;
+}
+
+// ── GAME LOGIC ──
+function gameTick(){
+  if(state!=='play')return;
+
+  // Animate tentacles toward targets
+  for(var i=0;i<4;i++){
+    if(tentacles[i]<tentTargets[i])tentacles[i]++;
+    else if(tentacles[i]>tentTargets[i])tentacles[i]--;
+  }
+  // Randomly pick new targets
+  for(var j=0;j<4;j++){
+    if(Math.random()<0.3){
+      tentTargets[j]=Math.floor(Math.random()*3); // 0, 1, or 2
+    }
+  }
+
+  // Check if diver is caught
+  if(isDiverCaught()){
+    lives--;
+    sfxCaught();
+    diverPos=0;hasTreasure=false;treasureCount=0;
+    if(lives<=0){
+      state='over';
+      if(score>hiScore){hiScore=score;saveHi()}
+      if(score>0&&!scoreSubmitted){scoreSubmitted=true;submitScore('octopus-treasure',score)}
+      sfxGameOver();
+    }
+    return;
+  }
+
+  // Speed up
+  tickRate=Math.max(300,600-score*5);
+}
+
+// ── INPUT ──
+function moveRight(){
+  if(state!=='play')return;
+  initAudio();
+  if(diverPos<6){
+    diverPos++;sfxStep();
+  } else if(diverPos===6&&!hasTreasure){
+    // Grab treasure
+    hasTreasure=true;
+    treasureCount++;
+    score++;
+    sfxGrab();
+  }
+}
+function moveLeft(){
+  if(state!=='play')return;
+  initAudio();
+  if(diverPos>0){
+    diverPos--;sfxStep();
+    // Returned to boat with treasure?
+    if(diverPos===0&&hasTreasure){
+      score+=3; // bonus for returning
+      hasTreasure=false;treasureCount=0;
+      sfxReturn();
+    }
+  }
+}
+function doStart(){initAudio();if(state!=='play')startGame()}
+
+window.addEventListener('keydown',function(e){
+  if(e.key==='ArrowLeft'||e.key==='a'){e.preventDefault();moveLeft()}
+  if(e.key==='ArrowRight'||e.key==='d'){e.preventDefault();moveRight()}
+  if(e.key===' '||e.key==='Enter'){e.preventDefault();doStart()}
+});
+function hitTest(x,y){
+  if(state!=='play'){doStart();return}
+  if(btnL&&x>=btnL.x&&x<=btnL.x+btnL.w&&y>=btnL.y&&y<=btnL.y+btnL.h){moveLeft();return}
+  if(btnR&&x>=btnR.x&&x<=btnR.x+btnR.w&&y>=btnR.y&&y<=btnR.y+btnR.h){moveRight();return}
+  if(x<canvas.width/2)moveLeft();else moveRight();
+}
+canvas.addEventListener('mousedown',function(e){hitTest(e.clientX,e.clientY)});
+canvas.addEventListener('touchstart',function(e){e.preventDefault();for(var i=0;i<e.touches.length;i++)hitTest(e.touches[i].clientX,e.touches[i].clientY)},{passive:false});
+
+// ═══════════════════════════════════════════════════════
+// DRAWING
+// ═══════════════════════════════════════════════════════
+
+var SEGS=[0x7E,0x30,0x6D,0x79,0x33,0x5B,0x5F,0x70,0x7F,0x7B];
+function draw7Seg(cx,cy,h,val,col){
+  var w=h*0.55,t=h*0.09,g=h*0.04;ctx.fillStyle=col;var s=SEGS[val]||0;
+  if(s&0x40)ctx.fillRect(cx-w/2+g,cy-h/2,w-g*2,t);
+  if(s&0x20)ctx.fillRect(cx+w/2-t,cy-h/2+g,t,h/2-g*2);
+  if(s&0x10)ctx.fillRect(cx+w/2-t,cy+g,t,h/2-g*2);
+  if(s&0x08)ctx.fillRect(cx-w/2+g,cy+h/2-t,w-g*2,t);
+  if(s&0x04)ctx.fillRect(cx-w/2,cy+g,t,h/2-g*2);
+  if(s&0x02)ctx.fillRect(cx-w/2,cy-h/2+g,t,h/2-g*2);
+  if(s&0x01)ctx.fillRect(cx-w/2+g,cy-t/2,w-g*2,t);
+}
+function drawScore(x,y,h,val){
+  var ds=[Math.floor(val/100)%10,Math.floor(val/10)%10,val%10],dw=h*0.7;
+  for(var i=0;i<3;i++){draw7Seg(x+i*dw,y,h,8,LCD_GHOST);draw7Seg(x+i*dw,y,h,ds[i],LCD_ON)}
+}
+
+// ── BOAT — simple vessel on surface ──
+function drawBoat(cx,cy,w,h,col){
+  ctx.fillStyle=col;
+  // Hull
+  ctx.beginPath();
+  ctx.moveTo(cx-w*0.45,cy-h*0.1);
+  ctx.lineTo(cx-w*0.5,cy+h*0.2);
+  ctx.quadraticCurveTo(cx,cy+h*0.4,cx+w*0.5,cy+h*0.2);
+  ctx.lineTo(cx+w*0.45,cy-h*0.1);
+  ctx.fill();
+  // Cabin
+  ctx.fillRect(cx-w*0.15,cy-h*0.35,w*0.3,h*0.28);
+  // Mast
+  ctx.fillRect(cx-w*0.02,cy-h*0.7,w*0.04,h*0.4);
+}
+
+// ── ROPE — vertical line from boat down ──
+function drawRope(x,y1,y2,col){
+  ctx.fillStyle=col;
+  ctx.fillRect(x-1,y1,2,y2-y1);
+}
+
+// ── DIVER — walking/swimming silhouette with optional treasure bag ──
+function drawDiver(cx,cy,w,h,col,carrying,onRope){
+  ctx.fillStyle=col;
+  if(onRope){
+    // Climbing pose — arms out gripping rope
+    ctx.beginPath();ctx.arc(cx,cy-h*0.3,w*0.12,0,Math.PI*2);ctx.fill();
+    // Body
+    ctx.fillRect(cx-w*0.1,cy-h*0.16,w*0.2,h*0.32);
+    // Arms gripping rope
+    ctx.fillRect(cx-w*0.25,cy-h*0.12,w*0.15,h*0.06);
+    ctx.fillRect(cx+w*0.1,cy-h*0.05,w*0.15,h*0.06);
+    // Legs
+    ctx.fillRect(cx-w*0.1,cy+h*0.16,w*0.08,h*0.18);
+    ctx.fillRect(cx+w*0.02,cy+h*0.16,w*0.08,h*0.18);
+    // Flippers
+    ctx.fillRect(cx-w*0.15,cy+h*0.32,w*0.12,h*0.05);
+    ctx.fillRect(cx+w*0.02,cy+h*0.32,w*0.12,h*0.05);
+  } else {
+    // Walking/swimming on seabed
+    // Head with mask
+    ctx.beginPath();ctx.arc(cx,cy-h*0.3,w*0.12,0,Math.PI*2);ctx.fill();
+    // Mask/goggles cutout
+    ctx.fillStyle=LCD_BG;
+    ctx.fillRect(cx-w*0.08,cy-h*0.33,w*0.12,h*0.05);
+    ctx.fillStyle=col;
+    // Body
+    ctx.beginPath();
+    ctx.moveTo(cx-w*0.12,cy-h*0.16);
+    ctx.lineTo(cx-w*0.14,cy+h*0.18);
+    ctx.lineTo(cx+w*0.14,cy+h*0.18);
+    ctx.lineTo(cx+w*0.12,cy-h*0.16);
+    ctx.fill();
+    // Arms
+    ctx.fillRect(cx-w*0.28,cy-h*0.1,w*0.16,h*0.06);
+    ctx.fillRect(cx+w*0.12,cy-h*0.05,w*0.16,h*0.06);
+    // Legs (walking stride)
+    ctx.fillRect(cx-w*0.12,cy+h*0.18,w*0.08,h*0.16);
+    ctx.fillRect(cx+w*0.04,cy+h*0.18,w*0.08,h*0.16);
+    // Flippers
+    ctx.fillRect(cx-w*0.17,cy+h*0.32,w*0.14,h*0.05);
+    ctx.fillRect(cx+w*0.04,cy+h*0.32,w*0.14,h*0.05);
+  }
+  // Treasure bag if carrying
+  if(carrying){
+    ctx.fillStyle=col;
+    ctx.beginPath();
+    ctx.moveTo(cx+w*0.15,cy-h*0.15);
+    ctx.quadraticCurveTo(cx+w*0.35,cy-h*0.25,cx+w*0.3,cy-h*0.05);
+    ctx.quadraticCurveTo(cx+w*0.28,cy+h*0.05,cx+w*0.15,cy);
+    ctx.fill();
+    // $ on bag
+    ctx.fillStyle=LCD_BG;
+    ctx.fillRect(cx+w*0.22,cy-h*0.14,w*0.03,h*0.08);
+  }
+}
+
+// ── TREASURE CHEST ──
+function drawChest(cx,cy,w,h,col){
+  ctx.fillStyle=col;
+  // Box
+  ctx.fillRect(cx-w*0.4,cy-h*0.1,w*0.8,h*0.4);
+  // Lid (slightly open)
+  ctx.beginPath();
+  ctx.moveTo(cx-w*0.42,cy-h*0.1);
+  ctx.lineTo(cx-w*0.35,cy-h*0.3);
+  ctx.lineTo(cx+w*0.35,cy-h*0.3);
+  ctx.lineTo(cx+w*0.42,cy-h*0.1);
+  ctx.fill();
+  // Lock/clasp
+  ctx.fillStyle=LCD_BG;
+  ctx.fillRect(cx-w*0.06,cy-h*0.05,w*0.12,h*0.1);
+  ctx.fillStyle=col;
+  // Treasure spilling out
+  ctx.beginPath();ctx.arc(cx-w*0.15,cy-h*0.35,w*0.06,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(cx+w*0.1,cy-h*0.38,w*0.05,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(cx,cy-h*0.32,w*0.04,0,Math.PI*2);ctx.fill();
+}
+
+// ── OCTOPUS — bulbous head with eyes ──
+function drawOctopusHead(cx,cy,w,h,col){
+  ctx.fillStyle=col;
+  // Bulbous head
+  ctx.beginPath();
+  ctx.moveTo(cx-w*0.3,cy+h*0.15);
+  ctx.quadraticCurveTo(cx-w*0.4,cy-h*0.3,cx,cy-h*0.4);
+  ctx.quadraticCurveTo(cx+w*0.4,cy-h*0.3,cx+w*0.3,cy+h*0.15);
+  ctx.quadraticCurveTo(cx,cy+h*0.25,cx-w*0.3,cy+h*0.15);
+  ctx.fill();
+  // Eyes
+  ctx.fillStyle=LCD_BG;
+  ctx.beginPath();ctx.arc(cx-w*0.12,cy-h*0.1,w*0.07,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(cx+w*0.12,cy-h*0.1,w*0.07,0,Math.PI*2);ctx.fill();
+  // Pupils
+  ctx.fillStyle=col;
+  ctx.beginPath();ctx.arc(cx-w*0.1,cy-h*0.08,w*0.03,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(cx+w*0.14,cy-h*0.08,w*0.03,0,Math.PI*2);ctx.fill();
+}
+
+// ── TENTACLE — thick filled curve, length 0-2 ──
+function drawTentacle(x1,y1,x2,y2,length,maxLen,thickness,col){
+  if(length<=0)return;
+  ctx.fillStyle=col;
+  var frac=length/maxLen;
+  var mx=(x1+x2)/2,my=(y1+y2)/2;
+  var ex=x1+(x2-x1)*frac,ey=y1+(y2-y1)*frac;
+  // Draw as a thick tapered path
+  var t=thickness;
+  var perpX=-(ey-y1),perpY=(ex-x1);
+  var len=Math.sqrt(perpX*perpX+perpY*perpY)||1;
+  perpX=perpX/len*t;perpY=perpY/len*t;
+
+  ctx.beginPath();
+  ctx.moveTo(x1+perpX,y1+perpY);
+  ctx.quadraticCurveTo(mx+perpX*0.8,my+perpY*0.8,ex+perpX*0.3,ey+perpY*0.3);
+  ctx.lineTo(ex-perpX*0.3,ey-perpY*0.3);
+  ctx.quadraticCurveTo(mx-perpX*0.8,my-perpY*0.8,x1-perpX,y1-perpY);
+  ctx.fill();
+
+  // Sucker bumps along one side
+  var steps=Math.floor(frac*4);
+  for(var i=1;i<=steps;i++){
+    var sf=i/(steps+1);
+    var sx=x1+(ex-x1)*sf+perpX*0.6;
+    var sy=y1+(ey-y1)*sf+perpY*0.6;
+    ctx.beginPath();ctx.arc(sx,sy,t*0.25,0,Math.PI*2);ctx.fill();
+  }
+}
+
+// ── SEABED ──
+function drawSeabed(y,col){
+  ctx.fillStyle=col;
+  ctx.fillRect(S.x+S.w*0.05,y,S.w*0.9,S.h*0.008);
+  // Sandy texture
+  for(var i=0;i<12;i++){
+    ctx.fillRect(S.x+S.w*(0.08+i*0.07),y+S.h*0.015,S.w*0.03,S.h*0.005);
+  }
+}
+
+// ── WATER SURFACE ──
+function drawWaterLine(y,col){
+  ctx.fillStyle=col;
+  ctx.fillRect(S.x+S.w*0.02,y,S.w*0.96,S.h*0.006);
+  for(var i=0;i<8;i++){
+    ctx.fillRect(S.x+S.w*(0.05+i*0.11),y+S.h*0.012,S.w*0.05,S.h*0.004);
+  }
+}
+
+function roundRect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath()}
+function drawButton(r,label){
+  ctx.fillStyle='#6a5820';roundRect(r.x,r.y+2,r.w,r.h,r.h*0.3);ctx.fill();
+  ctx.fillStyle='#8a7838';roundRect(r.x,r.y,r.w,r.h,r.h*0.3);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.06)';roundRect(r.x+r.w*0.1,r.y+1,r.w*0.8,r.h*0.3,r.h*0.15);ctx.fill();
+  ctx.fillStyle='#d0c090';ctx.font='bold '+(r.h*0.5)+'px sans-serif';ctx.textAlign='center';
+  ctx.fillText(label,r.x+r.w/2,r.y+r.h*0.65);
+}
+
+// ═══════════════════════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════════════════════
+function render(){
+  var vw=canvas.width,vh=canvas.height;
+  ctx.fillStyle='#1a1a2e';ctx.fillRect(0,0,vw,vh);
+
+  // Device — golden yellow
+  var grad=ctx.createLinearGradient(D.x,D.y,D.x,D.y+D.h);
+  grad.addColorStop(0,'#c8a838');grad.addColorStop(0.4,'#b89828');grad.addColorStop(1,'#a08820');
+  ctx.fillStyle=grad;roundRect(D.x,D.y,D.w,D.h,D.w*0.025);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.1)';roundRect(D.x,D.y,D.w,D.h*0.015,D.w*0.025);ctx.fill();
+  var sr=D.w*0.01,si=D.w*0.035;
+  [[D.x+si,D.y+si],[D.x+D.w-si,D.y+si],[D.x+si,D.y+D.h-si],[D.x+D.w-si,D.y+D.h-si]].forEach(function(p){
+    ctx.fillStyle='#907820';ctx.beginPath();ctx.arc(p[0],p[1],sr,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#706010';ctx.fillRect(p[0]-sr*0.6,p[1]-sr*0.15,sr*1.2,sr*0.3);
+  });
+  ctx.fillStyle='#f0e8c0';ctx.font='bold '+(D.w*0.03)+'px sans-serif';ctx.textAlign='center';
+  ctx.fillText('OCTOPUS TREASURE',D.x+D.w/2,D.y+D.h*0.055);
+
+  // Screen bezel
+  ctx.fillStyle='#3a2810';roundRect(S.x-4,S.y-4,S.w+8,S.h+8,3);ctx.fill();
+  ctx.fillStyle=LCD_BG;ctx.fillRect(S.x,S.y,S.w,S.h);
+
+  // ── Layout positions ──
+  var boatCX=S.x+S.w*0.12,boatCY=S.y+S.h*0.08;
+  var boatW=S.w*0.15,boatH=S.h*0.12;
+  var ropeX=S.x+S.w*0.13;
+  var waterY=S.y+S.h*0.2;
+  var seabedY=S.y+S.h*0.82;
+  var chestCX=S.x+S.w*0.82,chestCY=S.y+S.h*0.72;
+  var chestW=S.w*0.12,chestH=S.h*0.12;
+  var octCX=S.x+S.w*0.45,octCY=S.y+S.h*0.35;
+  var octW=S.w*0.15,octH=S.h*0.15;
+  var diverW=S.w*0.07,diverH=S.h*0.15;
+
+  // Tentacle endpoints (from octopus head to danger zones)
+  var tentBase=[
+    {x:octCX-octW*0.2,y:octCY+octH*0.3},  // T0: reaches toward rope
+    {x:octCX-octW*0.05,y:octCY+octH*0.4},  // T1: reaches left seabed
+    {x:octCX+octW*0.1,y:octCY+octH*0.4},   // T2: reaches mid seabed
+    {x:octCX+octW*0.25,y:octCY+octH*0.3},  // T3: reaches right/treasure
+  ];
+  var tentEnd=[
+    {x:S.x+S.w*0.15,y:S.y+S.h*0.55},  // toward rope area
+    {x:S.x+S.w*0.28,y:S.y+S.h*0.72},  // toward seabed left
+    {x:S.x+S.w*0.5,y:S.y+S.h*0.75},   // toward seabed mid
+    {x:S.x+S.w*0.7,y:S.y+S.h*0.7},    // toward treasure
+  ];
+  var tentThick=S.w*0.015;
+
+  // Score (top right)
+  drawScore(S.x+S.w*0.72,S.y+S.h*0.05,S.h*0.09,score);
+
+  // Lives (top right, below score)
+  for(var li=0;li<3;li++){
+    ctx.fillStyle=(li<lives&&state!=='title')?LCD_ON:LCD_GHOST;
+    ctx.beginPath();ctx.arc(S.x+S.w*(0.74+li*0.08),S.y+S.h*0.15,S.h*0.02,0,Math.PI*2);ctx.fill();
+  }
+
+  // ── STRUCTURAL ELEMENTS (always visible) ──
+  drawWaterLine(waterY,LCD_STRUCT);
+  drawSeabed(seabedY,LCD_STRUCT);
+  drawBoat(boatCX,boatCY,boatW,boatH,LCD_STRUCT);
+  drawRope(ropeX,S.y+S.h*0.18,S.y+S.h*0.65,LCD_STRUCT);
+  drawChest(chestCX,chestCY,chestW,chestH,LCD_STRUCT);
+  drawOctopusHead(octCX,octCY,octW,octH,LCD_STRUCT);
+
+  // ── GHOST SEGMENTS — all diver positions ──
+  for(var gd=0;gd<=6;gd++){
+    var gp=diverXY(gd);
+    drawDiver(gp.x,gp.y,diverW,diverH,LCD_GHOST,false,gd<=2);
+  }
+
+  // ── TENTACLES (active, variable length) ──
+  if(state==='play'||state==='over'){
+    for(var ti=0;ti<4;ti++){
+      drawTentacle(tentBase[ti].x,tentBase[ti].y,tentEnd[ti].x,tentEnd[ti].y,
+                   tentacles[ti],2,tentThick,LCD_ON);
+      // Ghost at max extension
+      drawTentacle(tentBase[ti].x,tentBase[ti].y,tentEnd[ti].x,tentEnd[ti].y,
+                   2,2,tentThick*0.5,LCD_GHOST);
+    }
+  }
+
+  // ── ACTIVE DIVER ──
+  if(state==='play'||state==='over'){
+    var dp=diverXY(diverPos);
+    drawDiver(dp.x,dp.y,diverW,diverH,LCD_ON,hasTreasure,diverPos<=2);
+  }
+
+  // ── BUTTONS ──
+  var btnW=D.w*0.12,btnH=D.h*0.12;
+  var btnCY=S.y+S.h+D.h*0.04+btnH*0.4;
+  btnL={x:D.x+D.w*0.22-btnW/2,y:btnCY-btnH*0.3,w:btnW,h:btnH*0.6};
+  btnR={x:D.x+D.w*0.78-btnW/2,y:btnCY-btnH*0.3,w:btnW,h:btnH*0.6};
+  drawButton(btnL,'◀ UP');drawButton(btnR,'▶ DOWN');
+
+  // ── TITLE / GAME OVER ──
+  if(state==='title'){
+    ctx.fillStyle=LCD_ON;ctx.font='bold '+(S.h*0.07)+'px sans-serif';ctx.textAlign='center';
+    ctx.fillText('OCTOPUS TREASURE',S.x+S.w/2,S.y+S.h*0.32);
+    ctx.font=(S.h*0.035)+'px sans-serif';
+    ctx.fillText('→ to dive down and grab treasure',S.x+S.w/2,S.y+S.h*0.44);
+    ctx.fillText('← to return to the boat',S.x+S.w/2,S.y+S.h*0.5);
+    ctx.fillText('Avoid the tentacles!',S.x+S.w/2,S.y+S.h*0.56);
+    ctx.fillText('1pt per grab, 3pt bonus for returning',S.x+S.w/2,S.y+S.h*0.62);
+    ctx.fillText('Tap or SPACE to start',S.x+S.w/2,S.y+S.h*0.72);
+    if(hiScore>0)ctx.fillText('Hi Score: '+hiScore,S.x+S.w/2,S.y+S.h*0.82);
+  }
+  if(state==='over'){
+    ctx.fillStyle='rgba(154,173,134,0.88)';ctx.fillRect(S.x+S.w*0.15,S.y+S.h*0.28,S.w*0.7,S.h*0.44);
+    ctx.fillStyle=LCD_ON;ctx.font='bold '+(S.h*0.07)+'px sans-serif';ctx.textAlign='center';
+    ctx.fillText('GAME OVER',S.x+S.w/2,S.y+S.h*0.43);
+    ctx.font=(S.h*0.05)+'px sans-serif';
+    ctx.fillText('Score: '+score,S.x+S.w/2,S.y+S.h*0.54);
+    if(score>=hiScore&&score>0)ctx.fillText('NEW HIGH SCORE!',S.x+S.w/2,S.y+S.h*0.62);
+    ctx.font=(S.h*0.035)+'px sans-serif';
+    ctx.fillText('Tap or SPACE to restart',S.x+S.w/2,S.y+S.h*0.7);
+  }
+}
+
+// ── MAIN LOOP ──
+var lastTime=0;
+function loop(now){
+  if(!lastTime)lastTime=now;
+  var dt=now-lastTime;lastTime=now;
+  if(state==='play'){accumulator+=dt;while(accumulator>=tickRate){accumulator-=tickRate;gameTick()}}
+  render();requestAnimationFrame(loop);
+}
+
+loadHi();initGame();calcLayout();
+window.addEventListener('resize',calcLayout);
+requestAnimationFrame(loop);
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px 'Segoe UI',Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px;">
+  <span id="vc-count">...</span> Treasure Hunters
+</div>
+<script>
+(function(){
+  var G='octopus-treasure',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

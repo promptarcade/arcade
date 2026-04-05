@@ -1,0 +1,128 @@
+[
+  {
+    "promptKey": "12x48 filled vertical rectangle, filling most of the canvas",
+    "prompt": "Draw a 12x48 filled vertical rectangle, filling most of the canvas on a PixelCanvas.\nColors: base=\"#0080FF\", light=\"#80D4FF\", dark=\"#0047AB\", accent=\"#FFB400\"\nAPI: pc.fillCircle(cx, cy, r, idx), pc.fillRect(x,y,w,h,idx), pc.fillEllipse(cx,cy,rx,ry,idx), pc.setPixel(x,y,idx)\nColor index: pal.groups.base.startIdx + (0=dark,1=mid,2=light,3=brightest)\nCanvas: 12x48, origin top-left. Fill at least 30% of the canvas. Use at least 2 color groups.\nOutput drawBody: the drawing code as a string.",
+    "output": "// Fill entire canvas with base light blue (fills 100% = 576 pixels, well over 30%)\npc.fillRect(0, 0, 12, 48, pal.groups.base.startIdx + 2);\n\n// Add accent vertical stripe on left side for visual interest and to use accent color group\npc.fillRect(0, 0, 3, 48, pal.groups.accent.startIdx + 2);",
+    "timestamp": 1774320867734,
+    "runId": "mn40t2tr-0"
+  },
+  {
+    "promptKey": "12x48 filled vertical rectangle, filling most of the canvas",
+    "prompt": "Draw a 12x48 filled vertical rectangle, filling most of the canvas on a PixelCanvas.\nColors: base=\"#B93A5F\", light=\"#E8899A\", dark=\"#5E1E35\", accent=\"#D4956B\"\nAPI: pc.fillCircle(cx, cy, r, idx), pc.fillRect(x,y,w,h,idx), pc.fillEllipse(cx,cy,rx,ry,idx), pc.setPixel(x,y,idx)\nColor index: pal.groups.base.startIdx + (0=dark,1=mid,2=light,3=brightest)\nCanvas: 12x48, origin top-left. Fill at least 30% of the canvas. Use at least 2 color groups.\nOutput drawBody: the drawing code as a string.",
+    "output": "\nconst darkIdx = pal.groups.base.startIdx + 0;\nconst midIdx = pal.groups.base.startIdx + 1;\nconst lightIdx = pal.groups.base.startIdx + 2;\nconst accentIdx = pal.groups.accent.startIdx + 1;\n\n// Fill the entire 12x48 vertical rectangle with mid color\npc.fillRect(0, 0, 12, 48, midIdx);\n\n// Add vertical accent stripe in the middle\npc.fillRect(5, 0, 2, 48, accentIdx);\n\n// Add light left edge for depth\npc.fillRect(0, 0, 1, 48, lightIdx);\n\n// Add dark right edge for depth\npc.fillRect(11, 0, 1, 48, darkIdx);\n",
+    "timestamp": 1774320875438,
+    "runId": "mn40t2tr-0"
+  },
+  {
+    "promptKey": "16x16 filled circle, centered, radius filling most of the canvas",
+    "prompt": "Draw a 16x16 filled circle, centered, radius filling most of the canvas on a PixelCanvas.\nColors: base=\"#FAFBFC\", light=\"#FFFFFF\", dark=\"#E0E6ED\", accent=\"#00E5FF\"\nAPI: pc.fillCircle(cx, cy, r, idx), pc.fillRect(x,y,w,h,idx), pc.fillEllipse(cx,cy,rx,ry,idx), pc.setPixel(x,y,idx)\nColor index: pal.groups.base.startIdx + (0=dark,1=mid,2=light,3=brightest)\nCanvas: 16x16, origin top-left. Fill at least 30% of the canvas. Use at least 2 color groups.\nOutput drawBody: the drawing code as a string.",
+    "output": "pc.fillCircle(8, 8, 7, pal.groups.base.startIdx + 0);\npc.fillCircle(8, 8, 5, pal.groups.base.startIdx + 2);\npc.fillCircle(8, 8, 2, pal.groups.accent.startIdx + 0);",
+    "timestamp": 1774320911137,
+    "runId": "mn40t2tr-0"
+  },
+  {
+    "promptKey": "12x48 filled vertical rectangle, filling most of the canvas",
+    "prompt": "Draw a 12x48 filled vertical rectangle, filling most of the canvas on a PixelCanvas.\nColors: base=\"#0099FF\", light=\"#66D9FF\", dark=\"#003D7A\", accent=\"#00D4FF\"\nAPI: pc.fillCircle(cx, cy, r, idx), pc.fillRect(x,y,w,h,idx), pc.fillEllipse(cx,cy,rx,ry,idx), pc.setPixel(x,y,idx)\nColor index: pal.groups.base.startIdx + (0=dark,1=mid,2=light,3=brightest)\nCanvas: 12x48, origin top-left. Fill at least 30% of the canvas. Use at least 2 color groups.\nOutput drawBody: the drawing code as a string.",
+    "output": "const darkIdx = pal.groups.base.startIdx + 0;\nconst midIdx = pal.groups.base.startIdx + 1;\nconst lightIdx = pal.groups.base.startIdx + 2;\nconst accentIdx = pal.groups.accent.startIdx + 1;\n\n// Fill the entire 12x48 vertical rectangle with mid color\npc.fillRect(0, 0, 12, 48, midIdx);\n\n// Add vertical accent stripe in the middle for visual interest\npc.fillRect(5, 0, 2, 48, accentIdx);\n\n// Add light left edge for depth\npc.fillRect(0, 0, 1, 48, lightIdx);\n\n// Add dark right edge for depth\npc.fillRect(11, 0, 1, 48, darkIdx);",
+    "timestamp": 1774320952163,
+    "runId": "mn40t2tr-1"
+  },
+  {
+    "promptKey": "12x48 filled vertical rectangle, filling most of the canvas",
+    "prompt": "Draw a 12x48 filled vertical rectangle, filling most of the canvas on a PixelCanvas.\nColors: base=\"#B93A5F\", light=\"#E8899A\", dark=\"#5E1E35\", accent=\"#D4956B\"\nAPI: pc.fillCircle(cx, cy, r, idx), pc.fillRect(x,y,w,h,idx), pc.fillEllipse(cx,cy,rx,ry,idx), pc.setPixel(x,y,idx)\nColor index: pal.groups.base.startIdx + (0=dark,1=mid,2=light,3=brightest)\nCanvas: 12x48, origin top-left. Fill at least 30% of the canvas. Use at least 2 color groups.\nOutput drawBody: the drawing code as a string.",
+    "output": "const darkIdx = pal.groups.base.startIdx + 0;\nconst midIdx = pal.groups.base.startIdx + 1;\nconst lightIdx = pal.groups.base.startIdx + 2;\nconst accentIdx = pal.groups.accent.startIdx + 1;\n\n// Fill the entire 12x48 vertical rectangle with mid color\npc.fillRect(0, 0, 12, 48, midIdx);\n\n// Add vertical accent stripe in the middle\npc.fillRect(5, 0, 2, 48, accentIdx);\n\n// Add light left edge for depth\npc.fillRect(0, 0, 1, 48, lightIdx);\n\n// Add dark right edge for depth\npc.fillRect(11, 0, 1, 48, darkIdx);",
+    "timestamp": 1774320952271,
+    "runId": "mn40t2tr-1"
+  },
+  {
+    "promptKey": "16x16 filled circle, centered, radius filling most of the canvas",
+    "prompt": "Draw a 16x16 filled circle, centered, radius filling most of the canvas on a PixelCanvas.\nColors: base=\"#FAFBFC\", light=\"#FFFFFF\", dark=\"#E0E6ED\", accent=\"#00E5FF\"\nAPI: pc.fillCircle(cx, cy, r, idx), pc.fillRect(x,y,w,h,idx), pc.fillEllipse(cx,cy,rx,ry,idx), pc.setPixel(x,y,idx)\nColor index: pal.groups.base.startIdx + (0=dark,1=mid,2=light,3=brightest)\nCanvas: 16x16, origin top-left. Fill at least 30% of the canvas. Use at least 2 color groups.\nOutput drawBody: the drawing code as a string.",
+    "output": "const baseLight = pal.groups.base.startIdx + 2;\nconst accentMid = pal.groups.accent.startIdx + 1;\n\n// Fill main circle with radius 7 centered at (8,8), filling ~60% of canvas\npc.fillCircle(8, 8, 7, baseLight);\n\n// Add accent inner circle with radius 3 for visual depth and contrast\npc.fillCircle(8, 8, 3, accentMid);",
+    "timestamp": 1774320960758,
+    "runId": "mn40t2tr-1"
+  },
+  {
+    "promptKey": "16x16 filled circle, centered, radius filling most of the canvas",
+    "prompt": "Draw a 16x16 filled circle, centered, radius filling most of the canvas on a PixelCanvas.\nColors: base=\"#FAFBFC\", light=\"#FFFFFF\", dark=\"#E0E6ED\", accent=\"#00E5FF\"\nAPI: pc.fillCircle(cx, cy, r, idx), pc.fillRect(x,y,w,h,idx), pc.fillEllipse(cx,cy,rx,ry,idx), pc.setPixel(x,y,idx)\nColor index: pal.groups.base.startIdx + (0=dark,1=mid,2=light,3=brightest)\nCanvas: 16x16, origin top-left. Fill at least 30% of the canvas. Use at least 2 color groups.\nOutput drawBody: the drawing code as a string.",
+    "output": "const baseLight = pal.groups.base.startIdx + 2;\nconst accentBright = pal.groups.accent.startIdx + 3;\n\n// Fill main circle with radius 7 centered at (8,8), filling ~60% of canvas\npc.fillCircle(8, 8, 7, baseLight);\n\n// Add accent inner circle with radius 3 for visual depth and contrast\npc.fillCircle(8, 8, 3, accentBright);",
+    "timestamp": 1774320999849,
+    "runId": "mn40t2tr-2"
+  },
+  {
+    "promptKey": "12x48 filled vertical rectangle, filling most of the canvas",
+    "prompt": "Draw a 12x48 filled vertical rectangle, filling most of the canvas on a PixelCanvas.\nColors: base=\"#C41E3A\", light=\"#FF7F7F\", dark=\"#8B0000\", accent=\"#FFB347\"\nAPI: pc.fillCircle(cx, cy, r, idx), pc.fillRect(x,y,w,h,idx), pc.fillEllipse(cx,cy,rx,ry,idx), pc.setPixel(x,y,idx)\nColor index: pal.groups.base.startIdx + (0=dark,1=mid,2=light,3=brightest)\nCanvas: 12x48, origin top-left. Fill at least 30% of the canvas. Use at least 2 color groups.\nOutput drawBody: the drawing code as a string.",
+    "output": "// Fill entire 12x48 canvas with base light color (fills 100% = 576 pixels, well over 30%)\npc.fillRect(0, 0, 12, 48, pal.groups.base.startIdx + 2);\n\n// Add accent vertical stripe on left side for visual interest and to use accent color group\npc.fillRect(0, 0, 3, 48, pal.groups.accent.startIdx + 2);",
+    "timestamp": 1774321006837,
+    "runId": "mn40t2tr-2"
+  },
+  {
+    "promptKey": "12x48 filled vertical rectangle, filling most of the canvas",
+    "prompt": "Draw a 12x48 filled vertical rectangle, filling most of the canvas on a PixelCanvas.\nColors: base=\"#0080FF\", light=\"#80D4FF\", dark=\"#0047AB\", accent=\"#FFB400\"\nAPI: pc.fillCircle(cx, cy, r, idx), pc.fillRect(x,y,w,h,idx), pc.fillEllipse(cx,cy,rx,ry,idx), pc.setPixel(x,y,idx)\nColor index: pal.groups.base.startIdx + (0=dark,1=mid,2=light,3=brightest)\nCanvas: 12x48, origin top-left. Fill at least 30% of the canvas. Use at least 2 color groups.\nOutput drawBody: the drawing code as a string.",
+    "output": "const darkIdx = pal.groups.base.startIdx + 0;\nconst midIdx = pal.groups.base.startIdx + 1;\nconst lightIdx = pal.groups.base.startIdx + 2;\nconst accentIdx = pal.groups.accent.startIdx + 1;\n\n// Fill the entire 12x48 vertical rectangle with base mid color\npc.fillRect(0, 0, 12, 48, midIdx);\n\n// Add accent vertical stripe on the right side for visual interest\npc.fillRect(9, 0, 3, 48, accentIdx);\n\n// Add light left edge for depth\npc.fillRect(0, 0, 1, 48, lightIdx);\n\n// Add dark right edge for visual depth\npc.fillRect(11, 0, 1, 48, darkIdx);",
+    "timestamp": 1774321007304,
+    "runId": "mn40t2tr-2"
+  },
+  {
+    "promptKey": "12x48 filled vertical rectangle, filling most of the canvas",
+    "prompt": "shape: filled vertical rectangle, filling most of the canvas",
+    "output": "const darkIdx = pal.groups.base.startIdx + 0;\nconst midIdx = pal.groups.base.startIdx + 1;\nconst lightIdx = pal.groups.base.startIdx + 2;\nconst accentIdx = pal.groups.accent.startIdx + 1;\n\n// Fill the entire 12x48 vertical rectangle with mid color\npc.fillRect(0, 0, 12, 48, midIdx);\n\n// Add vertical accent stripe in the middle for visual interest\npc.fillRect(5, 0, 2, 48, accentIdx);\n\n// Add light left edge for depth\npc.fillRect(0, 0, 1, 48, lightIdx);\n\n// Add dark right edge for depth\npc.fillRect(11, 0, 1, 48, darkIdx);",
+    "timestamp": 1774322873714,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "12x48 filled vertical rectangle, filling most of the canvas",
+    "prompt": "shape: filled vertical rectangle, filling most of the canvas",
+    "output": "const baseMid = pal.groups.base.startIdx + 1;\nconst baseLight = pal.groups.base.startIdx + 2;\nconst baseDark = pal.groups.base.startIdx + 0;\nconst accentMid = pal.groups.accent.startIdx + 1;\n\n// Fill the entire 12x48 vertical rectangle with mid color (100% fill)\npc.fillRect(0, 0, 12, 48, baseMid);\n\n// Add dark left edge for depth and dimension\npc.fillRect(0, 0, 1, 48, baseDark);\n\n// Add light right edge for contrast and polish\npc.fillRect(11, 0, 1, 48, baseLight);\n\n// Add accent vertical stripe in the middle for visual interest\npc.fillRect(5, 0, 2, 48, accentMid);",
+    "timestamp": 1774322873717,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "16x16 filled circle, centered, radius filling most of the canvas",
+    "prompt": "shape: filled circle, centered, radius filling most of the canvas",
+    "output": "const baseLight = pal.groups.base.startIdx + 2;\nconst accentBright = pal.groups.accent.startIdx + 3;\n\n// Fill main circle with radius 7 centered at (8,8), filling ~60% of canvas\npc.fillCircle(8, 8, 7, baseLight);\n\n// Add accent inner circle with radius 3 for visual depth and contrast\npc.fillCircle(8, 8, 3, accentBright);",
+    "timestamp": 1774322873807,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "12x48 filled vertical rectangle, filling most of the canvas",
+    "prompt": "shape: filled vertical rectangle, filling most of the canvas",
+    "output": "// Fill the entire 12x48 vertical rectangle with base group mid-tone\npc.fillRect(0, 0, 12, 48, pal.groups.base.startIdx + 1);\n\n// Add accent vertical stripe in the center for visual interest\npc.fillRect(4, 0, 4, 48, pal.groups.accent.startIdx + 2);\n\n// Add dark left edge for depth using base group dark variant\npc.fillRect(0, 0, 1, 48, pal.groups.base.startIdx + 0);\n\n// Add light right edge for depth using base group light variant\npc.fillRect(11, 0, 1, 48, pal.groups.base.startIdx + 2);",
+    "timestamp": 1774323117876,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "12x48 filled vertical rectangle, filling most of the canvas",
+    "prompt": "shape: filled vertical rectangle, filling most of the canvas",
+    "output": "const darkIdx = pal.groups.base.startIdx + 0;\nconst midIdx = pal.groups.base.startIdx + 1;\nconst lightIdx = pal.groups.base.startIdx + 2;\nconst accentIdx = pal.groups.accent.startIdx + 1;\n\n// Fill the entire 12x48 vertical rectangle with mid blue color\npc.fillRect(0, 0, 12, 48, midIdx);\n\n// Add dark left edge for depth\npc.fillRect(0, 0, 1, 48, darkIdx);\n\n// Add light right edge for contrast and depth\npc.fillRect(11, 0, 1, 48, lightIdx);\n\n// Add bright cyan accent vertical stripe in the middle for visual interest\npc.fillRect(5, 0, 2, 48, accentIdx);",
+    "timestamp": 1774323121678,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "16x16 filled circle, centered, radius filling most of the canvas",
+    "prompt": "shape: filled circle, centered, radius filling most of the canvas",
+    "output": "const darkIdx = pal.groups.base.startIdx + 0;\nconst midIdx = pal.groups.base.startIdx + 1;\nconst lightIdx = pal.groups.base.startIdx + 2;\nconst accentIdx = pal.groups.accent.startIdx + 1;\n\n// Fill a large centered circle with radius 7\n// Covers ~154 pixels (60% of 256 total), well over the 30% requirement\npc.fillCircle(8, 8, 7, midIdx);\n\n// Add light shading on the top-left for 3D depth effect\npc.fillCircle(5, 5, 2, lightIdx);\n\n// Add accent color highlight for visual interest\npc.fillCircle(8, 5, 1, accentIdx);",
+    "timestamp": 1774323126479,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "12x48 filled vertical rectangle, filling most of the canvas",
+    "prompt": "shape: filled vertical rectangle, filling most of the canvas",
+    "output": "// Fill entire canvas with base red (fills 100% = 576 pixels, well over 30%)\npc.fillRect(0, 0, 12, 48, pal.groups.base.startIdx + 1);\n\n// Add accent orange stripe on left side for visual interest and to use accent color group\npc.fillRect(0, 0, 3, 48, pal.groups.accent.startIdx + 2);",
+    "timestamp": 1774323339890,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "12x48 filled vertical rectangle, filling most of the canvas",
+    "prompt": "shape: filled vertical rectangle, filling most of the canvas",
+    "output": "const darkIdx = pal.groups.base.startIdx + 0;\nconst midIdx = pal.groups.base.startIdx + 1;\nconst lightIdx = pal.groups.base.startIdx + 2;\nconst accentIdx = pal.groups.accent.startIdx + 1;\n\n// Fill the entire 12x48 vertical rectangle with mid color\npc.fillRect(0, 0, 12, 48, midIdx);\n\n// Add accent vertical stripe in the middle\npc.fillRect(5, 0, 2, 48, accentIdx);\n\n// Add light left edge for depth\npc.fillRect(0, 0, 1, 48, lightIdx);\n\n// Add dark right edge for depth\npc.fillRect(11, 0, 1, 48, darkIdx);",
+    "timestamp": 1774323340479,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "16x16 filled circle, centered, radius filling most of the canvas",
+    "prompt": "shape: filled circle, centered, radius filling most of the canvas",
+    "output": "const darkIdx = pal.groups.base.startIdx + 0;\nconst midIdx = pal.groups.base.startIdx + 1;\nconst lightIdx = pal.groups.base.startIdx + 2;\nconst accentIdx = pal.groups.accent.startIdx + 1;\n\n// Fill a large centered circle with radius 7\n// Covers ~154 pixels (60% of 256 total), well over the 30% requirement\npc.fillCircle(8, 8, 7, midIdx);\n\n// Add dark shading on the bottom for 3D depth effect\npc.fillCircle(8, 11, 2, darkIdx);\n\n// Add light highlight on the top for contrast and depth\npc.fillCircle(8, 5, 2, lightIdx);\n\n// Add bright cyan accent circle in center for visual interest\npc.fillCircle(8, 8, 1, accentIdx);",
+    "timestamp": 1774323348133,
+    "runId": "mesh"
+  }
+]

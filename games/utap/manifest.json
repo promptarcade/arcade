@@ -1,0 +1,14 @@
+{
+  "name": "Utap",
+  "short_name": "Utap",
+  "description": "Tap photos to hear animals, instruments, and machines",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#f5f5f5",
+  "theme_color": "#f5f5f5",
+  "categories": ["education", "kids"],
+  "icons": [
+    {"src": "images/animals/lion.jpg", "sizes": "225x225", "type": "image/jpeg"}
+  ]
+}

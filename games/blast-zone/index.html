@@ -1,0 +1,1153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Blast Zone</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#111;touch-action:none;user-select:none;-webkit-user-select:none}
+canvas{display:block;width:100vw;height:100vh}
+#dpad{position:fixed;bottom:20px;left:20px;width:150px;height:150px;z-index:10;display:none}
+#dpad button{position:absolute;width:50px;height:50px;background:rgba(255,255,255,0.15);border:2px solid rgba(255,255,255,0.3);border-radius:10px;color:#fff;font-size:22px;line-height:50px;text-align:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
+#dpad .up{top:0;left:50px}
+#dpad .down{bottom:0;left:50px}
+#dpad .left{top:50px;left:0}
+#dpad .right{top:50px;left:100px}
+#bombBtn{position:fixed;bottom:40px;right:30px;width:80px;height:80px;background:rgba(255,80,0,0.25);border:3px solid rgba(255,120,0,0.5);border-radius:50%;color:#ff8800;font-size:36px;line-height:80px;text-align:center;z-index:10;cursor:pointer;display:none;-webkit-tap-highlight-color:transparent}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="dpad">
+  <button class="up" data-dir="up">&#9650;</button>
+  <button class="down" data-dir="down">&#9660;</button>
+  <button class="left" data-dir="left">&#9664;</button>
+  <button class="right" data-dir="right">&#9654;</button>
+</div>
+<button id="bombBtn">&#128163;</button>
+
+<script>
+// ============================================================
+// BOMBERMAN — Prompt Arcade
+// Single-file canvas game, 60fps, mobile + desktop
+// ============================================================
+(function(){
+'use strict';
+
+var _SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',_SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(g,s){var n=prompt('Score: '+s+'! Enter initials (max 5):');if(!n)return;n=n.trim().slice(0,5).toUpperCase();if(!n)return;try{await fetch(_SU+'/rest/v1/high_scores',{method:'POST',headers:{'apikey':_SK,'Authorization':'Bearer '+_SK,'Content-Type':'application/json'},body:JSON.stringify({game:g,initials:n,score:s})})}catch(e){}}
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// --- CONSTANTS ---
+const COLS = 13, ROWS = 11;
+const TILE_FLOOR = 0, TILE_WALL = 1, TILE_SOFT = 2;
+const DIR = {up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
+
+// --- AUDIO ---
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+function ensureAudio(){if(!audioCtx)audioCtx=new AudioCtx()}
+
+function playTone(freq,dur,type,vol,freqEnd){
+  ensureAudio();
+  const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+  o.type=type||'square';o.frequency.setValueAtTime(freq,audioCtx.currentTime);
+  if(freqEnd)o.frequency.linearRampToValueAtTime(freqEnd,audioCtx.currentTime+dur);
+  g.gain.setValueAtTime(vol||0.1,audioCtx.currentTime);
+  g.gain.linearRampToValueAtTime(0,audioCtx.currentTime+dur);
+  o.connect(g);g.connect(audioCtx.destination);
+  o.start();o.stop(audioCtx.currentTime+dur);
+}
+
+function sfxBomb(){playTone(120,0.15,'square',0.12)}
+function sfxExplode(){playTone(200,0.4,'sawtooth',0.15,40);setTimeout(()=>playTone(80,0.3,'square',0.1,30),50)}
+function sfxPickup(){playTone(600,0.08,'square',0.1);setTimeout(()=>playTone(900,0.1,'square',0.1),80)}
+function sfxDeath(){playTone(300,0.5,'sawtooth',0.15,50);setTimeout(()=>playTone(100,0.4,'square',0.1,30),200)}
+function sfxLevelClear(){for(let i=0;i<5;i++)setTimeout(()=>playTone(400+i*100,0.15,'square',0.08),i*120)}
+
+// --- GAME STATE ---
+let tileSize, offsetX, offsetY;
+let grid=[], bombs=[], explosions=[], enemies=[], powerups=[];
+let player={};
+let gameState='title'; // title, playing, dying, gameover, levelclear
+let score=0, lives=3, level=1;
+let highScore=parseInt(localStorage.getItem('blast-zone_hi'))||0;
+let stateTimer=0;
+let flashTimer=0;
+let keys={};
+
+// --- MOBILE DETECTION ---
+const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+// --- RESIZE ---
+function resize(){
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  // Calculate tile size to fit grid with some padding
+  const padX = isMobile ? 10 : 40;
+  const padTop = 50; // HUD
+  const padBot = isMobile ? 170 : 20;
+  const availW = canvas.width - padX*2;
+  const availH = canvas.height - padTop - padBot;
+  tileSize = Math.floor(Math.min(availW/COLS, availH/ROWS));
+  if(tileSize < 10) tileSize = 10;
+  offsetX = Math.floor((canvas.width - COLS*tileSize)/2);
+  offsetY = padTop + Math.floor((availH - ROWS*tileSize)/2);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- MOBILE CONTROLS ---
+if(isMobile){
+  document.getElementById('dpad').style.display='block';
+  document.getElementById('bombBtn').style.display='block';
+}
+
+let mobileDir = null;
+let mobileDirInterval = null;
+
+document.querySelectorAll('#dpad button').forEach(btn=>{
+  const dir = btn.dataset.dir;
+  const startMove = (e)=>{
+    e.preventDefault();
+    ensureAudio();
+    mobileDir = dir;
+    keys[dir] = true;
+  };
+  const stopMove = (e)=>{
+    e.preventDefault();
+    mobileDir = null;
+    keys[dir] = false;
+  };
+  btn.addEventListener('touchstart', startMove, {passive:false});
+  btn.addEventListener('touchend', stopMove, {passive:false});
+  btn.addEventListener('touchcancel', stopMove, {passive:false});
+});
+
+document.getElementById('bombBtn').addEventListener('touchstart', (e)=>{
+  e.preventDefault();
+  ensureAudio();
+  if(gameState==='playing') placeBomb();
+},{passive:false});
+
+// Prevent scrolling
+document.addEventListener('touchmove', e=>e.preventDefault(), {passive:false});
+
+// --- KEYBOARD ---
+window.addEventListener('keydown', e=>{
+  ensureAudio();
+  const k=e.key;
+  if(k==='ArrowUp'||k==='w'||k==='W')keys.up=true;
+  if(k==='ArrowDown'||k==='s'||k==='S')keys.down=true;
+  if(k==='ArrowLeft'||k==='a'||k==='A')keys.left=true;
+  if(k==='ArrowRight'||k==='d'||k==='D')keys.right=true;
+  if(k===' '){e.preventDefault();if(gameState==='playing')placeBomb();}
+  if(k==='Enter'||k===' '){
+    if(gameState==='title'){startGame();e.preventDefault();}
+    if(gameState==='gameover'){startGame();e.preventDefault();}
+    if(gameState==='levelclear'){nextLevel();e.preventDefault();}
+  }
+});
+window.addEventListener('keyup', e=>{
+  const k=e.key;
+  if(k==='ArrowUp'||k==='w'||k==='W')keys.up=false;
+  if(k==='ArrowDown'||k==='s'||k==='S')keys.down=false;
+  if(k==='ArrowLeft'||k==='a'||k==='A')keys.left=false;
+  if(k==='ArrowRight'||k==='d'||k==='D')keys.right=false;
+});
+
+// Click/tap for title/gameover
+canvas.addEventListener('click', ()=>{
+  ensureAudio();
+  if(gameState==='title')startGame();
+  if(gameState==='gameover')startGame();
+  if(gameState==='levelclear')nextLevel();
+});
+
+// --- GRID GENERATION ---
+function generateGrid(lvl){
+  grid=[];
+  for(let y=0;y<ROWS;y++){
+    grid[y]=[];
+    for(let x=0;x<COLS;x++){
+      // Border walls
+      if(x===0||y===0||x===COLS-1||y===ROWS-1){
+        grid[y][x]=TILE_WALL;
+      }
+      // Pillar walls (every other cell inside)
+      else if(x%2===0 && y%2===0){
+        grid[y][x]=TILE_WALL;
+      }
+      else{
+        grid[y][x]=TILE_FLOOR;
+      }
+    }
+  }
+  // Place soft blocks randomly
+  const softChance = Math.min(0.65 + lvl*0.02, 0.8);
+  for(let y=1;y<ROWS-1;y++){
+    for(let x=1;x<COLS-1;x++){
+      if(grid[y][x]!==TILE_FLOOR) continue;
+      // Keep player start area clear (top-left 3 cells)
+      if((x===1&&y===1)||(x===2&&y===1)||(x===1&&y===2)) continue;
+      if(Math.random()<softChance) grid[y][x]=TILE_SOFT;
+    }
+  }
+}
+
+// --- ENEMY GENERATION ---
+function generateEnemies(lvl){
+  enemies=[];
+  // Scale enemy count with level
+  const balloons = Math.max(3, 4 + Math.floor(lvl*0.5));
+  const oneals = Math.max(0, Math.floor(lvl*0.8)-1);
+  const dolls = Math.max(0, Math.floor(lvl*0.5)-1);
+
+  const types = [];
+  for(let i=0;i<balloons;i++) types.push('balloon');
+  for(let i=0;i<oneals;i++) types.push('oneal');
+  for(let i=0;i<dolls;i++) types.push('doll');
+
+  // Find valid positions (floor tiles, not near player start)
+  const valid=[];
+  for(let y=1;y<ROWS-1;y++)
+    for(let x=1;x<COLS-1;x++)
+      if(grid[y][x]===TILE_FLOOR && (x+y>5))
+        valid.push({x,y});
+
+  // Shuffle
+  for(let i=valid.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [valid[i],valid[j]]=[valid[j],valid[i]];
+  }
+
+  for(let i=0;i<types.length&&i<valid.length;i++){
+    const t=types[i];
+    const pos=valid[i];
+    let speed = 1;
+    let color = '#ff88aa';
+    let pts = 100;
+    if(t==='balloon'){speed=0.8+lvl*0.05;color='#ff88aa';pts=100;}
+    if(t==='oneal'){speed=1.2+lvl*0.08;color='#6688ff';pts=200;}
+    if(t==='doll'){speed=1.8+lvl*0.1;color='#ffaa44';pts=400;}
+
+    enemies.push({
+      x:pos.x, y:pos.y,
+      px:pos.x, py:pos.y, // pixel position (fractional)
+      type:t, speed:speed, color:color, pts:pts,
+      dir: ['up','down','left','right'][Math.floor(Math.random()*4)],
+      moveTimer: 0,
+      animFrame: 0,
+      alive: true
+    });
+  }
+}
+
+// --- POWERUP PLACEMENT ---
+function placePowerups(lvl){
+  powerups=[];
+  // Hide powerups under soft blocks
+  const softTiles=[];
+  for(let y=1;y<ROWS-1;y++)
+    for(let x=1;x<COLS-1;x++)
+      if(grid[y][x]===TILE_SOFT)
+        softTiles.push({x,y});
+
+  // Shuffle
+  for(let i=softTiles.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [softTiles[i],softTiles[j]]=[softTiles[j],softTiles[i]];
+  }
+
+  // Place 2-4 powerups
+  const count = Math.min(2 + Math.floor(lvl/2), softTiles.length, 6);
+  const puTypes = ['fire','bomb','speed'];
+  for(let i=0;i<count;i++){
+    const t = puTypes[i % puTypes.length];
+    powerups.push({x:softTiles[i].x, y:softTiles[i].y, type:t, revealed:false, collected:false});
+  }
+}
+
+// --- PLAYER ---
+function resetPlayer(){
+  player = {
+    x:1, y:1,
+    px:1, py:1,
+    speed: 2.5,
+    bombRange: 2,
+    maxBombs: 1,
+    alive: true,
+    moveDir: null,
+    animFrame: 0,
+    invincible: 0
+  };
+}
+
+// --- INIT LEVEL ---
+function initLevel(lvl){
+  bombs=[];
+  explosions=[];
+  generateGrid(lvl);
+  generateEnemies(lvl);
+  placePowerups(lvl);
+  resetPlayer();
+  // Restore powerup bonuses from previous levels
+  player.bombRange = 2 + playerBonuses.fire;
+  player.maxBombs = 1 + playerBonuses.bomb;
+  player.speed = 2.5 + playerBonuses.speed * 0.5;
+  gameState='playing';
+}
+
+let playerBonuses = {fire:0, bomb:0, speed:0};
+
+function startGame(){
+  score=0; lives=3; level=1;
+  playerBonuses = {fire:0, bomb:0, speed:0};
+  initLevel(1);
+}
+
+function nextLevel(){
+  level++;
+  initLevel(level);
+}
+
+// --- BOMB PLACEMENT ---
+function placeBomb(){
+  if(!player.alive) return;
+  const bx=Math.round(player.px), by=Math.round(player.py);
+  // Count active bombs
+  const activeBombs = bombs.filter(b=>b.alive).length;
+  if(activeBombs >= player.maxBombs) return;
+  // Don't place on existing bomb
+  if(bombs.some(b=>b.alive&&b.x===bx&&b.y===by)) return;
+  sfxBomb();
+  bombs.push({x:bx,y:by,timer:2.5,range:player.bombRange,alive:true,animFrame:0});
+}
+
+// --- EXPLOSION ---
+function triggerExplosion(bomb){
+  bomb.alive=false;
+  sfxExplode();
+  flashTimer=0.15;
+  // Center
+  const cells=[{x:bomb.x,y:bomb.y}];
+  // Four directions
+  const dirs=[[0,-1],[0,1],[-1,0],[1,0]];
+  for(const [dx,dy] of dirs){
+    for(let i=1;i<=bomb.range;i++){
+      const nx=bomb.x+dx*i, ny=bomb.y+dy*i;
+      if(nx<0||nx>=COLS||ny<0||ny>=ROWS) break;
+      if(grid[ny][nx]===TILE_WALL) break;
+      cells.push({x:nx,y:ny});
+      if(grid[ny][nx]===TILE_SOFT){
+        grid[ny][nx]=TILE_FLOOR;
+        score+=10;
+        // Reveal powerup
+        const pu=powerups.find(p=>p.x===nx&&p.y===ny&&!p.revealed&&!p.collected);
+        if(pu) pu.revealed=true;
+        break; // Explosion stops at soft block
+      }
+    }
+  }
+  // Chain reaction: detonate other bombs caught in explosion
+  for(const cell of cells){
+    for(const b of bombs){
+      if(b.alive && b.x===cell.x && b.y===cell.y){
+        triggerExplosion(b);
+      }
+    }
+  }
+  explosions.push({cells:cells, timer:0.5, maxTimer:0.5});
+}
+
+// --- UPDATE ---
+let lastTime = 0;
+function update(dt){
+  if(gameState!=='playing') return;
+
+  // Player movement
+  let dx=0, dy=0;
+  if(keys.up) dy=-1;
+  else if(keys.down) dy=1;
+  if(keys.left) dx=-1;
+  else if(keys.right) dx=1;
+
+  // Grid-aligned movement (smooth)
+  if(dx!==0||dy!==0){
+    player.animFrame += dt*8;
+    let npx = player.px + dx * player.speed * dt;
+    let npy = player.py + dy * player.speed * dt;
+
+    // Collision check (axis-separated)
+    // Try X movement
+    if(dx!==0){
+      const testX = npx;
+      const testY = player.py;
+      if(canMoveTo(testX, testY, 0.35)){
+        player.px = testX;
+        // Align Y when moving horizontally
+        player.py = lerp(player.py, Math.round(player.py), dt*10);
+      }
+    }
+    // Try Y movement
+    if(dy!==0){
+      const testX = player.px;
+      const testY = npy;
+      if(canMoveTo(testX, testY, 0.35)){
+        player.py = testY;
+        // Align X when moving vertically
+        player.px = lerp(player.px, Math.round(player.px), dt*10);
+      }
+    }
+  }
+
+  // Clamp player
+  player.px = Math.max(1, Math.min(COLS-2, player.px));
+  player.py = Math.max(1, Math.min(ROWS-2, player.py));
+
+  // Update invincibility
+  if(player.invincible > 0) player.invincible -= dt;
+
+  // Update bombs
+  for(const b of bombs){
+    if(!b.alive) continue;
+    b.timer -= dt;
+    b.animFrame += dt*6;
+    if(b.timer <= 0) triggerExplosion(b);
+  }
+
+  // Update explosions
+  for(const ex of explosions){
+    ex.timer -= dt;
+  }
+  explosions = explosions.filter(e=>e.timer>0);
+
+  // Check player hit by explosion
+  if(player.alive && player.invincible<=0){
+    const pgx = Math.round(player.px), pgy = Math.round(player.py);
+    for(const ex of explosions){
+      for(const c of ex.cells){
+        if(c.x===pgx && c.y===pgy){
+          playerDie();
+          break;
+        }
+      }
+      if(!player.alive) break;
+    }
+  }
+
+  // Check enemy hit by explosion
+  for(const en of enemies){
+    if(!en.alive) continue;
+    const egx = Math.round(en.px), egy = Math.round(en.py);
+    for(const ex of explosions){
+      for(const c of ex.cells){
+        if(c.x===egx && c.y===egy){
+          en.alive=false;
+          score += en.pts;
+          break;
+        }
+      }
+    }
+  }
+
+  // Check player-enemy collision
+  if(player.alive && player.invincible<=0){
+    for(const en of enemies){
+      if(!en.alive) continue;
+      const dist = Math.abs(player.px-en.px)+Math.abs(player.py-en.py);
+      if(dist < 0.7){
+        playerDie();
+        break;
+      }
+    }
+  }
+
+  // Powerup collection
+  const pgx2 = Math.round(player.px), pgy2 = Math.round(player.py);
+  for(const pu of powerups){
+    if(pu.collected||!pu.revealed) continue;
+    if(pu.x===pgx2 && pu.y===pgy2){
+      pu.collected=true;
+      sfxPickup();
+      score+=50;
+      if(pu.type==='fire'){player.bombRange++;playerBonuses.fire++;}
+      if(pu.type==='bomb'){player.maxBombs++;playerBonuses.bomb++;}
+      if(pu.type==='speed'){player.speed+=0.5;playerBonuses.speed++;}
+    }
+  }
+
+  // Update enemies
+  updateEnemies(dt);
+
+  // Check level clear
+  if(enemies.every(e=>!e.alive)){
+    gameState='levelclear';
+    stateTimer=2;
+    sfxLevelClear();
+    score += level * 500;
+  }
+
+  // Flash timer
+  if(flashTimer>0) flashTimer-=dt;
+}
+
+function lerp(a,b,t){return a+(b-a)*Math.min(t,1)}
+
+function canMoveTo(px,py,margin){
+  // Check all 4 corners of a slightly smaller hitbox
+  const corners = [
+    [px-margin, py-margin],
+    [px+margin, py-margin],
+    [px-margin, py+margin],
+    [px+margin, py+margin]
+  ];
+  for(const [cx,cy] of corners){
+    const gx=Math.round(cx), gy=Math.round(cy);
+    if(gx<0||gx>=COLS||gy<0||gy>=ROWS) return false;
+    if(grid[gy][gx]===TILE_WALL||grid[gy][gx]===TILE_SOFT) return false;
+    // Can walk through own bomb for a moment after placing
+    // Actually: can't walk through bombs unless standing on one
+    if(bombs.some(b=>b.alive&&b.x===gx&&b.y===gy)){
+      const bDist = Math.abs(player.px-gx)+Math.abs(player.py-gy);
+      if(bDist > 0.8) return false; // Only block if not standing on it
+    }
+  }
+  return true;
+}
+
+function playerDie(){
+  player.alive=false;
+  sfxDeath();
+  flashTimer=0.3;
+  lives--;
+  if(lives<=0){
+    gameState='gameover';
+    stateTimer=2;
+    if(score>highScore){
+      highScore=score;
+      localStorage.setItem('blast-zone_hi', highScore);
+    }
+    if(score>0)submitScore('blast-zone',score);
+  } else {
+    gameState='dying';
+    stateTimer=1.5;
+  }
+}
+
+// --- ENEMY AI ---
+function updateEnemies(dt){
+  for(const en of enemies){
+    if(!en.alive) continue;
+    en.moveTimer -= dt;
+    en.animFrame += dt*4;
+
+    if(en.moveTimer <= 0){
+      // Choose direction
+      let dirs = ['up','down','left','right'];
+
+      if(en.type==='oneal' && Math.random()<0.4){
+        // Chase player sometimes
+        const ddx = player.px - en.px;
+        const ddy = player.py - en.py;
+        if(Math.abs(ddx)>Math.abs(ddy)){
+          dirs = ddx>0 ? ['right','up','down','left'] : ['left','up','down','right'];
+        } else {
+          dirs = ddy>0 ? ['down','left','right','up'] : ['up','left','right','down'];
+        }
+      } else {
+        // Shuffle directions, prefer current direction
+        dirs = dirs.filter(d=>d!==en.dir);
+        dirs.sort(()=>Math.random()-0.5);
+        dirs.unshift(en.dir); // Try current direction first
+      }
+
+      let moved=false;
+      for(const d of dirs){
+        const [ddx,ddy] = DIR[d];
+        const nx = Math.round(en.px)+ddx;
+        const ny = Math.round(en.py)+ddy;
+        if(nx>=1&&nx<COLS-1&&ny>=1&&ny<ROWS-1&&grid[ny][nx]===TILE_FLOOR
+          && !bombs.some(b=>b.alive&&b.x===nx&&b.y===ny)){
+          en.dir=d;
+          moved=true;
+          break;
+        }
+      }
+      en.moveTimer = 0.3 + Math.random()*0.2;
+    }
+
+    // Move in current direction
+    const [ddx,ddy] = DIR[en.dir];
+    let npx = en.px + ddx * en.speed * dt;
+    let npy = en.py + ddy * en.speed * dt;
+
+    // Snap towards grid
+    const targetX = Math.round(en.px) + (ddx>0?1:ddx<0?-1:0);
+    const targetY = Math.round(en.py) + (ddy>0?1:ddy<0?-1:0);
+
+    // Check collision
+    const checkX = Math.round(npx + ddx*0.4);
+    const checkY = Math.round(npy + ddy*0.4);
+    if(checkX>=0&&checkX<COLS&&checkY>=0&&checkY<ROWS
+      &&grid[checkY][checkX]!==TILE_WALL&&grid[checkY][checkX]!==TILE_SOFT
+      &&!bombs.some(b=>b.alive&&b.x===checkX&&b.y===checkY)){
+      en.px = npx;
+      en.py = npy;
+      // Align perpendicular axis
+      if(ddx!==0) en.py = lerp(en.py, Math.round(en.py), dt*8);
+      if(ddy!==0) en.px = lerp(en.px, Math.round(en.px), dt*8);
+    } else {
+      // Hit wall, force direction change
+      en.px = lerp(en.px, Math.round(en.px), dt*10);
+      en.py = lerp(en.py, Math.round(en.py), dt*10);
+      en.moveTimer = 0; // Recheck direction immediately
+    }
+
+    // Clamp
+    en.px = Math.max(1, Math.min(COLS-2, en.px));
+    en.py = Math.max(1, Math.min(ROWS-2, en.py));
+  }
+}
+
+// --- STATE TIMER ---
+function updateState(dt){
+  if(gameState==='dying'){
+    stateTimer-=dt;
+    if(stateTimer<=0){
+      // Respawn player on current level
+      player.px=1;player.py=1;player.x=1;player.y=1;
+      player.alive=true;
+      player.invincible=2;
+      bombs=[];explosions=[];
+      gameState='playing';
+    }
+  }
+  if(gameState==='levelclear'){
+    stateTimer-=dt;
+    // Auto-advance handled by click/key
+  }
+}
+
+// --- DRAW ---
+function draw(){
+  ctx.fillStyle='#111';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  if(gameState==='title'){
+    drawTitle();
+    return;
+  }
+
+  // Screen flash
+  if(flashTimer>0){
+    ctx.fillStyle=`rgba(255,200,100,${flashTimer*2})`;
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+  }
+
+  drawGrid();
+  drawPowerups();
+  drawBombs();
+  drawExplosions();
+  drawEnemies();
+  if(player.alive && gameState!=='dying') drawPlayer();
+  drawHUD();
+
+  if(gameState==='gameover') drawGameOver();
+  if(gameState==='levelclear') drawLevelClear();
+  if(gameState==='dying') drawDying();
+}
+
+function drawTitle(){
+  const cx=canvas.width/2, cy=canvas.height/2;
+
+  // Background grid preview
+  ctx.globalAlpha=0.3;
+  const previewTS=Math.min(canvas.width/(COLS+2), canvas.height/(ROWS+6));
+  const pox=Math.floor((canvas.width-COLS*previewTS)/2);
+  const poy=Math.floor(cy - ROWS*previewTS/2 + 30);
+  for(let y=0;y<ROWS;y++){
+    for(let x=0;x<COLS;x++){
+      const px=pox+x*previewTS, py2=poy+y*previewTS;
+      if(x===0||y===0||x===COLS-1||y===ROWS-1||(x%2===0&&y%2===0)){
+        ctx.fillStyle='#445';
+        ctx.fillRect(px,py2,previewTS-1,previewTS-1);
+      } else {
+        ctx.fillStyle='#2a3a2a';
+        ctx.fillRect(px,py2,previewTS-1,previewTS-1);
+      }
+    }
+  }
+  ctx.globalAlpha=1;
+
+  // Title
+  ctx.textAlign='center';
+  ctx.fillStyle='#ff8800';
+  ctx.font='bold '+Math.floor(canvas.width*0.08)+'px monospace';
+  ctx.fillText('BLAST ZONE',cx,cy-60);
+
+  ctx.fillStyle='#fff';
+  ctx.font=Math.floor(canvas.width*0.03)+'px monospace';
+  ctx.fillText('Arrow keys / WASD to move',cx,cy+10);
+  ctx.fillText('SPACE to place bomb',cx,cy+40);
+
+  ctx.fillStyle='#ff8800';
+  ctx.font='bold '+Math.floor(canvas.width*0.035)+'px monospace';
+  const pulse = 0.6 + 0.4*Math.sin(Date.now()/400);
+  ctx.globalAlpha=pulse;
+  ctx.fillText(isMobile?'TAP TO START':'PRESS ENTER TO START',cx,cy+100);
+  ctx.globalAlpha=1;
+
+  if(highScore>0){
+    ctx.fillStyle='#888';
+    ctx.font=Math.floor(canvas.width*0.025)+'px monospace';
+    ctx.fillText('High Score: '+highScore,cx,cy+150);
+  }
+}
+
+function drawGrid(){
+  for(let y=0;y<ROWS;y++){
+    for(let x=0;x<COLS;x++){
+      const px=offsetX+x*tileSize;
+      const py=offsetY+y*tileSize;
+      const t=grid[y][x];
+
+      if(t===TILE_FLOOR){
+        // Floor - green/grey checkerboard
+        ctx.fillStyle = (x+y)%2===0 ? '#3a5a3a' : '#3e5e3e';
+        ctx.fillRect(px,py,tileSize,tileSize);
+      }
+      else if(t===TILE_WALL){
+        // Indestructible wall - dark stone
+        ctx.fillStyle='#445';
+        ctx.fillRect(px,py,tileSize,tileSize);
+        // Stone texture
+        ctx.fillStyle='#556';
+        ctx.fillRect(px+2,py+2,tileSize-4,tileSize/2-2);
+        ctx.fillStyle='#334';
+        ctx.fillRect(px+1,py+tileSize/2+1,tileSize/2-2,tileSize/2-3);
+        ctx.fillRect(px+tileSize/2+1,py+tileSize/2+1,tileSize/2-2,tileSize/2-3);
+      }
+      else if(t===TILE_SOFT){
+        // Destructible block - brown brick
+        ctx.fillStyle='#8B6914';
+        ctx.fillRect(px,py,tileSize,tileSize);
+        // Brick pattern
+        ctx.strokeStyle='#6B4914';
+        ctx.lineWidth=1;
+        ctx.strokeRect(px+1,py+1,tileSize-2,tileSize/2-1);
+        ctx.beginPath();
+        ctx.moveTo(px+tileSize/2,py);ctx.lineTo(px+tileSize/2,py+tileSize/2);
+        ctx.moveTo(px,py+tileSize/2);ctx.lineTo(px+tileSize,py+tileSize/2);
+        ctx.moveTo(px+tileSize*0.25,py+tileSize/2);ctx.lineTo(px+tileSize*0.25,py+tileSize);
+        ctx.moveTo(px+tileSize*0.75,py+tileSize/2);ctx.lineTo(px+tileSize*0.75,py+tileSize);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+function drawPlayer(){
+  if(player.invincible>0 && Math.floor(player.invincible*10)%2===0) return; // Blink
+
+  const px = offsetX + player.px * tileSize;
+  const py = offsetY + player.py * tileSize;
+  const s = tileSize;
+  const hs = s/2;
+
+  ctx.save();
+  ctx.translate(px+hs, py+hs);
+
+  // Body (white with blue accent)
+  ctx.fillStyle='#fff';
+  // Head
+  ctx.beginPath();
+  ctx.arc(0, -s*0.15, s*0.22, 0, Math.PI*2);
+  ctx.fill();
+
+  // Eyes
+  ctx.fillStyle='#222';
+  ctx.beginPath();
+  ctx.arc(-s*0.08, -s*0.18, s*0.04, 0, Math.PI*2);
+  ctx.arc(s*0.08, -s*0.18, s*0.04, 0, Math.PI*2);
+  ctx.fill();
+
+  // Body
+  ctx.fillStyle='#eee';
+  ctx.fillRect(-s*0.18, -s*0.02, s*0.36, s*0.28);
+
+  // Belt
+  ctx.fillStyle='#4488ff';
+  ctx.fillRect(-s*0.18, s*0.12, s*0.36, s*0.06);
+
+  // Legs (animate)
+  const legAnim = Math.sin(player.animFrame*2)*s*0.06;
+  ctx.fillStyle='#ddd';
+  ctx.fillRect(-s*0.14, s*0.26, s*0.11, s*0.16+legAnim);
+  ctx.fillRect(s*0.03, s*0.26, s*0.11, s*0.16-legAnim);
+
+  // Feet
+  ctx.fillStyle='#666';
+  ctx.fillRect(-s*0.16, s*0.38+legAnim, s*0.15, s*0.06);
+  ctx.fillRect(s*0.02, s*0.38-legAnim, s*0.15, s*0.06);
+
+  ctx.restore();
+}
+
+function drawEnemies(){
+  for(const en of enemies){
+    if(!en.alive) continue;
+    const px = offsetX + en.px * tileSize;
+    const py = offsetY + en.py * tileSize;
+    const s = tileSize;
+    const hs = s/2;
+
+    ctx.save();
+    ctx.translate(px+hs, py+hs);
+
+    // Body blob
+    const bounce = Math.sin(en.animFrame*3)*s*0.03;
+    ctx.fillStyle=en.color;
+    ctx.beginPath();
+    ctx.arc(0, bounce, s*0.32, 0, Math.PI*2);
+    ctx.fill();
+
+    // Eyes (white sclera + pupils)
+    ctx.fillStyle='#fff';
+    ctx.beginPath();
+    ctx.arc(-s*0.1, -s*0.05+bounce, s*0.09, 0, Math.PI*2);
+    ctx.arc(s*0.1, -s*0.05+bounce, s*0.09, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle='#111';
+    const pupilOff = en.type==='oneal' ? s*0.03 : 0;
+    // Pupils look toward movement direction
+    const [ddx,ddy]=DIR[en.dir];
+    ctx.beginPath();
+    ctx.arc(-s*0.1+ddx*s*0.03, -s*0.05+ddy*s*0.03+bounce, s*0.045, 0, Math.PI*2);
+    ctx.arc(s*0.1+ddx*s*0.03, -s*0.05+ddy*s*0.03+bounce, s*0.045, 0, Math.PI*2);
+    ctx.fill();
+
+    // Type-specific details
+    if(en.type==='balloon'){
+      // Cute mouth
+      ctx.strokeStyle='#a04060';
+      ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.arc(0, s*0.1+bounce, s*0.08, 0, Math.PI);
+      ctx.stroke();
+    }
+    if(en.type==='oneal'){
+      // Angry eyebrows
+      ctx.strokeStyle='#223';
+      ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.moveTo(-s*0.18,-s*0.12+bounce);ctx.lineTo(-s*0.04,-s*0.16+bounce);
+      ctx.moveTo(s*0.18,-s*0.12+bounce);ctx.lineTo(s*0.04,-s*0.16+bounce);
+      ctx.stroke();
+    }
+    if(en.type==='doll'){
+      // Speed lines
+      ctx.strokeStyle='rgba(255,170,68,0.5)';
+      ctx.lineWidth=1;
+      for(let i=0;i<3;i++){
+        const ly = -s*0.15+i*s*0.12+bounce;
+        ctx.beginPath();
+        ctx.moveTo(-s*0.35-ddx*s*0.1,ly);
+        ctx.lineTo(-s*0.45-ddx*s*0.2,ly);
+        ctx.stroke();
+      }
+    }
+
+    // Feet/tentacles at bottom
+    const wiggle = Math.sin(en.animFrame*5);
+    ctx.fillStyle=en.color;
+    for(let i=-1;i<=1;i++){
+      ctx.beginPath();
+      ctx.arc(i*s*0.12, s*0.25+bounce+wiggle*s*0.03, s*0.07, 0, Math.PI);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+}
+
+function drawBombs(){
+  for(const b of bombs){
+    if(!b.alive) continue;
+    const px = offsetX + b.x * tileSize;
+    const py = offsetY + b.y * tileSize;
+    const s = tileSize;
+    const hs = s/2;
+
+    // Pulsing size
+    const pulse = 1 + 0.08*Math.sin(b.animFrame*4);
+    const r = s*0.3*pulse;
+
+    ctx.save();
+    ctx.translate(px+hs, py+hs);
+
+    // Shadow
+    ctx.fillStyle='rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(0, s*0.15, r*0.9, r*0.3, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // Bomb body
+    ctx.fillStyle='#222';
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI*2);
+    ctx.fill();
+
+    // Highlight
+    ctx.fillStyle='rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.arc(-r*0.25, -r*0.25, r*0.3, 0, Math.PI*2);
+    ctx.fill();
+
+    // Fuse
+    ctx.strokeStyle='#886';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(0,-r);
+    ctx.quadraticCurveTo(r*0.5,-r*1.5, r*0.3,-r*1.3);
+    ctx.stroke();
+
+    // Spark
+    const sparkFlicker = Math.random();
+    if(sparkFlicker>0.3){
+      const sparkR = s*0.05 + Math.random()*s*0.04;
+      ctx.fillStyle=b.timer<1?'#ff4400':'#ffaa00';
+      ctx.beginPath();
+      ctx.arc(r*0.3, -r*1.3, sparkR, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle='#fff';
+      ctx.beginPath();
+      ctx.arc(r*0.3, -r*1.3, sparkR*0.4, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // Urgency: turn red when about to explode
+    if(b.timer < 0.8){
+      ctx.fillStyle=`rgba(255,0,0,${0.3*(1-b.timer/0.8)*Math.abs(Math.sin(b.animFrame*8))})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+}
+
+function drawExplosions(){
+  for(const ex of explosions){
+    const progress = 1 - ex.timer/ex.maxTimer;
+    for(const c of ex.cells){
+      const px = offsetX + c.x * tileSize;
+      const py = offsetY + c.y * tileSize;
+      const s = tileSize;
+
+      // Fire effect
+      const alpha = Math.max(0, 1 - progress*1.2);
+
+      // Outer glow
+      ctx.fillStyle=`rgba(255,100,0,${alpha*0.4})`;
+      ctx.fillRect(px-s*0.1,py-s*0.1,s*1.2,s*1.2);
+
+      // Main fire
+      const grad = ctx.createRadialGradient(px+s/2,py+s/2,0,px+s/2,py+s/2,s*0.6);
+      grad.addColorStop(0, `rgba(255,255,200,${alpha})`);
+      grad.addColorStop(0.3, `rgba(255,200,50,${alpha*0.9})`);
+      grad.addColorStop(0.6, `rgba(255,100,0,${alpha*0.7})`);
+      grad.addColorStop(1, `rgba(200,50,0,${alpha*0.2})`);
+      ctx.fillStyle=grad;
+      ctx.fillRect(px,py,s,s);
+
+      // Inner white-hot core
+      if(progress<0.4){
+        ctx.fillStyle=`rgba(255,255,255,${(0.4-progress)*2})`;
+        ctx.beginPath();
+        ctx.arc(px+s/2,py+s/2,s*0.2,0,Math.PI*2);
+        ctx.fill();
+      }
+
+      // Particles
+      if(progress<0.5){
+        for(let i=0;i<3;i++){
+          const ox = (Math.random()-0.5)*s*0.8;
+          const oy = (Math.random()-0.5)*s*0.8;
+          const pr = s*0.04+Math.random()*s*0.04;
+          ctx.fillStyle=`rgba(255,${150+Math.random()*100},0,${alpha*0.8})`;
+          ctx.beginPath();
+          ctx.arc(px+s/2+ox,py+s/2+oy,pr,0,Math.PI*2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+}
+
+function drawPowerups(){
+  for(const pu of powerups){
+    if(!pu.revealed||pu.collected) continue;
+    const px = offsetX + pu.x * tileSize;
+    const py = offsetY + pu.y * tileSize;
+    const s = tileSize;
+
+    // Glowing background
+    const glow = 0.3 + 0.2*Math.sin(Date.now()/300);
+    ctx.fillStyle=`rgba(255,255,100,${glow})`;
+    ctx.fillRect(px+2,py+2,s-4,s-4);
+
+    // Icon
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.font=Math.floor(s*0.55)+'px sans-serif';
+    if(pu.type==='fire') ctx.fillText('\uD83D\uDD25',px+s/2,py+s/2);
+    if(pu.type==='bomb') ctx.fillText('\uD83D\uDCA3',px+s/2,py+s/2);
+    if(pu.type==='speed') ctx.fillText('\uD83D\uDC5F',px+s/2,py+s/2);
+  }
+}
+
+function drawHUD(){
+  const fontSize = Math.max(14, Math.floor(canvas.width*0.018));
+  ctx.textAlign='left';
+  ctx.textBaseline='top';
+  ctx.font='bold '+fontSize+'px monospace';
+
+  const y = 8;
+  let x = 10;
+
+  // Lives
+  ctx.fillStyle='#ff4444';
+  ctx.fillText('\u2764 '+lives, x, y);
+  x+=fontSize*4;
+
+  // Score
+  ctx.fillStyle='#ffcc44';
+  ctx.fillText('SCORE: '+score, x, y);
+  x+=fontSize*9;
+
+  // Level
+  ctx.fillStyle='#88ff88';
+  ctx.fillText('LV '+level, x, y);
+  x+=fontSize*4;
+
+  // Power-up indicators
+  ctx.fillStyle='#ff8844';
+  ctx.fillText('\uD83D\uDD25'+player.bombRange, x, y);
+  x+=fontSize*3;
+  ctx.fillStyle='#aaaaff';
+  ctx.fillText('\uD83D\uDCA3'+player.maxBombs, x, y);
+  x+=fontSize*3;
+
+  // High score (right side)
+  ctx.textAlign='right';
+  ctx.fillStyle='#666';
+  ctx.fillText('HI: '+highScore, canvas.width-10, y);
+}
+
+function drawGameOver(){
+  ctx.fillStyle='rgba(0,0,0,0.7)';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  const cx=canvas.width/2, cy=canvas.height/2;
+  ctx.textAlign='center';
+
+  ctx.fillStyle='#ff4444';
+  ctx.font='bold '+Math.floor(canvas.width*0.07)+'px monospace';
+  ctx.fillText('GAME OVER',cx,cy-40);
+
+  ctx.fillStyle='#ffcc44';
+  ctx.font=Math.floor(canvas.width*0.035)+'px monospace';
+  ctx.fillText('Score: '+score,cx,cy+20);
+
+  if(score>=highScore && score>0){
+    ctx.fillStyle='#ff8844';
+    ctx.fillText('NEW HIGH SCORE!',cx,cy+55);
+  }
+
+  ctx.fillStyle='#888';
+  ctx.font=Math.floor(canvas.width*0.025)+'px monospace';
+  const pulse = 0.5+0.5*Math.sin(Date.now()/400);
+  ctx.globalAlpha=pulse;
+  ctx.fillText(isMobile?'TAP TO RESTART':'PRESS ENTER TO RESTART',cx,cy+100);
+  ctx.globalAlpha=1;
+}
+
+function drawLevelClear(){
+  ctx.fillStyle='rgba(0,0,0,0.5)';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  const cx=canvas.width/2, cy=canvas.height/2;
+  ctx.textAlign='center';
+
+  ctx.fillStyle='#88ff88';
+  ctx.font='bold '+Math.floor(canvas.width*0.06)+'px monospace';
+  ctx.fillText('LEVEL '+level+' CLEAR!',cx,cy-30);
+
+  ctx.fillStyle='#ffcc44';
+  ctx.font=Math.floor(canvas.width*0.03)+'px monospace';
+  ctx.fillText('Bonus: '+(level*500)+' pts',cx,cy+20);
+
+  ctx.fillStyle='#888';
+  ctx.font=Math.floor(canvas.width*0.025)+'px monospace';
+  const pulse = 0.5+0.5*Math.sin(Date.now()/400);
+  ctx.globalAlpha=pulse;
+  ctx.fillText(isMobile?'TAP TO CONTINUE':'PRESS ENTER TO CONTINUE',cx,cy+70);
+  ctx.globalAlpha=1;
+}
+
+function drawDying(){
+  // Death animation — screen tint red
+  const progress = 1 - stateTimer/1.5;
+  ctx.fillStyle=`rgba(255,0,0,${0.3*(1-progress)})`;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  const cx=canvas.width/2, cy=canvas.height/2;
+  ctx.textAlign='center';
+  ctx.fillStyle='#ff6666';
+  ctx.font='bold '+Math.floor(canvas.width*0.04)+'px monospace';
+  ctx.fillText('LIVES: '+lives,cx,offsetY-10);
+}
+
+// --- GAME LOOP ---
+function gameLoop(timestamp){
+  const dt = Math.min((timestamp - lastTime)/1000, 0.05); // Cap dt
+  lastTime = timestamp;
+
+  update(dt);
+  updateState(dt);
+  draw();
+
+  requestAnimationFrame(gameLoop);
+}
+
+lastTime = performance.now();
+requestAnimationFrame(gameLoop);
+
+})();
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px 'Segoe UI',Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px;">
+  <span id="vc-count">...</span> Bombers
+</div>
+<script>
+(function(){
+  var G='blast-zone',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

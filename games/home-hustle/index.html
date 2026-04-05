@@ -1,0 +1,3090 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Home Hustle</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: 'Segoe UI', Arial, sans-serif; }
+canvas { display: block; touch-action: none; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// SUPABASE
+// ============================================================
+const _SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+const _SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(g,s){var n=prompt('Score: '+s+'! Enter initials (max 5):');if(!n)return;n=n.trim().slice(0,5).toUpperCase();if(!n)return;try{await fetch(_SU+'/rest/v1/high_scores',{method:'POST',headers:{'apikey':_SK,'Authorization':'Bearer '+_SK,'Content-Type':'application/json'},body:JSON.stringify({game:g,initials:n,score:s})})}catch(e){}}
+
+// ============================================================
+// SFX
+// ============================================================
+var SFX = (function() {
+  var actx = null, muted = false;
+  function getCtx() {
+    if (!actx) try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return null; }
+    if (actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  function play(fn) { if (muted) return; var c = getCtx(); if (c) fn(c); }
+  function osc(c, type, freq, freq2, dur, vol) {
+    var o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, c.currentTime);
+    if (freq2) o.frequency.linearRampToValueAtTime(freq2, c.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.08, c.currentTime);
+    g.gain.linearRampToValueAtTime(0, c.currentTime + dur);
+    o.connect(g); g.connect(c.destination);
+    o.start(); o.stop(c.currentTime + dur);
+  }
+  return {
+    get muted() { return muted; }, set muted(v) { muted = v; },
+    complete() { play(c => { osc(c,'sine',600,1200,0.12,0.1); setTimeout(()=>osc(c,'sine',900,1400,0.1,0.08),80); }); },
+    assign()   { play(c => { osc(c,'triangle',400,600,0.1,0.06); }); },
+    fail()     { play(c => { osc(c,'sawtooth',300,150,0.25,0.08); }); },
+    pickup()   { play(c => { osc(c,'sine',500,700,0.08,0.06); }); },
+    warn()     { play(c => { osc(c,'square',200,180,0.15,0.05); osc(c,'square',180,160,0.15,0.04); }); },
+    dayEnd()   { play(c => { for(var i=0;i<4;i++) setTimeout(()=>osc(c,'sine',400+i*150,500+i*150,0.15,0.08),i*120); }); },
+    click()    { play(c => osc(c,'sine',800,600,0.05,0.04)); },
+    gameOver() { play(c => { for(var i=0;i<4;i++) setTimeout(()=>osc(c,'sawtooth',300-i*50,150-i*30,0.3,0.08),i*200); }); },
+    sweep()    { play(c => { osc(c,'sine',300,500,0.15,0.04); osc(c,'sine',350,550,0.12,0.03); }); },
+    nag()      { play(c => { osc(c,'square',250,200,0.08,0.04); osc(c,'square',220,180,0.08,0.03); }); },
+  };
+})();
+
+// ============================================================
+// SPRITEFORGE v2 ENGINE (inlined)
+// ============================================================
+'use strict';
+
+// ============================================================
+// UTILITIES
+// ============================================================
+
+function sf2_makeCanvas(w, h) {
+  // Always use DOM canvas — OffscreenCanvas has drawImage compat issues on file://
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+function sf2_seededRNG(seed) {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function sf2_hashStr(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  return h;
+}
+
+// ============================================================
+// MODULE A: COLOR UTILITIES & RAMP GENERATION
+// ============================================================
+
+function sf2_hexToRGB(hex) {
+  if (typeof hex !== 'string') return hex;
+  hex = hex.replace('#', '');
+  if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return {
+    r: parseInt(hex.slice(0,2), 16),
+    g: parseInt(hex.slice(2,4), 16),
+    b: parseInt(hex.slice(4,6), 16),
+  };
+}
+
+function sf2_rgbToHSL(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return { h: h * 360, s, l };
+}
+
+function sf2_hslToRGB(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  h /= 360;
+  let r, g, b;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+}
+
+function sf2_packRGBA(r, g, b, a) {
+  return ((a & 0xFF) << 24) | ((b & 0xFF) << 16) | ((g & 0xFF) << 8) | (r & 0xFF);
+}
+
+function sf2_unpackRGBA(v) {
+  return { r: v & 0xFF, g: (v >> 8) & 0xFF, b: (v >> 16) & 0xFF, a: (v >> 24) & 0xFF };
+}
+
+const ColorRamp = {
+  // Generate a 4-tone ramp with hue shifting
+  generate(baseHex) {
+    const rgb = sf2_hexToRGB(baseHex);
+    const hsl = sf2_rgbToHSL(rgb.r, rgb.g, rgb.b);
+
+    const deepShadow = sf2_hslToRGB(
+      hsl.h + 20, // cool shift
+      Math.min(1, hsl.s * 0.80),
+      Math.max(0.05, hsl.l * 0.45)
+    );
+    const shadow = sf2_hslToRGB(
+      hsl.h + 10,
+      Math.min(1, hsl.s * 0.90),
+      Math.max(0.08, hsl.l * 0.70)
+    );
+    const base = rgb;
+    const highlight = sf2_hslToRGB(
+      hsl.h - 15, // warm shift
+      Math.min(1, hsl.s * 0.85),
+      Math.min(0.95, hsl.l * 1.30)
+    );
+
+    return [deepShadow, shadow, base, highlight];
+  },
+
+  // Generate packed RGBA values
+  generatePacked(baseHex) {
+    return ColorRamp.generate(baseHex).map(c => sf2_packRGBA(c.r, c.g, c.b, 255));
+  },
+
+  // Build a complete indexed palette from color group definitions
+  // Returns { palette: Uint32Array, groups: { name: { startIdx, ramp } }, groupForIndex: Uint8Array }
+  buildPalette(colorGroups) {
+    // Index 0 = transparent
+    const palette = new Uint32Array(256);
+    const groupForIndex = new Uint8Array(256);
+    const groups = {};
+    palette[0] = 0; // transparent
+    let idx = 1;
+    let groupId = 1;
+
+    for (const [name, baseHex] of Object.entries(colorGroups)) {
+      let ramp;
+      if (name === 'eyes') {
+        // Special eye palette: pupil(near-black), iris(user color), white, specular(bright white)
+        const iris = sf2_hexToRGB(baseHex);
+        ramp = [
+          sf2_packRGBA(15, 10, 20, 255),           // 0: pupil — near black
+          sf2_packRGBA(iris.r, iris.g, iris.b, 255), // 1: iris — user's eye color
+          sf2_packRGBA(240, 240, 245, 255),          // 2: white of eye
+          sf2_packRGBA(255, 255, 255, 255),          // 3: specular highlight
+        ];
+      } else {
+        ramp = ColorRamp.generatePacked(baseHex);
+      }
+      const startIdx = idx;
+      for (let i = 0; i < 4; i++) {
+        palette[idx] = ramp[i];
+        groupForIndex[idx] = groupId;
+        idx++;
+      }
+      groups[name] = { startIdx, groupId, ramp };
+      groupId++;
+    }
+
+    // Reserve index for outline (will be set per-pixel by post-processing)
+    palette[idx] = sf2_packRGBA(0, 0, 0, 255); // black fallback
+    const outlineIdx = idx;
+    idx++;
+
+    return { palette, groups, groupForIndex, outlineIdx, nextIdx: idx };
+  },
+};
+
+// ============================================================
+// MODULE B: PIXEL CANVAS
+// ============================================================
+
+class PixelCanvas {
+  constructor(width, height) {
+    this.width = width;
+    this.height = height;
+    this.pixels = new Uint8Array(width * height);       // palette index
+    this.groupMap = new Uint8Array(width * height);      // color group ID
+    this.palette = null;         // Uint32Array(256), set by setPalette
+    this.groupForIndex = null;   // Uint8Array(256), maps palette idx -> group ID
+  }
+
+  setPalette(palette, groupForIndex) {
+    this.palette = palette;
+    this.groupForIndex = groupForIndex;
+  }
+
+  clear() {
+    this.pixels.fill(0);
+    this.groupMap.fill(0);
+  }
+
+  // ---- Pixel Access ----
+
+  setPixel(x, y, idx) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+    const off = y * this.width + x;
+    this.pixels[off] = idx;
+    if (this.groupForIndex) this.groupMap[off] = this.groupForIndex[idx];
+  }
+
+  getPixel(x, y) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return 0;
+    return this.pixels[y * this.width + x];
+  }
+
+  isFilled(x, y) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return false;
+    return this.pixels[y * this.width + x] !== 0;
+  }
+
+  // ---- Drawing Primitives ----
+
+  hline(x, y, len, idx) {
+    for (let i = 0; i < len; i++) this.setPixel(x + i, y, idx);
+  }
+
+  vline(x, y, len, idx) {
+    for (let i = 0; i < len; i++) this.setPixel(x, y + i, idx);
+  }
+
+  fillRect(x, y, w, h, idx) {
+    for (let row = 0; row < h; row++) {
+      this.hline(x, y + row, w, idx);
+    }
+  }
+
+  // Midpoint ellipse algorithm
+  fillEllipse(cx, cy, rx, ry, idx) {
+    if (rx <= 0 || ry <= 0) return;
+    cx = Math.round(cx); cy = Math.round(cy);
+    rx = Math.round(rx); ry = Math.round(ry);
+    const rx2 = rx * rx, ry2 = ry * ry;
+    for (let y = -ry; y <= ry; y++) {
+      const yf = y * y;
+      const xSpan = Math.floor(rx * Math.sqrt(1 - yf / ry2));
+      this.hline(cx - xSpan, cy + y, xSpan * 2 + 1, idx);
+    }
+  }
+
+  fillCircle(cx, cy, r, idx) {
+    this.fillEllipse(cx, cy, r, r, idx);
+  }
+
+  // Bresenham line
+  line(x0, y0, x1, y1, idx) {
+    x0 = Math.round(x0); y0 = Math.round(y0);
+    x1 = Math.round(x1); y1 = Math.round(y1);
+    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    while (true) {
+      this.setPixel(x0, y0, idx);
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x0 += sx; }
+      if (e2 < dx) { err += dx; y0 += sy; }
+    }
+  }
+
+  // Fill triangle via scanline
+  fillTriangle(x0, y0, x1, y1, x2, y2, idx) {
+    // Sort by Y
+    if (y0 > y1) { [x0,y0,x1,y1] = [x1,y1,x0,y0]; }
+    if (y0 > y2) { [x0,y0,x2,y2] = [x2,y2,x0,y0]; }
+    if (y1 > y2) { [x1,y1,x2,y2] = [x2,y2,x1,y1]; }
+    const lerp = (a, b, t) => a + (b - a) * t;
+    for (let y = Math.round(y0); y <= Math.round(y2); y++) {
+      let xa, xb;
+      if (y < y1) {
+        if (y1 === y0) continue;
+        const t1 = (y - y0) / (y1 - y0);
+        const t2 = (y - y0) / (y2 - y0);
+        xa = lerp(x0, x1, t1);
+        xb = lerp(x0, x2, t2);
+      } else {
+        if (y2 === y1) continue;
+        const t1 = (y - y1) / (y2 - y1);
+        const t2 = (y - y0) / (y2 - y0);
+        xa = lerp(x1, x2, t1);
+        xb = lerp(x0, x2, t2);
+      }
+      if (xa > xb) { const tmp = xa; xa = xb; xb = tmp; }
+      this.hline(Math.round(xa), y, Math.round(xb - xa) + 1, idx);
+    }
+  }
+
+  // ---- Bulk Operations ----
+
+  mirrorHorizontal() {
+    const { width, height, pixels, groupMap } = this;
+    const half = Math.floor(width / 2);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < half; x++) {
+        const src = y * width + x;
+        const dst = y * width + (width - 1 - x);
+        pixels[dst] = pixels[src];
+        groupMap[dst] = groupMap[src];
+      }
+    }
+  }
+
+  scatterNoise(x, y, w, h, idx, density, rng) {
+    rng = rng || Math.random;
+    for (let py = y; py < y + h; py++) {
+      for (let px = x; px < x + w; px++) {
+        if (this.isFilled(px, py) && rng() < density) {
+          this.setPixel(px, py, idx);
+        }
+      }
+    }
+  }
+
+  ditherCheckerboard(x, y, w, h, idxA, idxB) {
+    for (let py = y; py < y + h; py++) {
+      for (let px = x; px < x + w; px++) {
+        if (this.isFilled(px, py)) {
+          this.setPixel(px, py, (px + py) % 2 === 0 ? idxA : idxB);
+        }
+      }
+    }
+  }
+
+  // ---- Export ----
+
+  toCanvas() {
+    const cvs = sf2_makeCanvas(this.width, this.height);
+    const ctx = cvs.getContext('2d');
+    const imgData = ctx.createImageData(this.width, this.height);
+    const data = imgData.data;
+    const { pixels, palette, width, height } = this;
+    for (let i = 0; i < width * height; i++) {
+      const idx = pixels[i];
+      if (idx === 0) continue; // transparent
+      const rgba = palette[idx];
+      const off = i * 4;
+      data[off]     = rgba & 0xFF;
+      data[off + 1] = (rgba >> 8) & 0xFF;
+      data[off + 2] = (rgba >> 16) & 0xFF;
+      data[off + 3] = (rgba >> 24) & 0xFF;
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return cvs;
+  }
+
+  blitTo(ctx, destX, destY) {
+    const cvs = this.toCanvas();
+    ctx.drawImage(cvs, destX, destY);
+  }
+}
+
+// ============================================================
+// MODULE C: POST-PROCESSING
+// ============================================================
+
+const PostProcess = {
+  // Direction vectors for 8 neighbors
+  _dirs: [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]],
+
+  // Normalize light direction
+  _lightDir: (function() {
+    const lx = -0.7, ly = -0.7;
+    const len = Math.sqrt(lx*lx + ly*ly);
+    return { x: lx/len, y: ly/len };
+  })(),
+
+  // Pass 1: Directional shading
+  // Remaps each filled pixel to the correct tone within its color group
+  // based on surface normal computed from empty neighbors
+  applyShading(pc, groups) {
+    const { width, height, pixels, groupMap } = pc;
+    const dirs = PostProcess._dirs;
+    const light = PostProcess._lightDir;
+    const newPixels = new Uint8Array(pixels.length);
+    newPixels.set(pixels);
+
+    // Build group base index lookup: groupId -> startIdx
+    const groupBase = new Uint8Array(256);
+    for (const g of Object.values(groups)) {
+      groupBase[g.groupId] = g.startIdx;
+    }
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const off = y * width + x;
+        if (pixels[off] === 0) continue; // transparent
+
+        const gid = groupMap[off];
+        if (gid === 0) continue;
+        const base = groupBase[gid];
+        if (base === 0) continue;
+
+        // Compute surface normal from empty neighbors
+        let nx = 0, ny = 0;
+        let emptyCount = 0;
+        for (const [dx, dy] of dirs) {
+          const px2 = x + dx, py2 = y + dy;
+          if (px2 < 0 || px2 >= width || py2 < 0 || py2 >= height || pixels[py2 * width + px2] === 0) {
+            // Empty neighbor — normal points away from it (toward center)
+            nx -= dx;
+            ny -= dy;
+            emptyCount++;
+          }
+        }
+
+        if (emptyCount === 0) {
+          // Interior pixel — use base tone
+          newPixels[off] = base + 2; // base
+          continue;
+        }
+
+        // Normalize
+        const len = Math.sqrt(nx * nx + ny * ny);
+        if (len > 0) { nx /= len; ny /= len; }
+
+        // Dot with light direction
+        const dot = nx * light.x + ny * light.y;
+
+        // Map to tone (0=deepShadow, 1=shadow, 2=base, 3=highlight)
+        let tone;
+        if (dot > 0.4) tone = 3;       // highlight (facing light)
+        else if (dot > -0.1) tone = 2;  // base
+        else if (dot > -0.5) tone = 1;  // shadow
+        else tone = 0;                   // deep shadow
+
+        newPixels[off] = base + tone;
+      }
+    }
+
+    pc.pixels.set(newPixels);
+  },
+
+  // Pass 2: Tinted outlines
+  // Empty pixels adjacent to filled pixels become the deepShadow of the nearest filled neighbor's group
+  applyOutlines(pc, groups, mode) {
+    if (mode === 'none') return;
+
+    const { width, height, pixels, groupMap } = pc;
+    const dirs = PostProcess._dirs;
+    const newPixels = new Uint8Array(pixels.length);
+    const newGroupMap = new Uint8Array(groupMap.length);
+    newPixels.set(pixels);
+    newGroupMap.set(groupMap);
+
+    // Build group base index lookup
+    const groupBase = new Uint8Array(256);
+    for (const g of Object.values(groups)) {
+      groupBase[g.groupId] = g.startIdx;
+    }
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const off = y * width + x;
+        if (pixels[off] !== 0) continue; // skip filled pixels
+
+        // Check neighbors for filled pixels
+        let nearestGroup = 0;
+        let found = false;
+        // Check cardinals first (stronger adjacency), then diagonals
+        for (const [dx, dy] of dirs) {
+          const px2 = x + dx, py2 = y + dy;
+          if (px2 >= 0 && px2 < width && py2 >= 0 && py2 < height) {
+            const noff = py2 * width + px2;
+            if (pixels[noff] !== 0) {
+              nearestGroup = groupMap[noff];
+              found = true;
+              break;
+            }
+          }
+        }
+
+        if (!found) continue;
+
+        const base = groupBase[nearestGroup];
+        if (base === 0) continue;
+
+        if (mode === 'tinted') {
+          // Use the deepShadow tone of the neighbor's group
+          newPixels[off] = base + 0; // deepShadow
+        } else if (mode === 'black') {
+          // Use a fixed dark color — we'll set palette index 255 to black
+          newPixels[off] = 255;
+        } else if (mode === 'silhouette') {
+          // Only outline if ALL pixels on one side are empty (exterior edge)
+          let leftEmpty = true, rightEmpty = true, topEmpty = true, bottomEmpty = true;
+          for (let dy = -1; dy <= 1; dy++) {
+            if (x - 1 >= 0 && pixels[(y+dy) * width + (x-1)] !== 0) leftEmpty = false;
+            if (x + 1 < width && pixels[(y+dy) * width + (x+1)] !== 0) rightEmpty = false;
+          }
+          for (let dx = -1; dx <= 1; dx++) {
+            if (y - 1 >= 0 && pixels[(y-1) * width + (x+dx)] !== 0) topEmpty = false;
+            if (y + 1 < height && pixels[(y+1) * width + (x+dx)] !== 0) bottomEmpty = false;
+          }
+          if (leftEmpty || rightEmpty || topEmpty || bottomEmpty) {
+            newPixels[off] = base + 0;
+          }
+        }
+
+        if (newPixels[off] !== 0) {
+          newGroupMap[off] = nearestGroup;
+        }
+      }
+    }
+
+    pc.pixels.set(newPixels);
+    pc.groupMap.set(newGroupMap);
+  },
+};
+
+// ============================================================
+// MODULE D: BODY TEMPLATES
+// ============================================================
+
+const BODY_TEMPLATES = {
+  mini: {
+    canvas: { w: 16, h: 24 },
+    head: { rx: 5, ry: 5, cy: 7 },
+    torso: { w: 8, h: 5, cy: 14 },
+    legs: { w: 2, h: 5, gap: 2 },
+    arms: { w: 1, h: 4, shoulderOff: 0 },
+    eyes: { type: 'dot', w: 1, h: 1, gap: 3, cy: -1 },
+    hair: { maxH: 3 },
+    features: { ears: false, hands: false, belt: false, mouth: false },
+    outline: 'black',
+    toneCount: 3,
+  },
+  retro: {
+    canvas: { w: 24, h: 32 },
+    head: { rx: 7, ry: 7, cy: 9 },
+    torso: { w: 10, h: 6, cy: 19 },
+    legs: { w: 3, h: 6, gap: 2 },
+    arms: { w: 2, h: 5, shoulderOff: 1 },
+    eyes: { type: 'simple', w: 3, h: 2, gap: 4, cy: -1 },
+    hair: { maxH: 4 },
+    features: { ears: false, hands: false, belt: true, mouth: false },
+    outline: 'black',
+    toneCount: 3,
+  },
+  chibi: {
+    canvas: { w: 32, h: 40 },
+    head: { rx: 10, ry: 10, cy: 12 },
+    torso: { w: 14, h: 8, cy: 25 },
+    legs: { w: 4, h: 7, gap: 2 },
+    arms: { w: 3, h: 7, shoulderOff: 1 },
+    eyes: { type: 'detailed', w: 4, h: 4, gap: 5, cy: 0 },
+    hair: { maxH: 6 },
+    features: { ears: true, hands: true, belt: true, mouth: true },
+    outline: 'tinted',
+    toneCount: 4,
+  },
+  tall: {
+    canvas: { w: 32, h: 48 },
+    head: { rx: 8, ry: 9, cy: 11 },
+    torso: { w: 14, h: 12, cy: 24 },
+    legs: { w: 4, h: 11, gap: 2 },
+    arms: { w: 3, h: 10, shoulderOff: 1 },
+    eyes: { type: 'detailed', w: 4, h: 3, gap: 5, cy: 0 },
+    hair: { maxH: 6 },
+    features: { ears: true, hands: true, belt: true, mouth: true },
+    outline: 'tinted',
+    toneCount: 4,
+  },
+  heroic: {
+    canvas: { w: 36, h: 56 },
+    head: { rx: 8, ry: 9, cy: 12 },
+    torso: { w: 16, h: 16, cy: 26 },
+    legs: { w: 5, h: 14, gap: 2 },
+    arms: { w: 4, h: 13, shoulderOff: 2 },
+    eyes: { type: 'detailed', w: 5, h: 4, gap: 6, cy: 0 },
+    hair: { maxH: 7 },
+    features: { ears: true, hands: true, belt: true, mouth: true },
+    outline: 'tinted',
+    toneCount: 4,
+  },
+};
+
+// ============================================================
+// MODULE E: CHARACTER RENDERER
+// ============================================================
+
+const CharacterRenderer = {
+  // Main entry: draw a single animation frame
+  drawFrame(pc, template, pal, config, frameType, frameNum, totalFrames) {
+    const t = totalFrames > 1 ? frameNum / (totalFrames - 1) : 0;
+    const cx = Math.floor(template.canvas.w / 2);
+    const pose = CharacterRenderer._getPose(template, frameType, t);
+
+    // Get palette indices for each group
+    const skin = pal.groups.skin ? pal.groups.skin.startIdx : 1;
+    const hair = pal.groups.hair ? pal.groups.hair.startIdx : 5;
+    const shirt = pal.groups.shirt ? pal.groups.shirt.startIdx : 9;
+    const pants = pal.groups.pants ? pal.groups.pants.startIdx : 13;
+    const shoes = pal.groups.shoes ? pal.groups.shoes.startIdx : 17;
+    const eyeGroup = pal.groups.eyes ? pal.groups.eyes.startIdx : 21;
+    const belt = pal.groups.belt ? pal.groups.belt.startIdx : 25;
+
+    // Use base tone (+2) for initial drawing — shading pass will adjust
+    const skinBase = skin + 2;
+    const hairBase = hair + 2;
+    const shirtBase = shirt + 2;
+    const pantsBase = pants + 2;
+    const shoesBase = shoes + 2;
+    const beltBase = belt + 2;
+
+    const T = template;
+    const headCY = T.head.cy + pose.headBob;
+    const torsoCY = T.torso.cy + pose.torsoShift;
+    const legBase = torsoCY + Math.floor(T.torso.h / 2);
+
+    // 1. Back hair (long styles)
+    if (config.body && config.body.hair === 'long') {
+      CharacterRenderer._drawBackHair(pc, T, cx, headCY, hairBase);
+    }
+
+    // 2. Head
+    pc.fillEllipse(cx, headCY, T.head.rx, T.head.ry, skinBase);
+
+    // 3. Ears
+    if (T.features.ears) {
+      pc.fillCircle(cx - T.head.rx, headCY + 1, 2, skinBase);
+      pc.fillCircle(cx + T.head.rx, headCY + 1, 2, skinBase);
+    }
+
+    // 4. Torso
+    const torsoLeft = cx - Math.floor(T.torso.w / 2);
+    pc.fillRect(torsoLeft, torsoCY - Math.floor(T.torso.h / 2), T.torso.w, T.torso.h, shirtBase);
+    // Shoulder taper — round off top corners
+    if (T.torso.w >= 12) {
+      const tTop = torsoCY - Math.floor(T.torso.h / 2);
+      pc.setPixel(torsoLeft, tTop, 0);
+      pc.setPixel(torsoLeft + T.torso.w - 1, tTop, 0);
+    }
+
+    // 5. Legs
+    const legY = legBase;
+    const leftLegX = cx - Math.floor(T.legs.gap / 2) - T.legs.w + pose.leftLeg;
+    const rightLegX = cx + Math.floor(T.legs.gap / 2) + pose.rightLeg;
+    pc.fillRect(leftLegX, legY, T.legs.w, T.legs.h, pantsBase);
+    pc.fillRect(rightLegX, legY, T.legs.w, T.legs.h, pantsBase);
+
+    // 6. Feet/Shoes
+    const feetY = legY + T.legs.h;
+    pc.fillRect(leftLegX - 1, feetY, T.legs.w + 1, 2, shoesBase);
+    pc.fillRect(rightLegX, feetY, T.legs.w + 1, 2, shoesBase);
+
+    // 7. Belt
+    if (T.features.belt) {
+      const beltY = legY - 1;
+      pc.hline(torsoLeft + 1, beltY, T.torso.w - 2, beltBase);
+    }
+
+    // 8. Arms
+    const armTop = torsoCY - Math.floor(T.torso.h / 2) + T.arms.shoulderOff;
+    const leftArmX = torsoLeft - T.arms.w;
+    const rightArmX = torsoLeft + T.torso.w;
+    pc.fillRect(leftArmX, armTop + pose.leftArm, T.arms.w, T.arms.h, skinBase);
+    pc.fillRect(rightArmX, armTop + pose.rightArm, T.arms.w, T.arms.h, skinBase);
+
+    // 9. Hands
+    if (T.features.hands) {
+      pc.fillRect(leftArmX, armTop + T.arms.h + pose.leftArm, T.arms.w, 2, skinBase);
+      pc.fillRect(rightArmX, armTop + T.arms.h + pose.rightArm, T.arms.w, 2, skinBase);
+    }
+
+    // 10. Hair front
+    CharacterRenderer._drawHairFront(pc, T, cx, headCY, hairBase, config);
+
+    // 11. Face — Eyes (drawn after shading pass, see _drawFace)
+    // Stored for later: pc._eyeParams set here for post-shading draw
+    pc._eyeParams = { T, cx, headCY, eyeGroup, config, frameType, frameNum, totalFrames };
+
+    // 12. Mouth
+    if (T.features.mouth) {
+      const mouthY = headCY + Math.floor(T.head.ry * 0.4);
+      pc.hline(cx - 1, mouthY, 3, skin + 1); // shadow tone for mouth line
+    }
+
+    // Death: clear most pixels for fade effect
+    if (frameType === 'death') {
+      const progress = t;
+      if (progress > 0.5) {
+        const rng = sf2_seededRNG(frameNum * 1000);
+        for (let y = 0; y < pc.height; y++) {
+          for (let x = 0; x < pc.width; x++) {
+            if (rng() < (progress - 0.5) * 2) {
+              pc.pixels[y * pc.width + x] = 0;
+              pc.groupMap[y * pc.width + x] = 0;
+            }
+          }
+        }
+      }
+    }
+  },
+
+  _getPose(T, frameType, t) {
+    const pose = { headBob: 0, torsoShift: 0, leftLeg: 0, rightLeg: 0, leftArm: 0, rightArm: 0 };
+    const sin = Math.sin;
+    const PI = Math.PI;
+    const round = Math.round;
+
+    switch (frameType) {
+      case 'idle':
+        pose.headBob = round(sin(t * PI * 2) * 0.5);
+        break;
+      case 'walk': {
+        const walkSin = sin(t * PI * 2);
+        pose.headBob = round(-Math.abs(walkSin) * 1.5);
+        pose.leftLeg = round(walkSin * 2);
+        pose.rightLeg = round(-walkSin * 2);
+        pose.leftArm = round(-walkSin * 3);
+        pose.rightArm = round(walkSin * 3);
+        break;
+      }
+      case 'attack': {
+        if (t < 0.4) {
+          pose.rightArm = round(-t / 0.4 * 6);
+        } else {
+          pose.rightArm = round(-(1 - (t - 0.4) / 0.6) * 6);
+        }
+        pose.torsoShift = round(sin(t * PI) * -1);
+        break;
+      }
+      case 'hurt': {
+        pose.torsoShift = round(sin(t * PI) * 2);
+        pose.headBob = round(-sin(t * PI) * 1);
+        break;
+      }
+      case 'death': {
+        pose.torsoShift = round(t * 3);
+        pose.headBob = round(t * 2);
+        break;
+      }
+    }
+
+    return pose;
+  },
+
+  _drawBackHair(pc, T, cx, headCY, hairIdx) {
+    const hairTop = headCY - T.head.ry - 1;
+    const hairBottom = headCY + Math.floor(T.head.ry * 0.8);
+    const hairW = T.head.rx + 3;
+    for (let y = hairTop; y <= hairBottom; y++) {
+      const t = (y - hairTop) / (hairBottom - hairTop);
+      const w = Math.round(hairW * (0.7 + t * 0.3));
+      pc.hline(cx - w, y, w * 2 + 1, hairIdx);
+    }
+  },
+
+  _drawHairFront(pc, T, cx, headCY, hairIdx, config) {
+    const style = (config.body && config.body.hair) || 'short';
+    const hairTop = headCY - T.head.ry;
+    const maxH = T.hair.maxH;
+
+    switch (style) {
+      case 'short': {
+        // Cap on top of head
+        pc.fillEllipse(cx, hairTop, T.head.rx - 1, maxH, hairIdx);
+        break;
+      }
+      case 'spiky': {
+        // Triangular tufts above head
+        const spikeCount = Math.max(3, Math.floor(T.head.rx / 2));
+        for (let i = 0; i < spikeCount; i++) {
+          const sx = cx - T.head.rx + 2 + i * Math.floor((T.head.rx * 2 - 4) / (spikeCount - 1));
+          const spikeH = maxH + (i % 2) * 2;
+          pc.fillTriangle(sx - 2, hairTop + 1, sx + 2, hairTop + 1, sx, hairTop - spikeH, hairIdx);
+        }
+        // Base cap
+        pc.fillEllipse(cx, hairTop + 1, T.head.rx - 1, Math.floor(maxH * 0.4), hairIdx);
+        break;
+      }
+      case 'long': {
+        // Fringe/bangs over forehead
+        pc.fillEllipse(cx, hairTop, T.head.rx, Math.floor(maxH * 0.6), hairIdx);
+        // Side curtains
+        pc.fillRect(cx - T.head.rx - 1, hairTop, 2, T.head.ry + 3, hairIdx);
+        pc.fillRect(cx + T.head.rx, hairTop, 2, T.head.ry + 3, hairIdx);
+        break;
+      }
+      case 'flowing': {
+        // Full coverage top + sides flowing down
+        pc.fillEllipse(cx, hairTop, T.head.rx, maxH, hairIdx);
+        const sideLen = T.head.ry + maxH;
+        pc.fillRect(cx - T.head.rx - 1, hairTop, 3, sideLen, hairIdx);
+        pc.fillRect(cx + T.head.rx - 1, hairTop, 3, sideLen, hairIdx);
+        break;
+      }
+      case 'ponytail': {
+        // Short top
+        pc.fillEllipse(cx, hairTop, T.head.rx - 1, Math.floor(maxH * 0.5), hairIdx);
+        // Tail extending right
+        const tailX = cx + T.head.rx;
+        const tailY = hairTop + 2;
+        pc.fillRect(tailX, tailY, 3, maxH + 4, hairIdx);
+        break;
+      }
+      case 'mohawk': {
+        // Narrow vertical strip
+        pc.fillRect(cx - 1, hairTop - maxH, 3, maxH + 2, hairIdx);
+        break;
+      }
+      case 'bun': {
+        // Small dome on top
+        pc.fillEllipse(cx, hairTop, T.head.rx - 1, Math.floor(maxH * 0.4), hairIdx);
+        pc.fillCircle(cx, hairTop - maxH + 1, Math.floor(maxH * 0.6), hairIdx);
+        break;
+      }
+      case 'bob': {
+        // Mid-length with curved bottom
+        pc.fillEllipse(cx, hairTop + 1, T.head.rx, maxH, hairIdx);
+        const bobLen = Math.floor(T.head.ry * 0.5);
+        pc.fillRect(cx - T.head.rx, hairTop, 2, bobLen, hairIdx);
+        pc.fillRect(cx + T.head.rx - 1, hairTop, 2, bobLen, hairIdx);
+        break;
+      }
+      default: // 'none'
+        break;
+    }
+  },
+
+  _drawEyes(pc, T, cx, headCY, eyeStart, config, frameType, frameNum, totalFrames) {
+    const eye = T.eyes;
+    const eyeY = headCY + (eye.cy || 0);
+
+    // Blink on specific idle frames
+    const isBlink = frameType === 'idle' && frameNum === totalFrames - 1;
+    // Hurt = squeezed eyes
+    const isHurt = frameType === 'hurt';
+
+    if (eye.type === 'dot') {
+      // Simple dot eyes — use pupil color (dark) for visibility
+      if (isBlink || isHurt) {
+        pc.hline(cx - Math.floor(eye.gap / 2), eyeY, 1, eyeStart);
+        pc.hline(cx + Math.floor(eye.gap / 2), eyeY, 1, eyeStart);
+      } else {
+        pc.setPixel(cx - Math.floor(eye.gap / 2), eyeY, eyeStart); // pupil (near-black)
+        pc.setPixel(cx + Math.floor(eye.gap / 2), eyeY, eyeStart);
+      }
+    } else if (eye.type === 'simple') {
+      // 3x2 eyes: white bg + dark pupil
+      const lx = cx - Math.floor(eye.gap / 2) - Math.floor(eye.w / 2);
+      const rx = cx + Math.floor(eye.gap / 2) - Math.floor(eye.w / 2);
+      if (isBlink || isHurt) {
+        pc.hline(lx, eyeY, eye.w, eyeStart + 1);
+        pc.hline(rx, eyeY, eye.w, eyeStart + 1);
+      } else {
+        // White
+        pc.fillRect(lx, eyeY, eye.w, eye.h, eyeStart + 3); // highlight = white
+        pc.fillRect(rx, eyeY, eye.w, eye.h, eyeStart + 3);
+        // Pupil (center pixel)
+        pc.setPixel(lx + Math.floor(eye.w / 2), eyeY + Math.floor(eye.h / 2), eyeStart); // deepShadow = pupil
+        pc.setPixel(rx + Math.floor(eye.w / 2), eyeY + Math.floor(eye.h / 2), eyeStart);
+      }
+    } else if (eye.type === 'detailed') {
+      // Full eye: eyeStart+0=pupil(black), +1=iris(color), +2=white, +3=specular
+      const lx = cx - Math.floor(eye.gap / 2) - Math.floor(eye.w / 2);
+      const rx = cx + Math.floor(eye.gap / 2) - Math.floor(eye.w / 2);
+      if (isBlink || isHurt) {
+        pc.hline(lx, eyeY + Math.floor(eye.h / 2), eye.w, eyeStart); // closed eye line
+        pc.hline(rx, eyeY + Math.floor(eye.h / 2), eye.w, eyeStart);
+      } else {
+        // White of eye (background)
+        pc.fillRect(lx, eyeY, eye.w, eye.h, eyeStart + 2);
+        pc.fillRect(rx, eyeY, eye.w, eye.h, eyeStart + 2);
+        // Iris — centered circle within the eye area
+        const irisX = Math.floor(eye.w / 2);
+        const irisR = Math.max(1, Math.floor(Math.min(eye.w, eye.h) / 2) - 1);
+        pc.fillCircle(lx + irisX, eyeY + Math.floor(eye.h / 2), irisR, eyeStart + 1);
+        pc.fillCircle(rx + irisX, eyeY + Math.floor(eye.h / 2), irisR, eyeStart + 1);
+        // Pupil — single dark pixel at center
+        pc.setPixel(lx + irisX, eyeY + Math.floor(eye.h / 2), eyeStart);
+        pc.setPixel(rx + irisX, eyeY + Math.floor(eye.h / 2), eyeStart);
+        // Specular highlight — top-left of each eye
+        pc.setPixel(lx + irisX - 1, eyeY, eyeStart + 3);
+        pc.setPixel(rx + irisX - 1, eyeY, eyeStart + 3);
+      }
+    }
+  },
+};
+
+// ============================================================
+// MODULE F: CREATURE RENDERER
+// ============================================================
+
+const CreatureRenderer = {
+  drawFrame(pc, pal, config, frameType, frameNum, totalFrames) {
+    const t = totalFrames > 1 ? frameNum / (totalFrames - 1) : 0;
+    const cx = Math.floor(pc.width / 2);
+    const cy = Math.floor(pc.height / 2);
+    const type = (config.creature && config.creature.bodyShape) || 'blob';
+    const bodyColor = pal.groups.body ? pal.groups.body.startIdx + 2 : 1;
+    const eyeColor = pal.groups.eyes ? pal.groups.eyes.startIdx : 5;
+
+    // Animation offsets
+    let squish = 0, shiftX = 0, shiftY = 0;
+    switch (frameType) {
+      case 'idle':
+        squish = Math.sin(t * Math.PI * 2) * 0.08;
+        shiftY = Math.round(Math.sin(t * Math.PI * 2) * 1);
+        break;
+      case 'walk':
+        shiftX = Math.round(Math.sin(t * Math.PI * 2) * 2);
+        squish = Math.sin(t * Math.PI * 4) * 0.1;
+        shiftY = Math.round(Math.abs(Math.sin(t * Math.PI * 2)) * -2);
+        break;
+      case 'attack':
+        shiftX = t < 0.5 ? Math.round(-t * 4) : Math.round((t - 0.5) * 8 - 2);
+        squish = t < 0.4 ? t * 0.2 : -(t - 0.4) * 0.15;
+        break;
+      case 'hurt':
+        shiftX = Math.round(Math.sin(t * Math.PI) * 3);
+        break;
+      case 'death':
+        squish = t * 0.5;
+        break;
+    }
+
+    const bx = cx + shiftX;
+    const by = cy + shiftY;
+
+    // Deferred eye list — drawn after shading pass
+    const deferredEyes = [];
+    const drawEye = (ex, ey, r) => { deferredEyes.push({ ex, ey, r }); };
+
+    switch (type) {
+      case 'blob': {
+        // Classic slime/blob: dome shape, glossy, cute face
+        const rx = Math.max(4, Math.floor(pc.width * 0.32 * (1 + squish)));
+        const ry = Math.max(4, Math.floor(pc.height * 0.28 * (1 - squish)));
+        // Body — slightly flattened dome
+        pc.fillEllipse(bx, by + 2, rx, ry, bodyColor);
+        // Flat bottom
+        pc.fillRect(bx - rx, by + 2, rx * 2 + 1, Math.floor(ry * 0.3), bodyColor);
+        // Glossy highlight — upper left area
+        pc.fillEllipse(bx - Math.floor(rx * 0.25), by - Math.floor(ry * 0.15), Math.max(2, Math.floor(rx * 0.35)), Math.max(2, Math.floor(ry * 0.25)), bodyColor + 1);
+        // Eyes
+        const eyeCount = (config.creature && config.creature.eyeCount) || 2;
+        const eyeY = by - Math.floor(ry * 0.1);
+        const eyeR = Math.max(1, Math.floor(rx * 0.2));
+        if (eyeCount === 1) {
+          drawEye(bx, eyeY, eyeR);
+        } else {
+          const gap = Math.max(3, Math.floor(rx * 0.4));
+          drawEye(bx - gap, eyeY, eyeR);
+          drawEye(bx + gap, eyeY, eyeR);
+        }
+        // Smile
+        if (rx >= 6) {
+          pc.hline(bx - 2, by + Math.floor(ry * 0.25), 5, bodyColor - 1);
+          pc.setPixel(bx - 3, by + Math.floor(ry * 0.25) - 1, bodyColor - 1);
+          pc.setPixel(bx + 3, by + Math.floor(ry * 0.25) - 1, bodyColor - 1);
+        }
+        break;
+      }
+      case 'quadruped': {
+        // 4-legged animal: distinct head, body, legs
+        const bodyRX = Math.max(5, Math.floor(pc.width * 0.26));
+        const bodyRY = Math.max(3, Math.floor(pc.height * 0.14 * (1 - squish)));
+        const headR = Math.max(3, Math.floor(bodyRY * 0.9));
+        const legH = Math.max(3, Math.floor(pc.height * 0.2));
+        const legW = Math.max(2, Math.floor(pc.width * 0.06));
+        const stride = Math.round(Math.sin(t * Math.PI * 2) * 2);
+        // Body
+        pc.fillEllipse(bx, by, bodyRX, bodyRY, bodyColor);
+        // Head — positioned to the right, slightly higher
+        const headX = bx + bodyRX - Math.floor(headR * 0.3);
+        const headY = by - bodyRY + Math.floor(headR * 0.3);
+        pc.fillCircle(headX, headY, headR, bodyColor);
+        // Ear nubs
+        pc.fillCircle(headX - 2, headY - headR, Math.max(1, Math.floor(headR * 0.4)), bodyColor);
+        pc.fillCircle(headX + 2, headY - headR, Math.max(1, Math.floor(headR * 0.4)), bodyColor);
+        // Legs — side view facing right
+        // Each leg: vertical shin + foot extending RIGHT (forward)
+        const frontBase = bx + Math.floor(bodyRX * 0.35);
+        const backBase = bx - Math.floor(bodyRX * 0.35);
+        const groundY = by + bodyRY - 1;
+        const footW = legW + 2; // foot wider than leg, extends forward
+        const footH = Math.max(1, Math.floor(legH * 0.2));
+        const footY = groundY + legH - footH;
+
+        // Draw leg + foot helper (foot extends to the right = forward)
+        const drawLeg = (lx, color) => {
+          pc.fillRect(lx, groundY, legW, legH, color);        // shin
+          pc.fillRect(lx, footY, footW, footH, color);         // foot extends right
+        };
+
+        // Far legs first (behind, darker)
+        drawLeg(frontBase + 1 - stride, bodyColor - 1);
+        drawLeg(backBase + 1 + stride, bodyColor - 1);
+        // Near legs on top
+        drawLeg(frontBase + stride, bodyColor);
+        drawLeg(backBase - stride, bodyColor);
+        // Tail — small curve from back
+        pc.line(bx - bodyRX, by - 1, bx - bodyRX - 3, by - 4, bodyColor);
+        pc.line(bx - bodyRX - 3, by - 4, bx - bodyRX - 2, by - 6, bodyColor);
+        // Eye on head
+        drawEye(headX + Math.floor(headR * 0.3), headY - 1, Math.max(1, Math.floor(headR * 0.35)));
+        // Nose
+        pc.setPixel(headX + headR - 1, headY + 1, bodyColor - 1);
+        break;
+      }
+      case 'serpent': {
+        // Snake: thick segmented body, tapered tail, distinct head with eyes and tongue
+        const segCount = 8;
+        const maxR = Math.max(3, Math.floor(pc.width * 0.12));
+        const bodyLen = Math.floor(pc.width * 0.7);
+        const startX = bx - Math.floor(bodyLen * 0.35);
+        for (let i = 0; i < segCount; i++) {
+          const sf = i / (segCount - 1);
+          const sx = startX + Math.floor(sf * bodyLen);
+          const sy = by + Math.round(Math.sin(sf * Math.PI * 1.5 + t * Math.PI * 2) * 5);
+          // Taper: head is large, body medium, tail thin
+          let r;
+          if (i === 0) r = Math.floor(maxR * 1.3); // head
+          else if (i < 3) r = maxR;
+          else r = Math.max(1, Math.floor(maxR * (1 - (sf - 0.3) * 0.8)));
+          pc.fillCircle(sx, sy, r, bodyColor);
+        }
+        // Head details
+        const headX = startX;
+        const headY = by + Math.round(Math.sin(t * Math.PI * 2) * 5);
+        const headR = Math.floor(maxR * 1.3);
+        // Eyes — on top of head
+        drawEye(headX - Math.floor(headR * 0.4), headY - Math.floor(headR * 0.4), Math.max(1, Math.floor(headR * 0.35)));
+        drawEye(headX + Math.floor(headR * 0.4), headY - Math.floor(headR * 0.4), Math.max(1, Math.floor(headR * 0.35)));
+        // Forked tongue
+        const tongueX = headX - headR - 1;
+        const tongueY = headY;
+        pc.line(tongueX, tongueY, tongueX - 3, tongueY - 1, eyeColor);
+        pc.line(tongueX, tongueY, tongueX - 3, tongueY + 1, eyeColor);
+        break;
+      }
+      case 'flying': {
+        // Bat/bird: round body, large swept wings, visible face
+        const bodyRX = Math.max(3, Math.floor(pc.width * 0.12));
+        const bodyRY = Math.max(3, Math.floor(pc.height * 0.14));
+        // Body — round
+        pc.fillEllipse(bx, by, bodyRX, bodyRY, bodyColor);
+        // Wings — large triangular, attached to body sides
+        const wingFlap = Math.round(Math.sin(t * Math.PI * 2) * 4);
+        const wingSpan = Math.floor(pc.width * 0.38);
+        const wingTip = by - wingFlap - 2;
+        const wingMid = by + Math.floor(bodyRY * 0.3);
+        // Left wing — triangle from shoulder to tip to elbow
+        pc.fillTriangle(
+          bx - bodyRX, by - 1,          // shoulder
+          bx - wingSpan, wingTip,        // tip
+          bx - bodyRX - 2, wingMid,      // elbow
+          bodyColor
+        );
+        // Right wing — mirror
+        pc.fillTriangle(
+          bx + bodyRX, by - 1,
+          bx + wingSpan, wingTip,
+          bx + bodyRX + 2, wingMid,
+          bodyColor
+        );
+        // Wing membrane detail line
+        pc.line(bx - bodyRX, by, bx - wingSpan + 2, wingTip + 2, bodyColor + 1);
+        pc.line(bx + bodyRX, by, bx + wingSpan - 2, wingTip + 2, bodyColor + 1);
+        // Eyes — prominent on the round body
+        const eyeR = Math.max(1, Math.floor(bodyRX * 0.4));
+        drawEye(bx - Math.floor(bodyRX * 0.45), by - Math.floor(bodyRY * 0.2), eyeR);
+        drawEye(bx + Math.floor(bodyRX * 0.45), by - Math.floor(bodyRY * 0.2), eyeR);
+        // Feet — tiny dangling
+        pc.line(bx - 2, by + bodyRY, bx - 3, by + bodyRY + 3, bodyColor);
+        pc.line(bx + 2, by + bodyRY, bx + 3, by + bodyRY + 3, bodyColor);
+        break;
+      }
+      case 'spider': {
+        // Spider: large round abdomen, smaller cephalothorax, 8 legs spreading outward
+        const abdR = Math.max(4, Math.floor(pc.width * 0.18));
+        const headR = Math.max(2, Math.floor(pc.width * 0.1));
+        const abdY = by + 3;
+        const headY = abdY - abdR - headR + 3;
+        // Abdomen (larger, back)
+        pc.fillEllipse(bx, abdY, abdR, Math.floor(abdR * 0.85), bodyColor);
+        // Cephalothorax (smaller, front)
+        pc.fillCircle(bx, headY, headR, bodyColor);
+        // Connect them
+        pc.fillRect(bx - headR + 1, headY + headR - 1, headR * 2 - 1, 3, bodyColor);
+        // 8 legs — 4 per side, angled outward and bending downward
+        const legLen1 = Math.max(4, Math.floor(pc.width * 0.2));  // upper segment
+        const legLen2 = Math.max(3, Math.floor(pc.width * 0.15)); // lower segment
+        for (let side = -1; side <= 1; side += 2) {
+          for (let i = 0; i < 4; i++) {
+            const angle = (0.3 + i * 0.35) * side; // spread angle
+            const swing = Math.sin(t * Math.PI * 2 + i * 1.2) * 1.5;
+            // Knee point — extends outward and slightly up
+            const kneeX = bx + Math.round((headR + legLen1) * Math.cos(angle) * side);
+            const kneeY = headY + Math.round(-legLen1 * 0.3 + i * 1.5 + swing);
+            // Foot point — from knee downward
+            const footX = kneeX + Math.round(legLen2 * 0.5 * side);
+            const footY = kneeY + legLen2;
+            // Draw leg: body -> knee -> foot
+            pc.line(bx + headR * side, headY + i - 1, kneeX, kneeY, bodyColor);
+            pc.line(kneeX, kneeY, footX, footY, bodyColor);
+          }
+        }
+        // Eyes — cluster of small eyes on cephalothorax
+        const eyeR = Math.max(1, Math.floor(headR * 0.3));
+        drawEye(bx - Math.floor(headR * 0.4), headY - Math.floor(headR * 0.3), eyeR);
+        drawEye(bx + Math.floor(headR * 0.4), headY - Math.floor(headR * 0.3), eyeR);
+        // Smaller secondary eyes
+        pc.setPixel(bx - Math.floor(headR * 0.6), headY, eyeColor + 2);
+        pc.setPixel(bx + Math.floor(headR * 0.6), headY, eyeColor + 2);
+        // Fangs
+        pc.line(bx - 1, headY + headR, bx - 2, headY + headR + 2, eyeColor + 2);
+        pc.line(bx + 1, headY + headR, bx + 2, headY + headR + 2, eyeColor + 2);
+        break;
+      }
+    }
+    // Store deferred eyes for post-shading drawing
+    pc._deferredEyes = deferredEyes;
+    pc._eyeColor = eyeColor;
+  },
+
+  // Draw deferred creature eyes (call after shading pass)
+  drawDeferredEyes(pc) {
+    if (!pc._deferredEyes || !pc._deferredEyes.length) return;
+    const eyeColor = pc._eyeColor || 5;
+    for (const { ex, ey, r } of pc._deferredEyes) {
+      const er = Math.max(1, r);
+      if (er <= 1) {
+        pc.setPixel(ex, ey, eyeColor + 2); // white
+        pc.setPixel(ex, ey, eyeColor);      // pupil on top
+      } else {
+        pc.fillCircle(ex, ey, er, eyeColor + 2);              // white
+        pc.fillCircle(ex, ey, Math.max(1, er - 1), eyeColor + 1); // iris
+        pc.setPixel(ex, ey, eyeColor);                         // pupil
+        pc.setPixel(ex - 1, ey - 1, eyeColor + 3);            // specular
+      }
+    }
+  },
+};
+
+// ============================================================
+// MODULE G: SPRITESHEET, ANIMATOR, CACHE (carried from v1)
+// ============================================================
+
+class SpriteSheet {
+  constructor(canvas, frameWidth, frameHeight, cols, rows) {
+    this.canvas = canvas;
+    this.frameWidth = frameWidth;
+    this.frameHeight = frameHeight;
+    this.cols = cols;
+    this.rows = rows;
+    this._names = {};
+  }
+
+  getFrame(index) {
+    const col = index % this.cols;
+    const row = Math.floor(index / this.cols);
+    return {
+      x: col * this.frameWidth,
+      y: row * this.frameHeight,
+      w: this.frameWidth,
+      h: this.frameHeight,
+      canvas: this.canvas,
+    };
+  }
+
+  nameFrame(name, index) { this._names[name] = index; }
+
+  getFrameByName(name) {
+    const idx = this._names[name];
+    return idx != null ? this.getFrame(idx) : null;
+  }
+
+  drawFrame(ctx, index, x, y, opts) {
+    const f = this.getFrame(index);
+    if (!f) return;
+    const o = opts || {};
+    ctx.save();
+    const scale = o.scale || 1;
+    const alpha = o.alpha != null ? o.alpha : 1;
+    ctx.globalAlpha = alpha;
+    if (o.flipX || o.flipY) {
+      ctx.translate(x + f.w * scale / 2, y + f.h * scale / 2);
+      ctx.scale(o.flipX ? -1 : 1, o.flipY ? -1 : 1);
+      ctx.drawImage(f.canvas, f.x, f.y, f.w, f.h, -f.w * scale / 2, -f.h * scale / 2, f.w * scale, f.h * scale);
+    } else {
+      ctx.drawImage(f.canvas, f.x, f.y, f.w, f.h, x, y, f.w * scale, f.h * scale);
+    }
+    ctx.restore();
+  }
+}
+
+class SpriteAnimator {
+  constructor(sheet, animations) {
+    this.sheet = sheet;
+    this.animations = animations;
+    this.current = null;
+    this.frame = 0;
+    this.elapsed = 0;
+    this.playing = false;
+    this._dir = 1; // 1 forward, -1 backward (pingpong)
+  }
+
+  play(name, opts) {
+    if (this.current === name && this.playing) return;
+    this.current = name;
+    this.frame = 0;
+    this.elapsed = 0;
+    this.playing = true;
+    this._dir = 1;
+    this._opts = opts || {};
+  }
+
+  stop() { this.playing = false; }
+
+  update(dt) {
+    if (!this.playing || !this.current) return;
+    const anim = this.animations[this.current];
+    if (!anim) return;
+
+    this.elapsed += dt;
+    if (this.elapsed >= anim.speed) {
+      this.elapsed -= anim.speed;
+      this.frame += this._dir;
+
+      if (this.frame >= anim.frames.length) {
+        if (anim.pingpong) {
+          this._dir = -1;
+          this.frame = anim.frames.length - 2;
+        } else if (anim.loop !== false) {
+          this.frame = 0;
+        } else {
+          this.frame = anim.frames.length - 1;
+          this.playing = false;
+          if (anim.onComplete) anim.onComplete();
+        }
+      } else if (this.frame < 0) {
+        this._dir = 1;
+        this.frame = 1;
+      }
+    }
+  }
+
+  getCurrentFrame() {
+    if (!this.current) return 0;
+    const anim = this.animations[this.current];
+    if (!anim) return 0;
+    return anim.frames[Math.max(0, Math.min(this.frame, anim.frames.length - 1))];
+  }
+
+  draw(ctx, x, y, opts) {
+    this.sheet.drawFrame(ctx, this.getCurrentFrame(), x, y, opts);
+  }
+}
+
+class SpriteCache {
+  constructor(maxEntries) {
+    this.max = maxEntries || 128;
+    this._map = new Map();
+  }
+
+  get(key) {
+    const entry = this._map.get(key);
+    if (!entry) return null;
+    entry.ts = Date.now();
+    return entry.value;
+  }
+
+  set(key, value) {
+    if (this._map.size >= this.max) {
+      let oldest = null, oldestKey = null;
+      for (const [k, v] of this._map) {
+        if (!oldest || v.ts < oldest.ts) { oldest = v; oldestKey = k; }
+      }
+      if (oldestKey) this._map.delete(oldestKey);
+    }
+    this._map.set(key, { value, ts: Date.now() });
+  }
+
+  has(key) { return this._map.has(key); }
+  clear() { this._map.clear(); }
+}
+
+// ============================================================
+// MODULE H: SPRITEFORGE v2 PUBLIC API
+// ============================================================
+
+const _sf2Cache = new SpriteCache(256);
+
+const SpriteForge = {
+  VERSION: 2,
+
+  character(config) {
+    const cacheKey = JSON.stringify({ _t: 'char', ...config });
+    const cached = _sf2Cache.get(cacheKey);
+    if (cached) return cached;
+
+    // Resolve style
+    const styleName = config.style || 'chibi';
+    const template = BODY_TEMPLATES[styleName];
+    if (!template) throw new Error('Unknown style: ' + styleName);
+
+    // Build color palette
+    const colors = config.colors || {};
+    const defaultColors = {
+      skin: '#ffcc99', hair: '#553322', shirt: '#5588bb',
+      pants: '#445566', shoes: '#332211', eyes: '#4488ff', belt: '#8b7355',
+    };
+    const mergedColors = { ...defaultColors, ...colors };
+    const pal = ColorRamp.buildPalette(mergedColors);
+
+    // Set black at index 255 for 'black' outline mode
+    pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+
+    // Resolve animations
+    const defaultAnims = {
+      idle: { frames: 4, speed: 0.2 },
+      walk: { frames: 6, speed: 0.1 },
+      attack: { frames: 4, speed: 0.08 },
+      hurt: { frames: 2, speed: 0.1 },
+      death: { frames: 4, speed: 0.15 },
+    };
+    const animConfig = { ...defaultAnims, ...(config.animations || {}) };
+
+    // Count total frames
+    let totalFrames = 0;
+    const animList = [];
+    for (const [name, def] of Object.entries(animConfig)) {
+      animList.push({ name, frames: def.frames, speed: def.speed });
+      totalFrames += def.frames;
+    }
+
+    // Create sprite sheet grid
+    const cols = Math.ceil(Math.sqrt(totalFrames));
+    const rows = Math.ceil(totalFrames / cols);
+    const fw = template.canvas.w;
+    const fh = template.canvas.h;
+    const sheetCanvas = sf2_makeCanvas(cols * fw, rows * fh);
+    const sheetCtx = sheetCanvas.getContext('2d');
+    sheetCtx.imageSmoothingEnabled = false;
+
+    // Determine outline mode
+    const outlineMode = config.outlineMode || template.outline || 'tinted';
+
+    // Generate each frame
+    let frameIdx = 0;
+    const animationDefs = {};
+
+    for (const anim of animList) {
+      const frameIndices = [];
+      for (let f = 0; f < anim.frames; f++) {
+        const pc = new PixelCanvas(fw, fh);
+        pc.setPalette(pal.palette, pal.groupForIndex);
+
+        // Draw the character frame (without eyes)
+        CharacterRenderer.drawFrame(pc, template, pal, config, anim.name, f, anim.frames);
+
+        // Post-processing: shade body first, then draw eyes, then outlines
+        PostProcess.applyShading(pc, pal.groups);
+
+        // Draw eyes AFTER shading so they aren't modified
+        if (pc._eyeParams) {
+          const ep = pc._eyeParams;
+          CharacterRenderer._drawEyes(pc, ep.T, ep.cx, ep.headCY, ep.eyeGroup, ep.config, ep.frameType, ep.frameNum, ep.totalFrames);
+        }
+
+        PostProcess.applyOutlines(pc, pal.groups, outlineMode);
+
+        // Blit to sheet
+        const col = frameIdx % cols;
+        const row = Math.floor(frameIdx / cols);
+        pc.blitTo(sheetCtx, col * fw, row * fh);
+
+        frameIndices.push(frameIdx);
+        frameIdx++;
+      }
+
+      animationDefs[anim.name] = {
+        frames: frameIndices,
+        speed: anim.speed,
+        loop: anim.name !== 'death' && anim.name !== 'hurt',
+        pingpong: anim.name === 'idle',
+      };
+    }
+
+    const sheet = new SpriteSheet(sheetCanvas, fw, fh, cols, rows);
+    const animator = new SpriteAnimator(sheet, animationDefs);
+    animator.play('idle');
+
+    const result = { sheet, animator, animations: animationDefs };
+    _sf2Cache.set(cacheKey, result);
+    return result;
+  },
+
+  creature(config) {
+    const cacheKey = JSON.stringify({ _t: 'creature', ...config });
+    const cached = _sf2Cache.get(cacheKey);
+    if (cached) return cached;
+
+    const size = config.size || 32;
+    const colors = config.colors || {};
+    const defaultColors = { body: '#66aa44', eyes: '#ffffff' };
+    const mergedColors = { ...defaultColors, ...colors };
+    const pal = ColorRamp.buildPalette(mergedColors);
+    pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+
+    const defaultAnims = {
+      idle: { frames: 4, speed: 0.2 },
+      walk: { frames: 4, speed: 0.12 },
+      attack: { frames: 3, speed: 0.1 },
+      hurt: { frames: 2, speed: 0.1 },
+      death: { frames: 3, speed: 0.15 },
+    };
+    const animConfig = { ...defaultAnims, ...(config.animations || {}) };
+
+    let totalFrames = 0;
+    const animList = [];
+    for (const [name, def] of Object.entries(animConfig)) {
+      animList.push({ name, frames: def.frames, speed: def.speed });
+      totalFrames += def.frames;
+    }
+
+    const cols = Math.ceil(Math.sqrt(totalFrames));
+    const rows = Math.ceil(totalFrames / cols);
+    const sheetCanvas = sf2_makeCanvas(cols * size, rows * size);
+    const sheetCtx = sheetCanvas.getContext('2d');
+    sheetCtx.imageSmoothingEnabled = false;
+
+    const outlineMode = config.outlineMode || 'tinted';
+    let frameIdx = 0;
+    const animationDefs = {};
+
+    for (const anim of animList) {
+      const frameIndices = [];
+      for (let f = 0; f < anim.frames; f++) {
+        const pc = new PixelCanvas(size, size);
+        pc.setPalette(pal.palette, pal.groupForIndex);
+
+        CreatureRenderer.drawFrame(pc, pal, config, anim.name, f, anim.frames);
+
+        PostProcess.applyShading(pc, pal.groups);
+        CreatureRenderer.drawDeferredEyes(pc);
+        PostProcess.applyOutlines(pc, pal.groups, outlineMode);
+
+        const col = frameIdx % cols;
+        const row = Math.floor(frameIdx / cols);
+        pc.blitTo(sheetCtx, col * size, row * size);
+
+        frameIndices.push(frameIdx);
+        frameIdx++;
+      }
+
+      animationDefs[anim.name] = {
+        frames: frameIndices,
+        speed: anim.speed,
+        loop: anim.name !== 'death' && anim.name !== 'hurt',
+        pingpong: anim.name === 'idle',
+      };
+    }
+
+    const sheet = new SpriteSheet(sheetCanvas, size, size, cols, rows);
+    const animator = new SpriteAnimator(sheet, animationDefs);
+    animator.play('idle');
+
+    const result = { sheet, animator, animations: animationDefs };
+    _sf2Cache.set(cacheKey, result);
+    return result;
+  },
+
+  clearCache() { _sf2Cache.clear(); },
+};
+
+// Export for inline usage (no modules)
+if (typeof window !== 'undefined') {
+  window.SpriteForge = SpriteForge;
+  window.SpriteSheet = SpriteSheet;
+  window.SpriteAnimator = SpriteAnimator;
+  window.PixelCanvas = PixelCanvas;
+  window.ColorRamp = ColorRamp;
+  window.PostProcess = PostProcess;
+}
+// ============================================================
+// GAME CODE
+// ============================================================
+
+var W, H, TILE;
+function recalc() {
+  W = canvas.width; H = canvas.height;
+  TILE = Math.floor(Math.min(W, H) / 16);
+}
+recalc();
+
+// ============================================================
+// HOUSE LAYOUT
+// ============================================================
+var rooms = [], walls = [], furnitureList = [];
+
+function initHouse() {
+  rooms = []; walls = []; furnitureList = [];
+  var cx = W / 2, cy = H / 2;
+  // House is square-ish, not stretched to widescreen
+  var maxSide = Math.min(W * 0.85, H * 0.76);
+  var rw = Math.floor(maxSide * (W > H ? 1.15 : 1.0));
+  var rh = Math.floor(maxSide);
+  var left = Math.floor(cx - rw/2), top = Math.floor(cy - rh/2);
+  var midX = Math.floor(left + rw * 0.45);
+  var midY = Math.floor(top + rh * 0.5);
+  var wallT = Math.max(6, Math.floor(TILE * 0.18));
+
+  rooms = [
+    { name: 'Kitchen',  x: left,  y: top,  w: midX-left,        h: midY-top,        col: '#f0e4cc', floorCol: '#e8d4b0', accent: '#d4a06a' },
+    { name: 'Lounge',   x: midX,  y: top,  w: left+rw-midX,     h: midY-top,        col: '#e0ddd0', floorCol: '#d4d0c0', accent: '#b0a890' },
+    { name: 'Bedroom',  x: left,  y: midY, w: midX-left,        h: top+rh-midY,     col: '#e4d8e8', floorCol: '#d8c8e0', accent: '#b898c8' },
+    { name: 'Bathroom', x: midX,  y: midY, w: left+rw-midX,     h: top+rh-midY,     col: '#d4e8e8', floorCol: '#c0dce0', accent: '#88b8c0' },
+  ];
+
+  var dW = Math.floor(TILE * 1.8);
+  // Outer walls
+  walls = [
+    { x: left, y: top, w: rw, h: wallT },
+    { x: left, y: top+rh-wallT, w: rw, h: wallT },
+    { x: left, y: top, w: wallT, h: rh },
+    { x: left+rw-wallT, y: top, w: wallT, h: rh },
+    // Horizontal divider with 2 door gaps
+    { x: left+wallT, y: midY-wallT/2, w: (midX-left)/2-dW, h: wallT },
+    { x: left+(midX-left)/2+dW, y: midY-wallT/2, w: (midX-left)/2-dW, h: wallT },
+    { x: midX+dW, y: midY-wallT/2, w: left+rw-midX-dW-wallT, h: wallT },
+    // Vertical divider with 2 door gaps
+    { x: midX-wallT/2, y: top+wallT, w: wallT, h: (midY-top)/2-dW },
+    { x: midX-wallT/2, y: midY+(top+rh-midY)/2+dW/2, w: wallT, h: (top+rh-midY)/2-dW },
+  ];
+
+  // Furniture
+  var kR = rooms[0], lR = rooms[1], bR = rooms[2], btR = rooms[3];
+  furnitureList = [
+    // Kitchen
+    { x: kR.x+TILE*0.6, y: kR.y+TILE*0.5, w: kR.w-TILE*1.2, h: TILE*0.9, col: '#887766', top: '#aa9980', type: 'counter' },
+    { x: kR.x+TILE*0.5, y: kR.y+TILE*2, w: TILE*0.9, h: TILE*1.4, col: '#ddd', top: '#eee', type: 'fridge' },
+    { x: kR.x+kR.w-TILE*2.2, y: kR.y+TILE*1.8, w: TILE*1.2, h: TILE*0.8, col: '#776655', top: '#998877', type: 'table' },
+    // Lounge
+    { x: lR.x+TILE, y: lR.y+lR.h-TILE*1.8, w: lR.w-TILE*2, h: TILE*1.0, col: '#5577aa', top: '#6688bb', type: 'sofa' },
+    { x: lR.x+lR.w-TILE*1.2, y: lR.y+TILE*0.7, w: TILE*0.7, h: TILE*0.5, col: '#222', top: '#333', type: 'tv' },
+    { x: lR.x+TILE*0.8, y: lR.y+TILE*0.7, w: TILE*1.5, h: TILE*1.0, col: '#886644', top: '#aa8866', type: 'shelf' },
+    // Bedroom
+    { x: bR.x+TILE*0.8, y: bR.y+TILE*0.8, w: TILE*2.8, h: TILE*1.8, col: '#7766aa', top: '#9988cc', type: 'bed' },
+    { x: bR.x+bR.w-TILE*1.8, y: bR.y+TILE*0.8, w: TILE*1.1, h: TILE*0.8, col: '#998866', top: '#bbaa88', type: 'dresser' },
+    // Bathroom
+    { x: btR.x+TILE*0.8, y: btR.y+TILE*0.7, w: TILE*2.2, h: TILE*1.0, col: '#aadddd', top: '#cceeee', type: 'tub' },
+    { x: btR.x+btR.w-TILE*1.4, y: btR.y+btR.h-TILE*1.6, w: TILE*0.7, h: TILE*0.9, col: '#eee', top: '#fff', type: 'toilet' },
+    { x: btR.x+TILE*0.8, y: btR.y+btR.h-TILE*1.4, w: TILE*1.0, h: TILE*0.6, col: '#ccc', top: '#ddd', type: 'sink' },
+  ];
+}
+
+// ============================================================
+// SPRITES — built with SpriteForge v2
+// ============================================================
+var sprites = {};
+
+// Boy/girl sprite templates — randomly assigned each game
+var BOY_LOOKS = [
+  { hair: 'short',  hairCol: '#553311', shirt: '#4488cc', pants: '#445566' },
+  { hair: 'spiky',  hairCol: '#332211', shirt: '#44bb66', pants: '#556644' },
+  { hair: 'mohawk', hairCol: '#884422', shirt: '#ee6644', pants: '#554433' },
+];
+var GIRL_LOOKS = [
+  { hair: 'long',     hairCol: '#aa6633', shirt: '#dd55aa', pants: '#665577' },
+  { hair: 'ponytail', hairCol: '#664422', shirt: '#ee8844', pants: '#556655' },
+  { hair: 'bob',      hairCol: '#886644', shirt: '#cc66cc', pants: '#554466' },
+];
+var BOY_NAMES = ['Tom', 'Max', 'Ben', 'Leo', 'Sam', 'Dan'];
+var GIRL_NAMES = ['Mia', 'Zoe', 'Lily', 'Emma', 'Ruby', 'Ava'];
+
+function buildSprites() {
+  // Parent — tall style, flowing hair, clearly the adult
+  sprites.parent = SpriteForge.character({
+    style: 'tall',
+    body: { hair: 'flowing' },
+    colors: { skin: '#ffcc99', hair: '#664422', shirt: '#4488cc', pants: '#334466', shoes: '#443322', eyes: '#4488ff' },
+    animations: { idle: { frames: 4, speed: 0.25 }, walk: { frames: 6, speed: 0.1 } },
+  });
+}
+
+function buildKidSprite(look) {
+  return SpriteForge.character({
+    style: 'chibi',
+    body: { hair: look.hair },
+    colors: { skin: '#ffd5a0', hair: look.hairCol, shirt: look.shirt, pants: look.pants, shoes: '#443322', eyes: '#4488cc' },
+    animations: { idle: { frames: 4, speed: 0.3 }, walk: { frames: 6, speed: 0.1 } },
+  });
+}
+
+function randomizeKids() {
+  // Pick 3 kids, random mix of boys/girls, each visually distinct
+  var kidDefs = [];
+  var usedBoy = [], usedGirl = [];
+  for (var i = 0; i < 3; i++) {
+    var isBoy = Math.random() < 0.5;
+    var pool = isBoy ? BOY_LOOKS : GIRL_LOOKS;
+    var used = isBoy ? usedBoy : usedGirl;
+    var avail = pool.filter(function(_, idx) { return used.indexOf(idx) === -1; });
+    if (avail.length === 0) { isBoy = !isBoy; pool = isBoy ? BOY_LOOKS : GIRL_LOOKS; used = isBoy ? usedBoy : usedGirl; avail = pool.filter(function(_, idx) { return used.indexOf(idx) === -1; }); }
+    var pick = Math.floor(Math.random() * avail.length);
+    var lookIdx = pool.indexOf(avail[pick]);
+    used.push(lookIdx);
+    var look = avail[pick];
+    var names = isBoy ? BOY_NAMES : GIRL_NAMES;
+    var name = names[Math.floor(Math.random() * names.length)];
+    // Build sprite
+    var sprKey = 'kid_' + i;
+    sprites[sprKey] = buildKidSprite(look);
+    kidDefs.push({
+      name: name,
+      sprite: sprKey,
+      gender: isBoy ? 'boy' : 'girl',
+      shirtCol: look.shirt,
+    });
+  }
+  return kidDefs;
+}
+
+// ============================================================
+// ENTITIES
+// ============================================================
+var parent = { x: 0, y: 0, speed: 3, doing: null, doTimer: 0, facing: 1 };
+var kids = [];
+var chores = [];
+var particles = [];
+var floatTexts = [];
+var state = 'menu';
+var dayTime = 0, dayLength = 90;
+var day = 1, score = 0, totalScore = 0;
+var cleanliness = 100;
+var choreSpawnTimer = 0;
+var selectedKid = null;
+var moveTarget = null;
+
+var KID_STATS = [
+  { speed: 1.5, reliability: 0.88, workSpeed: 0.7,  desc: 'Reliable but slow' },
+  { speed: 3.0, reliability: 0.45, workSpeed: 1.3,  desc: 'Fast but easily distracted' },
+  { speed: 2.0, reliability: 0.65, workSpeed: 0.5,  desc: 'Complains then works' },
+];
+var KID_TYPES = []; // populated in initGame
+
+var CHORE_TYPES = [
+  { name: 'Dirty Dishes',   icon: drawDishes,      time: 2.5, room: 'Kitchen',  penalty: 3, col: '#cc8844' },
+  { name: 'Spilled Juice',  icon: drawSpill,       time: 1.5, room: 'Kitchen',  penalty: 2, col: '#cc44aa' },
+  { name: 'Scattered Toys', icon: drawToys,        time: 2.0, room: 'Lounge',   penalty: 2, col: '#44aacc' },
+  { name: 'Dusty Surface',  icon: drawDust,        time: 2.0, room: 'Lounge',   penalty: 1, col: '#aaa' },
+  { name: 'Unmade Bed',     icon: drawMessyBed,    time: 3.0, room: 'Bedroom',  penalty: 2, col: '#8866aa' },
+  { name: 'Dirty Laundry',  icon: drawLaundry,     time: 2.5, room: 'Bedroom',  penalty: 3, col: '#66aa44' },
+  { name: 'Messy Bathroom', icon: drawMessyBath,   time: 3.0, room: 'Bathroom', penalty: 3, col: '#44aabb' },
+  { name: 'Wet Floor',      icon: drawWetFloor,    time: 1.5, room: 'Bathroom', penalty: 2, col: '#4488cc' },
+];
+
+// ============================================================
+// CHORE ICON DRAWING FUNCTIONS (pixel art style)
+// ============================================================
+function drawDishes(ctx, x, y, sz) {
+  // Stack of plates with food smears
+  ctx.fillStyle = '#ddd';
+  ctx.fillRect(x-sz*0.35, y-sz*0.1, sz*0.7, sz*0.12);
+  ctx.fillRect(x-sz*0.3, y-sz*0.24, sz*0.6, sz*0.12);
+  ctx.fillRect(x-sz*0.25, y-sz*0.38, sz*0.5, sz*0.12);
+  ctx.fillStyle = '#cc8844';
+  ctx.fillRect(x-sz*0.15, y-sz*0.34, sz*0.12, sz*0.06);
+  ctx.fillRect(x+sz*0.05, y-sz*0.2, sz*0.1, sz*0.06);
+  // Cup
+  ctx.fillStyle = '#88bbdd';
+  ctx.fillRect(x+sz*0.2, y-sz*0.35, sz*0.18, sz*0.25);
+  ctx.fillStyle = '#664422';
+  ctx.fillRect(x+sz*0.22, y-sz*0.32, sz*0.14, sz*0.08);
+}
+
+function drawSpill(ctx, x, y, sz) {
+  // Purple juice puddle
+  ctx.fillStyle = '#cc44aa';
+  ctx.beginPath();
+  ctx.ellipse(x, y-sz*0.1, sz*0.35, sz*0.2, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = '#dd66bb';
+  ctx.beginPath();
+  ctx.ellipse(x-sz*0.08, y-sz*0.15, sz*0.15, sz*0.08, -0.3, 0, Math.PI*2);
+  ctx.fill();
+  // Tipped cup
+  ctx.save();
+  ctx.translate(x+sz*0.2, y-sz*0.2);
+  ctx.rotate(1.2);
+  ctx.fillStyle = '#88bbdd';
+  ctx.fillRect(-sz*0.08, -sz*0.15, sz*0.16, sz*0.22);
+  ctx.restore();
+}
+
+function drawToys(ctx, x, y, sz) {
+  // Scattered blocks and a ball
+  ctx.fillStyle = '#ee4444';
+  ctx.fillRect(x-sz*0.3, y-sz*0.15, sz*0.18, sz*0.18);
+  ctx.fillStyle = '#44aa44';
+  ctx.fillRect(x+sz*0.05, y-sz*0.25, sz*0.15, sz*0.15);
+  ctx.fillStyle = '#4444ee';
+  ctx.fillRect(x-sz*0.1, y+sz*0.05, sz*0.2, sz*0.12);
+  // Ball
+  ctx.fillStyle = '#ffcc44';
+  ctx.beginPath();
+  ctx.arc(x+sz*0.25, y, sz*0.1, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = '#ff8800';
+  ctx.beginPath();
+  ctx.arc(x+sz*0.22, y-sz*0.03, sz*0.04, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function drawDust(ctx, x, y, sz) {
+  // Dust motes
+  ctx.fillStyle = 'rgba(160,150,130,0.6)';
+  for (var i = 0; i < 8; i++) {
+    var dx = (Math.sin(i*2.3)*0.3 + Math.cos(i*1.7)*0.15) * sz;
+    var dy = (Math.cos(i*1.9)*0.25 + Math.sin(i*3.1)*0.1) * sz;
+    ctx.beginPath();
+    ctx.arc(x+dx, y+dy-sz*0.1, sz*0.04+i*0.5, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(140,130,110,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(x, y, sz*0.3, sz*0.15, 0.2, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function drawMessyBed(ctx, x, y, sz) {
+  // Crumpled blanket
+  ctx.fillStyle = '#9988cc';
+  ctx.fillRect(x-sz*0.35, y-sz*0.25, sz*0.7, sz*0.45);
+  ctx.fillStyle = '#bbaadd';
+  ctx.fillRect(x-sz*0.3, y-sz*0.2, sz*0.25, sz*0.15);
+  ctx.fillRect(x+sz*0.05, y-sz*0.1, sz*0.2, sz*0.2);
+  // Pillow
+  ctx.fillStyle = '#eeddee';
+  ctx.fillRect(x-sz*0.25, y-sz*0.35, sz*0.3, sz*0.12);
+  ctx.fillStyle = '#ddd';
+  ctx.fillRect(x+sz*0.1, y+sz*0.1, sz*0.2, sz*0.1);
+}
+
+function drawLaundry(ctx, x, y, sz) {
+  // Pile of clothes
+  ctx.fillStyle = '#4466aa';
+  ctx.fillRect(x-sz*0.25, y-sz*0.1, sz*0.22, sz*0.18);
+  ctx.fillStyle = '#cc4444';
+  ctx.fillRect(x-sz*0.1, y-sz*0.25, sz*0.3, sz*0.15);
+  ctx.fillStyle = '#44aa66';
+  ctx.fillRect(x+sz*0.05, y-sz*0.05, sz*0.2, sz*0.2);
+  ctx.fillStyle = '#eecc44';
+  ctx.fillRect(x-sz*0.2, y+sz*0.05, sz*0.18, sz*0.12);
+  // Sock
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(x+sz*0.2, y-sz*0.15, sz*0.08, sz*0.15);
+  ctx.fillRect(x+sz*0.2, y, sz*0.12, sz*0.06);
+}
+
+function drawMessyBath(ctx, x, y, sz) {
+  // Scattered toiletries
+  ctx.fillStyle = '#44bbbb';
+  ctx.fillRect(x-sz*0.15, y-sz*0.3, sz*0.1, sz*0.25);
+  ctx.fillStyle = '#ff88aa';
+  ctx.fillRect(x+sz*0.1, y-sz*0.2, sz*0.08, sz*0.2);
+  // Towel on floor
+  ctx.fillStyle = '#88aaff';
+  ctx.fillRect(x-sz*0.3, y, sz*0.4, sz*0.12);
+  ctx.fillRect(x-sz*0.25, y+sz*0.1, sz*0.3, sz*0.08);
+  // Soap
+  ctx.fillStyle = '#ffddee';
+  ctx.beginPath();
+  ctx.ellipse(x+sz*0.2, y+sz*0.1, sz*0.08, sz*0.05, 0, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function drawWetFloor(ctx, x, y, sz) {
+  // Water puddles
+  ctx.fillStyle = 'rgba(100,180,220,0.5)';
+  ctx.beginPath();
+  ctx.ellipse(x, y-sz*0.05, sz*0.35, sz*0.2, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(130,200,240,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(x+sz*0.15, y+sz*0.1, sz*0.15, sz*0.1, 0.5, 0, Math.PI*2);
+  ctx.fill();
+  // Water drops
+  ctx.fillStyle = 'rgba(150,210,250,0.6)';
+  ctx.beginPath(); ctx.arc(x-sz*0.2, y-sz*0.2, sz*0.04, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+sz*0.3, y-sz*0.1, sz*0.03, 0, Math.PI*2); ctx.fill();
+  // Highlight
+  ctx.fillStyle = 'rgba(200,240,255,0.5)';
+  ctx.beginPath();
+  ctx.ellipse(x-sz*0.1, y-sz*0.12, sz*0.08, sz*0.04, -0.3, 0, Math.PI*2);
+  ctx.fill();
+}
+
+// ============================================================
+// GAME INIT
+// ============================================================
+var showTutorial = true; // show delegation hint at start
+
+function initGame() {
+  recalc();
+  initHouse();
+
+  parent.x = W / 2;
+  parent.y = H / 2;
+  parent.doing = null;
+  parent.doTimer = 0;
+  parent.speed = Math.max(1.5, TILE * 0.06);
+  parent.facing = 1;
+
+  // Randomize kid appearances each game
+  var kidDefs = randomizeKids();
+  KID_TYPES = kidDefs.map(function(def, i) {
+    return { ...KID_STATS[i], ...def };
+  });
+
+  kids = KID_TYPES.map((type, i) => ({
+    ...type,
+    x: rooms[i % rooms.length].x + rooms[i % rooms.length].w / 2 + TILE,
+    y: rooms[i % rooms.length].y + rooms[i % rooms.length].h / 2 + TILE,
+    task: null, taskTimer: 0,
+    state: 'idle', stateTimer: 0,
+    moveTarget: null,
+    speed: type.speed * TILE * 0.035,
+    distractTimer: 0,
+    thoughtBubble: '',
+    facing: 1,
+  }));
+
+  chores = [];
+  particles = [];
+  floatTexts = [];
+  dayTime = 0;
+  cleanliness = 100;
+  choreSpawnTimer = 0;
+  selectedKid = null;
+  moveTarget = null;
+}
+
+function startDay() {
+  chores = [];
+  dayTime = 0;
+  choreSpawnTimer = 2;
+  cleanliness = Math.min(100, cleanliness);
+  kids.forEach(k => { k.task = null; k.state = 'idle'; k.thoughtBubble = ''; k.distractTimer = 0; });
+  parent.doing = null;
+  parent.doTimer = 0;
+  moveTarget = null;
+  selectedKid = null;
+  score = 0;
+  for (var i = 0; i < Math.min(3 + day, 8); i++) spawnChore();
+}
+
+function spawnChore() {
+  if (chores.length >= 12) return;
+  var type = CHORE_TYPES[Math.floor(Math.random() * CHORE_TYPES.length)];
+  var room = rooms.find(r => r.name === type.room) || rooms[0];
+  var margin = TILE * 1.8;
+  var cx = room.x + margin + Math.random() * Math.max(1, room.w - margin * 2);
+  var cy = room.y + margin + Math.random() * Math.max(1, room.h - margin * 2);
+  // Avoid overlap with existing chores
+  if (chores.some(c => Math.abs(c.x - cx) < TILE && Math.abs(c.y - cy) < TILE)) return;
+  // Avoid furniture
+  if (furnitureList.some(f => cx > f.x - TILE*0.3 && cx < f.x + f.w + TILE*0.3 && cy > f.y - TILE*0.3 && cy < f.y + f.h + TILE*0.3)) return;
+
+  chores.push({
+    x: cx, y: cy,
+    type: type, progress: 0, total: type.time,
+    assignedTo: null, age: 0,
+  });
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+var keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (state === 'menu') { state = 'playing'; initGame(); startDay(); SFX.click(); }
+});
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+function getPointerPos(e) {
+  var r = canvas.getBoundingClientRect();
+  var t = e.touches ? e.touches[0] : e;
+  return { x: (t.clientX - r.left) * (canvas.width / r.width), y: (t.clientY - r.top) * (canvas.height / r.height) };
+}
+
+function dist(a, b) { return Math.sqrt((a.x-b.x)*(a.x-b.x) + (a.y-b.y)*(a.y-b.y)); }
+
+function handleTap(px, py) {
+  // Mute check
+  if (px >= W - 44 && px <= W - 8 && py >= 8 && py <= 44) {
+    SFX.muted = !SFX.muted;
+    return;
+  }
+
+  if (state === 'menu') { state = 'playing'; initGame(); startDay(); SFX.click(); return; }
+  if (state === 'dayEnd') { day++; startDay(); state = 'playing'; SFX.click(); return; }
+  if (state === 'gameOver') { submitScore('home-hustle', totalScore); day = 1; totalScore = 0; score = 0; cleanliness = 100; state = 'playing'; initGame(); startDay(); SFX.click(); return; }
+  if (state !== 'playing') return;
+
+  var hitR = TILE * 1.0;
+
+  // Check kid tap — test against sprite center, not feet
+  for (var i = 0; i < kids.length; i++) {
+    var k = kids[i];
+    var kidCenterY = k.y - TILE * 0.5; // sprite visual center
+    if (dist({x:px,y:py}, {x:k.x,y:kidCenterY}) < hitR) {
+      // If kid is distracted or complaining, tap to nudge them back to work
+      if (k.task && (k.state === 'distracted' || k.state === 'complaining')) {
+        k.state = 'working';
+        k.thoughtBubble = '!';
+        k.distractTimer = 0;
+        k.stateTimer = 0;
+        addFloatText('Get to work!', k.x, k.y - TILE, '#ffcc44');
+        SFX.assign();
+        return;
+      }
+      if (selectedKid === k) { selectedKid = null; SFX.click(); return; }
+      selectedKid = k;
+      showTutorial = false;
+      SFX.pickup();
+      return;
+    }
+  }
+
+  // If kid selected, tap chore to assign
+  if (selectedKid) {
+    for (var i = 0; i < chores.length; i++) {
+      var c = chores[i];
+      if (dist({x:px,y:py}, c) < hitR && !c.assignedTo) {
+        c.assignedTo = selectedKid;
+        selectedKid.task = c;
+        selectedKid.state = 'moving';
+        selectedKid.moveTarget = { x: c.x, y: c.y };
+        selectedKid.thoughtBubble = '!';
+        SFX.assign();
+        selectedKid = null;
+        return;
+      }
+    }
+    selectedKid = null;
+    SFX.click();
+    return;
+  }
+
+  // Set parent move target
+  moveTarget = { x: px, y: py };
+}
+
+canvas.addEventListener('mousedown', e => { var p = getPointerPos(e); handleTap(p.x, p.y); });
+canvas.addEventListener('touchstart', e => { e.preventDefault(); var p = getPointerPos(e); handleTap(p.x, p.y); }, { passive: false });
+
+// ============================================================
+// UPDATE
+// ============================================================
+var lastTime = 0;
+
+function update(dt) {
+  if (state !== 'playing') return;
+
+  dayTime += dt;
+
+  // Spawn chores
+  var spawnRate = Math.max(2, 7 - day * 0.4);
+  choreSpawnTimer -= dt;
+  if (choreSpawnTimer <= 0) {
+    spawnChore();
+    choreSpawnTimer = spawnRate + Math.random() * 3;
+  }
+
+  // Cleanliness decays based on mess
+  var messLevel = chores.length * (0.6 + day * 0.15);
+  cleanliness -= messLevel * dt * 0.25;
+  cleanliness = Math.max(0, Math.min(100, cleanliness));
+
+  // Move parent (keyboard)
+  var dx = 0, dy = 0;
+  if (keys['ArrowLeft'] || keys['a'] || keys['A']) dx -= 1;
+  if (keys['ArrowRight'] || keys['d'] || keys['D']) dx += 1;
+  if (keys['ArrowUp'] || keys['w'] || keys['W']) dy -= 1;
+  if (keys['ArrowDown'] || keys['s'] || keys['S']) dy += 1;
+
+  if (dx !== 0 || dy !== 0) {
+    moveTarget = null;
+    var len = Math.sqrt(dx*dx + dy*dy);
+    parent.x += (dx/len) * parent.speed * dt * 60;
+    parent.y += (dy/len) * parent.speed * dt * 60;
+    parent.doing = null;
+    parent.doTimer = 0;
+    if (dx !== 0) parent.facing = dx > 0 ? 1 : -1;
+  }
+
+  // Move parent (tap)
+  if (moveTarget) {
+    var d = dist(parent, moveTarget);
+    if (d > parent.speed) {
+      var mx = (moveTarget.x - parent.x) / d;
+      var my = (moveTarget.y - parent.y) / d;
+      parent.x += mx * parent.speed * dt * 60;
+      parent.y += my * parent.speed * dt * 60;
+      if (Math.abs(mx) > 0.1) parent.facing = mx > 0 ? 1 : -1;
+      parent.doing = null;
+      parent.doTimer = 0;
+    } else {
+      moveTarget = null;
+    }
+  }
+
+  // Constrain to house
+  constrainToHouse(parent);
+
+  // Parent auto-works nearby chores when stopped
+  var isMoving = moveTarget || dx !== 0 || dy !== 0;
+  if (!isMoving) {
+    var nearC = null, nearD = TILE * 1.3;
+    for (var i = 0; i < chores.length; i++) {
+      var d = dist(parent, chores[i]);
+      if (d < nearD) { nearD = d; nearC = chores[i]; }
+    }
+    if (nearC) {
+      parent.doing = nearC;
+      parent.doTimer += dt;
+      nearC.progress += dt;
+      if (nearC.progress >= nearC.total) completeChore(nearC, 'You');
+    } else {
+      parent.doing = null;
+      parent.doTimer = 0;
+    }
+  }
+
+  // Update sprite animations
+  if (sprites.parent) {
+    var pAnim = isMoving ? 'walk' : 'idle';
+    if (sprites.parent.animator.currentAnimation !== pAnim) sprites.parent.animator.play(pAnim);
+    sprites.parent.animator.update(dt);
+  }
+
+  // Update kids
+  kids.forEach((k, i) => {
+    updateKid(k, dt);
+    var sp = sprites[k.sprite];
+    if (sp) {
+      var kMoving = k.state === 'moving' || (k.state === 'idle' && k.moveTarget);
+      var kAnim = kMoving ? 'walk' : 'idle';
+      if (sp.animator.currentAnimation !== kAnim) sp.animator.play(kAnim);
+      sp.animator.update(dt);
+    }
+  });
+
+  // Update chore ages
+  chores.forEach(c => { c.age += dt; });
+
+  // Particles
+  for (var i = particles.length - 1; i >= 0; i--) {
+    var p = particles[i];
+    p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 40 * dt;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // Float texts
+  for (var i = floatTexts.length - 1; i >= 0; i--) {
+    var ft = floatTexts[i];
+    ft.y -= 30 * dt; ft.life -= dt;
+    if (ft.life <= 0) floatTexts.splice(i, 1);
+  }
+
+  if (dayTime >= dayLength) endDay();
+  if (cleanliness <= 0) { state = 'gameOver'; totalScore += score; SFX.gameOver(); }
+}
+
+function constrainToHouse(ent, oldX, oldY) {
+  if (rooms.length === 0) return;
+  var pad = TILE * 0.4;
+  var hL = rooms[0].x + pad, hR = rooms[1].x + rooms[1].w - pad;
+  var hT = rooms[0].y + pad, hB = rooms[2].y + rooms[2].h - pad;
+  ent.x = Math.max(hL, Math.min(hR, ent.x));
+  ent.y = Math.max(hT, Math.min(hB, ent.y));
+
+  // Wall collision — push out of solid walls (not door gaps)
+  var r = pad * 0.5;
+  for (var i = 0; i < walls.length; i++) {
+    var w = walls[i];
+    // Expand wall rect by entity radius
+    var wl = w.x - r, wr = w.x + w.w + r;
+    var wt = w.y - r, wb = w.y + w.h + r;
+    if (ent.x > wl && ent.x < wr && ent.y > wt && ent.y < wb) {
+      // Inside wall — push out along shortest axis
+      var dLeft = ent.x - wl, dRight = wr - ent.x;
+      var dTop = ent.y - wt, dBot = wb - ent.y;
+      var minD = Math.min(dLeft, dRight, dTop, dBot);
+      if (minD === dLeft) ent.x = wl;
+      else if (minD === dRight) ent.x = wr;
+      else if (minD === dTop) ent.y = wt;
+      else ent.y = wb;
+    }
+  }
+}
+
+function updateKid(k, dt) {
+  if (!k.task) {
+    k.state = 'idle';
+    k.stateTimer += dt;
+    if (k.stateTimer > 3 + Math.random() * 4) {
+      k.stateTimer = 0;
+      var room = rooms[Math.floor(Math.random() * rooms.length)];
+      k.moveTarget = {
+        x: room.x + TILE * 1.8 + Math.random() * Math.max(1, room.w - TILE * 3.6),
+        y: room.y + TILE * 1.8 + Math.random() * Math.max(1, room.h - TILE * 3.6),
+      };
+    }
+    if (k.moveTarget) {
+      var d = dist(k, k.moveTarget);
+      if (d > 2) {
+        var mx = (k.moveTarget.x - k.x) / d;
+        k.x += mx * k.speed * 0.4 * dt * 60;
+        k.y += ((k.moveTarget.y - k.y) / d) * k.speed * 0.4 * dt * 60;
+        if (Math.abs(mx) > 0.1) k.facing = mx > 0 ? 1 : -1;
+      } else { k.moveTarget = null; }
+    }
+    k.thoughtBubble = '';
+    constrainToHouse(k);
+    return;
+  }
+
+  var c = k.task;
+  if (chores.indexOf(c) === -1) { k.task = null; k.state = 'idle'; k.thoughtBubble = ''; return; }
+
+  if (k.state === 'moving') {
+    var d = dist(k, c);
+    if (d > TILE * 0.5) {
+      var mx = (c.x - k.x) / d;
+      k.x += mx * k.speed * dt * 60;
+      k.y += ((c.y - k.y) / d) * k.speed * dt * 60;
+      if (Math.abs(mx) > 0.1) k.facing = mx > 0 ? 1 : -1;
+    } else {
+      if (k.name === 'Jo' && Math.random() < 0.4) {
+        k.state = 'complaining'; k.stateTimer = 2 + Math.random(); k.thoughtBubble = 'UGH';
+        SFX.nag();
+      } else { k.state = 'working'; k.thoughtBubble = '~'; }
+    }
+  } else if (k.state === 'complaining') {
+    k.stateTimer -= dt;
+    if (k.stateTimer <= 0) { k.state = 'working'; k.thoughtBubble = '~'; }
+  } else if (k.state === 'working') {
+    k.distractTimer += dt;
+    if (k.distractTimer > 1.5 && Math.random() < (1 - k.reliability) * dt * 2) {
+      k.state = 'distracted'; k.stateTimer = 2 + Math.random() * 2;
+      k.thoughtBubble = ['...', '?!', 'hmm'][Math.floor(Math.random() * 3)];
+      k.distractTimer = 0;
+      return;
+    }
+    c.progress += dt * k.workSpeed;
+    k.thoughtBubble = '~';
+    if (c.progress >= c.total) {
+      completeChore(c, k.name);
+      k.task = null; k.state = 'idle'; k.distractTimer = 0;
+    }
+  } else if (k.state === 'distracted') {
+    k.stateTimer -= dt;
+    if (k.stateTimer <= 0) { k.state = 'working'; k.thoughtBubble = '~'; k.distractTimer = 0; }
+  }
+  constrainToHouse(k);
+}
+
+function completeChore(chore, by) {
+  var idx = chores.indexOf(chore);
+  if (idx === -1) return;
+  chores.splice(idx, 1);
+  var pts = Math.ceil(chore.type.penalty * 10);
+  if (by !== 'You') pts = Math.ceil(pts * 0.7);
+  score += pts;
+  cleanliness = Math.min(100, cleanliness + chore.type.penalty * 2);
+  SFX.complete();
+  addFloatText('+' + pts, chore.x, chore.y - TILE * 0.5, '#88ff88');
+  addFloatText(by === 'You' ? 'Done!' : by + ' did it!', chore.x, chore.y - TILE, '#ffdd44');
+  // Sparkles
+  for (var i = 0; i < 12; i++) {
+    var angle = (i / 12) * Math.PI * 2;
+    var spd = 40 + Math.random() * 40;
+    particles.push({
+      x: chore.x, y: chore.y,
+      vx: Math.cos(angle) * spd, vy: Math.sin(angle) * spd - 20,
+      life: 0.5 + Math.random() * 0.3,
+      col: ['#ffdd44', '#44ff88', '#ff88cc', '#88ddff'][i % 4],
+      size: 2 + Math.random() * 3,
+    });
+  }
+}
+
+function addFloatText(text, x, y, col) {
+  floatTexts.push({ text, x, y, col, life: 1.2 });
+}
+
+function endDay() {
+  var bonus = Math.floor(cleanliness * day);
+  score += bonus;
+  totalScore += score;
+  state = 'dayEnd';
+  SFX.dayEnd();
+}
+
+// ============================================================
+// DRAW
+// ============================================================
+function draw() {
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, W, H);
+
+  if (state === 'menu') { drawMenu(); return; }
+  if (state === 'gameOver') { drawGameOver(); return; }
+
+  drawHouse();
+  drawFurniture();
+  drawChoresOnMap();
+  drawKidsOnMap();
+  drawParentOnMap();
+  drawParticlesOnMap();
+  if (showTutorial && dayTime < 8) drawTutorialHint();
+  drawFloatTexts();
+  drawHUD();
+  if (state === 'dayEnd') drawDayEnd();
+}
+
+function drawMenu() {
+  // Draw house in background (dimmed)
+  initHouse();
+  ctx.globalAlpha = 0.3;
+  drawHouse();
+  drawFurniture();
+  ctx.globalAlpha = 1;
+
+  ctx.textAlign = 'center';
+  // Title
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold ' + Math.floor(TILE * 2.2) + 'px "Segoe UI", Arial';
+  ctx.fillText('Home Hustle', W/2, H * 0.22);
+
+  ctx.fillStyle = '#bbb';
+  ctx.font = Math.floor(TILE * 0.65) + 'px "Segoe UI", Arial';
+  ctx.fillText('Keep the house clean before bedtime!', W/2, H * 0.3);
+
+  var y = H * 0.4;
+  var lh = TILE * 1.0;
+
+  ctx.fillStyle = '#ddd';
+  ctx.font = Math.floor(TILE * 0.5) + 'px "Segoe UI", Arial';
+  ctx.fillText('Move: WASD / Arrows / Tap anywhere', W/2, y); y += lh;
+  ctx.fillText('Walk near a mess to clean it yourself', W/2, y); y += lh * 1.3;
+
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold ' + Math.floor(TILE * 0.5) + 'px "Segoe UI", Arial';
+  ctx.fillText('DELEGATE: Tap a kid, then tap a mess', W/2, y); y += lh * 1.3;
+
+  ctx.fillStyle = '#aaa';
+  ctx.font = Math.floor(TILE * 0.4) + 'px "Segoe UI", Arial';
+  ctx.fillText('Each kid has a unique personality!', W/2, y);
+
+  y += lh * 0.8;
+  ctx.fillStyle = '#88ff88';
+  ctx.font = 'bold ' + Math.floor(TILE * 0.65) + 'px "Segoe UI", Arial';
+  var pulse = 0.8 + Math.sin(Date.now() * 0.004) * 0.2;
+  ctx.globalAlpha = pulse;
+  ctx.fillText('TAP OR PRESS ANY KEY TO START', W/2, y);
+  ctx.globalAlpha = 1;
+}
+
+function drawHouse() {
+  rooms.forEach(r => {
+    // Main floor
+    ctx.fillStyle = r.col;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    // Floor tile pattern
+    ctx.strokeStyle = 'rgba(0,0,0,0.04)';
+    ctx.lineWidth = 1;
+    var tileSize = TILE * 0.8;
+    for (var x = r.x; x < r.x + r.w; x += tileSize) {
+      for (var y = r.y; y < r.y + r.h; y += tileSize) {
+        ctx.strokeRect(x, y, tileSize, tileSize);
+      }
+    }
+    // Room name
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.font = 'bold ' + Math.floor(TILE * 0.55) + 'px "Segoe UI", Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(r.name, r.x + r.w/2, r.y + r.h - TILE * 0.3);
+  });
+
+  // Walls with 3D effect
+  walls.forEach(w => {
+    // Wall shadow
+    ctx.fillStyle = '#5a4530';
+    ctx.fillRect(w.x + 2, w.y + 2, w.w, w.h);
+    // Wall body
+    ctx.fillStyle = '#8b7355';
+    ctx.fillRect(w.x, w.y, w.w, w.h);
+    // Wall highlight
+    ctx.fillStyle = '#a08868';
+    if (w.h <= w.w) {
+      ctx.fillRect(w.x, w.y, w.w, Math.max(2, w.h * 0.35));
+    } else {
+      ctx.fillRect(w.x, w.y, Math.max(2, w.w * 0.35), w.h);
+    }
+  });
+}
+
+function drawFurniture() {
+  furnitureList.forEach(f => {
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    roundRect(ctx, f.x + 3, f.y + 3, f.w, f.h, 3);
+    ctx.fill();
+
+    // Type-specific pixel art
+    switch (f.type) {
+      case 'fridge': drawFridgeArt(f); break;
+      case 'counter': drawCounterArt(f); break;
+      case 'table': drawTableArt(f); break;
+      case 'sofa': drawSofaArt(f); break;
+      case 'tv': drawTVArt(f); break;
+      case 'shelf': drawShelfArt(f); break;
+      case 'bed': drawBedArt(f); break;
+      case 'dresser': drawDresserArt(f); break;
+      case 'tub': drawTubArt(f); break;
+      case 'toilet': drawToiletArt(f); break;
+      case 'sink': drawSinkArt(f); break;
+      default:
+        ctx.fillStyle = f.col;
+        roundRect(ctx, f.x, f.y, f.w, f.h, 3); ctx.fill();
+    }
+  });
+}
+
+function drawFridgeArt(f) {
+  // White/silver body
+  ctx.fillStyle = '#dde0e4';
+  roundRect(ctx, f.x, f.y, f.w, f.h, 3); ctx.fill();
+  // Freezer door (top third)
+  ctx.fillStyle = '#c8ccd0';
+  ctx.fillRect(f.x + 2, f.y + 2, f.w - 4, f.h * 0.3);
+  // Door line
+  ctx.strokeStyle = '#aab0b8';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(f.x + 2, f.y + f.h * 0.33); ctx.lineTo(f.x + f.w - 2, f.y + f.h * 0.33); ctx.stroke();
+  // Handles
+  ctx.fillStyle = '#889';
+  ctx.fillRect(f.x + f.w - 6, f.y + f.h * 0.12, 3, f.h * 0.12);
+  ctx.fillRect(f.x + f.w - 6, f.y + f.h * 0.45, 3, f.h * 0.2);
+  // Magnets (colored dots)
+  ctx.fillStyle = '#ee4444'; ctx.fillRect(f.x + 4, f.y + 5, 4, 4);
+  ctx.fillStyle = '#44aa44'; ctx.fillRect(f.x + 10, f.y + 7, 3, 3);
+  ctx.fillStyle = '#4488ee'; ctx.fillRect(f.x + 5, f.y + 12, 4, 3);
+}
+
+function drawCounterArt(f) {
+  // Wood counter with granite top
+  ctx.fillStyle = '#8b7355';
+  roundRect(ctx, f.x, f.y, f.w, f.h, 2); ctx.fill();
+  // Granite top
+  ctx.fillStyle = '#666';
+  ctx.fillRect(f.x, f.y, f.w, f.h * 0.3);
+  ctx.fillStyle = '#777';
+  for (var i = 0; i < 8; i++) {
+    ctx.fillRect(f.x + (i * f.w/8) + 2, f.y + 2, 3, 2);
+  }
+  // Cabinet lines
+  ctx.strokeStyle = '#6a5a42';
+  ctx.lineWidth = 1;
+  var cabW = f.w / 4;
+  for (var i = 1; i < 4; i++) {
+    ctx.beginPath(); ctx.moveTo(f.x + cabW * i, f.y + f.h * 0.35); ctx.lineTo(f.x + cabW * i, f.y + f.h); ctx.stroke();
+  }
+  // Knobs
+  ctx.fillStyle = '#aa9';
+  for (var i = 0; i < 4; i++) {
+    ctx.beginPath(); ctx.arc(f.x + cabW * i + cabW/2, f.y + f.h * 0.6, 2, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+function drawTableArt(f) {
+  // Wooden table top
+  ctx.fillStyle = '#a08060';
+  roundRect(ctx, f.x, f.y, f.w, f.h, 3); ctx.fill();
+  // Wood grain
+  ctx.strokeStyle = '#907050';
+  ctx.lineWidth = 1;
+  for (var i = 1; i < 4; i++) {
+    ctx.beginPath(); ctx.moveTo(f.x + 3, f.y + f.h * i/4); ctx.lineTo(f.x + f.w - 3, f.y + f.h * i/4); ctx.stroke();
+  }
+  // Highlight edge
+  ctx.fillStyle = '#b89878';
+  ctx.fillRect(f.x + 1, f.y + 1, f.w - 2, 2);
+}
+
+function drawSofaArt(f) {
+  // Sofa body
+  ctx.fillStyle = '#5577aa';
+  roundRect(ctx, f.x, f.y, f.w, f.h, 4); ctx.fill();
+  // Back rest (darker)
+  ctx.fillStyle = '#446688';
+  ctx.fillRect(f.x + 2, f.y, f.w - 4, f.h * 0.3);
+  // Cushions (3 sections)
+  var cw = (f.w - 8) / 3;
+  for (var i = 0; i < 3; i++) {
+    ctx.fillStyle = i % 2 === 0 ? '#6688bb' : '#7799cc';
+    roundRect(ctx, f.x + 4 + i * cw, f.y + f.h * 0.32, cw - 2, f.h * 0.55, 3); ctx.fill();
+  }
+  // Armrests
+  ctx.fillStyle = '#446688';
+  roundRect(ctx, f.x, f.y + f.h * 0.2, 5, f.h * 0.7, 2); ctx.fill();
+  roundRect(ctx, f.x + f.w - 5, f.y + f.h * 0.2, 5, f.h * 0.7, 2); ctx.fill();
+  // Pillow
+  ctx.fillStyle = '#ddaa66';
+  roundRect(ctx, f.x + 6, f.y + f.h * 0.35, cw * 0.6, f.h * 0.4, 3); ctx.fill();
+}
+
+function drawTVArt(f) {
+  // TV frame (black)
+  ctx.fillStyle = '#111';
+  roundRect(ctx, f.x, f.y, f.w, f.h, 2); ctx.fill();
+  // Screen (dark blue/gray — off)
+  ctx.fillStyle = '#1a1a2a';
+  ctx.fillRect(f.x + 2, f.y + 2, f.w - 4, f.h - 6);
+  // Screen glare
+  ctx.fillStyle = 'rgba(100,150,200,0.15)';
+  ctx.fillRect(f.x + 3, f.y + 3, (f.w - 6) * 0.4, f.h - 8);
+  // Stand
+  ctx.fillStyle = '#333';
+  ctx.fillRect(f.x + f.w/2 - 4, f.y + f.h - 3, 8, 3);
+  // Power LED
+  ctx.fillStyle = '#44ff44';
+  ctx.fillRect(f.x + f.w - 5, f.y + f.h - 4, 2, 2);
+}
+
+function drawShelfArt(f) {
+  // Bookshelf frame
+  ctx.fillStyle = '#886644';
+  roundRect(ctx, f.x, f.y, f.w, f.h, 2); ctx.fill();
+  // Shelves (3 rows)
+  var rowH = (f.h - 4) / 3;
+  for (var row = 0; row < 3; row++) {
+    var sy = f.y + 2 + row * rowH;
+    // Shelf board
+    ctx.fillStyle = '#997755';
+    ctx.fillRect(f.x + 2, sy + rowH - 2, f.w - 4, 2);
+    // Books (colored rectangles)
+    var bx = f.x + 3;
+    var colors = ['#cc4444','#4488cc','#44aa44','#ddaa33','#8844aa','#dd6633','#4488aa','#aa4466'];
+    for (var b = 0; b < 5 + row; b++) {
+      var bw = 2 + Math.floor(Math.random() * 2);
+      var bh = rowH - 5 - Math.floor(Math.random() * 3);
+      if (bx + bw > f.x + f.w - 3) break;
+      ctx.fillStyle = colors[(row * 5 + b) % colors.length];
+      ctx.fillRect(bx, sy + rowH - 2 - bh, bw, bh);
+      bx += bw + 1;
+    }
+  }
+}
+
+function drawBedArt(f) {
+  // Bed frame
+  ctx.fillStyle = '#6a5a40';
+  roundRect(ctx, f.x, f.y, f.w, f.h, 3); ctx.fill();
+  // Mattress
+  ctx.fillStyle = '#eee8dd';
+  ctx.fillRect(f.x + 3, f.y + 3, f.w - 6, f.h - 6);
+  // Blanket (covering lower 2/3)
+  ctx.fillStyle = '#7766aa';
+  roundRect(ctx, f.x + 3, f.y + f.h * 0.35, f.w - 6, f.h * 0.6, 2); ctx.fill();
+  // Blanket fold line
+  ctx.strokeStyle = '#6655aa';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(f.x + 5, f.y + f.h * 0.38); ctx.lineTo(f.x + f.w - 5, f.y + f.h * 0.38); ctx.stroke();
+  // Pillow(s)
+  ctx.fillStyle = '#fff';
+  roundRect(ctx, f.x + 5, f.y + 5, f.w * 0.3, f.h * 0.25, 3); ctx.fill();
+  roundRect(ctx, f.x + 5 + f.w * 0.32, f.y + 5, f.w * 0.3, f.h * 0.25, 3); ctx.fill();
+  // Pillow shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.05)';
+  ctx.fillRect(f.x + 5, f.y + 5 + f.h * 0.18, f.w * 0.64, f.h * 0.07);
+}
+
+function drawDresserArt(f) {
+  // Wooden dresser
+  ctx.fillStyle = '#a08866';
+  roundRect(ctx, f.x, f.y, f.w, f.h, 2); ctx.fill();
+  // Top surface
+  ctx.fillStyle = '#b89878';
+  ctx.fillRect(f.x + 1, f.y + 1, f.w - 2, 3);
+  // 3 drawers
+  var dh = (f.h - 8) / 3;
+  for (var i = 0; i < 3; i++) {
+    var dy = f.y + 5 + i * dh;
+    ctx.fillStyle = '#997755';
+    ctx.fillRect(f.x + 3, dy, f.w - 6, dh - 2);
+    // Knob
+    ctx.fillStyle = '#cc9';
+    ctx.beginPath(); ctx.arc(f.x + f.w/2, dy + dh/2 - 1, 2, 0, Math.PI*2); ctx.fill();
+  }
+  // Mirror on top (small oval)
+  ctx.strokeStyle = '#aa9';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.ellipse(f.x + f.w/2, f.y - 3, f.w * 0.3, 4, 0, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function drawTubArt(f) {
+  // White bathtub
+  ctx.fillStyle = '#eef0f2';
+  roundRect(ctx, f.x, f.y, f.w, f.h, 5); ctx.fill();
+  // Inner basin
+  ctx.fillStyle = '#dde4e8';
+  roundRect(ctx, f.x + 4, f.y + 4, f.w - 8, f.h - 8, 4); ctx.fill();
+  // Water hint
+  ctx.fillStyle = 'rgba(100,180,220,0.2)';
+  roundRect(ctx, f.x + 5, f.y + f.h * 0.3, f.w - 10, f.h * 0.5, 3); ctx.fill();
+  // Taps (two circles at one end)
+  ctx.fillStyle = '#bbb';
+  ctx.beginPath(); ctx.arc(f.x + f.w - 10, f.y + 8, 3, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#88aadd';
+  ctx.beginPath(); ctx.arc(f.x + f.w - 10, f.y + 16, 3, 0, Math.PI*2); ctx.fill();
+  // Rim highlight
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.lineWidth = 1;
+  roundRect(ctx, f.x + 1, f.y + 1, f.w - 2, f.h - 2, 5); ctx.stroke();
+}
+
+function drawToiletArt(f) {
+  // Bowl (oval)
+  ctx.fillStyle = '#f0f0f0';
+  roundRect(ctx, f.x, f.y + f.h * 0.3, f.w, f.h * 0.7, 4); ctx.fill();
+  // Tank
+  ctx.fillStyle = '#e8e8e8';
+  ctx.fillRect(f.x + 2, f.y, f.w - 4, f.h * 0.35);
+  // Seat
+  ctx.strokeStyle = '#ccc';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(f.x + f.w/2, f.y + f.h * 0.65, f.w * 0.35, f.h * 0.25, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  // Flush button
+  ctx.fillStyle = '#bbb';
+  ctx.beginPath(); ctx.arc(f.x + f.w/2, f.y + f.h * 0.15, 3, 0, Math.PI*2); ctx.fill();
+  // Highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.fillRect(f.x + 3, f.y + f.h * 0.35, f.w * 0.3, 2);
+}
+
+function drawSinkArt(f) {
+  // Basin
+  ctx.fillStyle = '#e8e8ea';
+  roundRect(ctx, f.x, f.y, f.w, f.h, 3); ctx.fill();
+  // Bowl indent
+  ctx.fillStyle = '#d0d4d8';
+  ctx.beginPath();
+  ctx.ellipse(f.x + f.w/2, f.y + f.h * 0.55, f.w * 0.35, f.h * 0.3, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Tap
+  ctx.fillStyle = '#aab';
+  ctx.fillRect(f.x + f.w/2 - 2, f.y, 4, f.h * 0.3);
+  ctx.fillStyle = '#99a';
+  ctx.beginPath(); ctx.arc(f.x + f.w/2, f.y + 2, 3, 0, Math.PI*2); ctx.fill();
+  // Drain
+  ctx.fillStyle = '#888';
+  ctx.beginPath(); ctx.arc(f.x + f.w/2, f.y + f.h * 0.6, 2, 0, Math.PI*2); ctx.fill();
+}
+
+function drawChoresOnMap() {
+  chores.forEach(c => {
+    var sz = TILE * 0.9;
+    var pulse = Math.sin(c.age * 3) * 0.08 + 1;
+    var drawSz = sz * pulse;
+
+    // Warning aura for old chores
+    if (c.age > 8) {
+      var urgency = Math.min(1, (c.age - 8) / 10);
+      ctx.fillStyle = 'rgba(255,50,50,' + (0.08 + Math.sin(c.age * 5) * 0.06) * urgency + ')';
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, drawSz * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Background circle
+    var bgCol = c.assignedTo ? 'rgba(80,80,200,0.25)' : 'rgba(200,80,80,0.25)';
+    ctx.fillStyle = bgCol;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, drawSz * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = c.assignedTo ? 'rgba(80,80,200,0.5)' : 'rgba(200,80,80,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Draw chore icon
+    ctx.save();
+    c.type.icon(ctx, c.x, c.y, drawSz);
+    ctx.restore();
+
+    // Label
+    ctx.fillStyle = '#fff';
+    ctx.font = Math.floor(TILE * 0.24) + 'px "Segoe UI", Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(c.type.name, c.x, c.y + drawSz * 0.65);
+
+    // Progress bar
+    if (c.progress > 0) {
+      var barW = drawSz * 1.2, barH = Math.max(3, TILE * 0.08);
+      var barX = c.x - barW/2, barY = c.y + drawSz * 0.75;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      roundRect(ctx, barX, barY, barW, barH, 2); ctx.fill();
+      ctx.fillStyle = '#44ee44';
+      roundRect(ctx, barX, barY, barW * Math.min(1, c.progress / c.total), barH, 2); ctx.fill();
+    }
+  });
+}
+
+function drawParentOnMap() {
+  var px = parent.x, py = parent.y;
+  // Parent uses 'tall' style: 32x48. Scale so sprite is about 1.5 tiles tall.
+  var scale = (TILE * 1.5) / 48;
+  var drawW = 32 * scale, drawH = 48 * scale;
+
+  // Shadow at feet
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(px, py, drawW * 0.35, drawW * 0.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Draw SpriteForge character — feet at (px, py)
+  if (sprites.parent) {
+    var flipX = parent.facing < 0;
+    sprites.parent.animator.draw(ctx, px - drawW/2, py - drawH, { scale: scale, flipX: flipX });
+  } else {
+    ctx.fillStyle = '#4488cc';
+    ctx.beginPath(); ctx.arc(px, py - TILE * 0.4, TILE * 0.35, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd5a0';
+    ctx.beginPath(); ctx.arc(px, py - TILE * 0.7, TILE * 0.2, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Working indicator
+  if (parent.doing) {
+    var wobble = Math.sin(parent.doTimer * 10) * 3;
+    ctx.fillStyle = '#ffdd44';
+    ctx.font = Math.floor(TILE * 0.5) + 'px Arial';
+    ctx.textAlign = 'center';
+    ctx.save();
+    ctx.translate(px + drawW * 0.4 + wobble, py - drawH * 0.6);
+    ctx.rotate(Math.sin(parent.doTimer * 8) * 0.3);
+    ctx.fillText('*', 0, 0);
+    ctx.restore();
+  }
+
+  // When a kid is selected, show prominent "NOW TAP A MESS" prompt
+  if (selectedKid) {
+    var pulse = 0.5 + Math.sin(Date.now() * 0.006) * 0.3;
+    ctx.fillStyle = 'rgba(255,200,50,' + pulse * 0.15 + ')';
+    ctx.fillRect(0, TILE * 1.5, W, TILE * 0.8);
+    ctx.fillStyle = 'rgba(255,220,80,' + (0.7 + pulse * 0.3) + ')';
+    ctx.font = 'bold ' + Math.floor(TILE * 0.42) + 'px "Segoe UI", Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(selectedKid.name + ' selected! Now tap a mess to send them.', W/2, TILE * 2.05);
+  }
+}
+
+function drawKidsOnMap() {
+  kids.forEach((k, i) => {
+    var kx = k.x, ky = k.y;
+    var scale = TILE / 40;
+    var drawW = 32 * scale, drawH = 40 * scale;
+
+    // Draw connection line from kid to their assigned chore
+    if (k.task && chores.indexOf(k.task) !== -1) {
+      var lineCol = k.state === 'working' ? 'rgba(80,220,80,0.4)' :
+                    k.state === 'distracted' ? 'rgba(255,100,50,0.4)' :
+                    k.state === 'complaining' ? 'rgba(255,200,50,0.4)' :
+                    'rgba(100,150,255,0.4)';
+      ctx.strokeStyle = lineCol;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(kx, ky);
+      ctx.lineTo(k.task.x, k.task.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Shadow at feet
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(kx, ky, drawW * 0.3, drawW * 0.08, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw SpriteForge character
+    var sp = sprites[k.sprite];
+    if (sp) {
+      var flipX = k.facing < 0;
+      sp.animator.draw(ctx, kx - drawW/2, ky - drawH, { scale: scale, flipX: flipX });
+    } else {
+      ctx.fillStyle = k.shirtCol || '#888';
+      ctx.beginPath(); ctx.arc(kx, ky - TILE*0.3, TILE * 0.25, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Name + status below feet
+    ctx.font = 'bold ' + Math.floor(TILE * 0.28) + 'px "Segoe UI", Arial';
+    ctx.textAlign = 'center';
+    if (k.task) {
+      var stateCol = k.state === 'working' ? '#44dd44' :
+                     k.state === 'distracted' ? '#ff6644' :
+                     k.state === 'complaining' ? '#ffaa22' :
+                     k.state === 'moving' ? '#88bbff' : '#fff';
+      var stateText = k.state === 'working' ? 'Cleaning...' :
+                      k.state === 'distracted' ? 'DISTRACTED' :
+                      k.state === 'complaining' ? 'COMPLAINING' :
+                      k.state === 'moving' ? 'On my way' : '';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(k.name, kx, ky + TILE * 0.22);
+      ctx.fillStyle = stateCol;
+      ctx.font = Math.floor(TILE * 0.22) + 'px "Segoe UI", Arial';
+      ctx.fillText(stateText, kx, ky + TILE * 0.45);
+    } else {
+      ctx.fillStyle = '#fff';
+      ctx.fillText(k.name, kx, ky + TILE * 0.25);
+    }
+
+    if (selectedKid === k) {
+      var pulse = 0.6 + Math.sin(Date.now() * 0.008) * 0.4;
+      ctx.strokeStyle = 'rgba(255,204,68,' + pulse + ')';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(kx, ky - drawH * 0.4, drawW * 0.6, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (!k.task && !selectedKid) {
+      // Idle — pulsing "tap me" indicator
+      var idlePulse = 0.2 + Math.sin(Date.now() * 0.003 + i * 2) * 0.15;
+      ctx.strokeStyle = 'rgba(255,255,255,' + idlePulse + ')';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.arc(kx, ky - drawH * 0.4, drawW * 0.55, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      var arrowY = ky - drawH - TILE * 0.15 + Math.sin(Date.now() * 0.005 + i) * 3;
+      ctx.fillStyle = 'rgba(255,255,255,' + (idlePulse + 0.1) + ')';
+      ctx.beginPath();
+      ctx.moveTo(kx - 4, arrowY - 4);
+      ctx.lineTo(kx + 4, arrowY - 4);
+      ctx.lineTo(kx, arrowY + 2);
+      ctx.closePath();
+      ctx.fill();
+    } else if (k.state === 'distracted' || k.state === 'complaining') {
+      // Pulsing red/yellow ring — tap to nudge
+      var warnPulse = 0.5 + Math.sin(Date.now() * 0.008) * 0.5;
+      var warnCol = k.state === 'distracted' ? 'rgba(255,80,40,' : 'rgba(255,180,30,';
+      ctx.strokeStyle = warnCol + warnPulse + ')';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(kx, ky - drawH * 0.4, drawW * 0.6, 0, Math.PI * 2);
+      ctx.stroke();
+      // "TAP" hint
+      ctx.fillStyle = warnCol + '0.8)';
+      ctx.font = 'bold ' + Math.floor(TILE * 0.22) + 'px "Segoe UI", Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('TAP!', kx, ky - drawH - TILE * 0.12);
+    }
+
+    // Working animation — wobble effect
+    if (k.state === 'working') {
+      var wobble = Math.sin(Date.now() * 0.01) * 2;
+      ctx.fillStyle = 'rgba(80,220,80,0.6)';
+      var sparkX = kx + wobble + (Math.random()-0.5) * drawW * 0.3;
+      var sparkY = ky - drawH * 0.5 + (Math.random()-0.5) * drawH * 0.3;
+      ctx.beginPath(); ctx.arc(sparkX, sparkY, 1.5, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Distracted — floating Z's
+    if (k.state === 'distracted') {
+      var t = Date.now() * 0.003;
+      ctx.fillStyle = 'rgba(255,150,50,0.6)';
+      ctx.beginPath(); ctx.arc(kx - drawW*0.4, ky - drawH*0.6 + Math.sin(t)*3, 3, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(kx + drawW*0.3, ky - drawH*0.7 - Math.cos(t*1.3)*3, 2.5, 0, Math.PI*2); ctx.fill();
+    }
+  });
+}
+
+function drawParticlesOnMap() {
+  particles.forEach(p => {
+    ctx.globalAlpha = Math.max(0, p.life * 1.5);
+    ctx.fillStyle = p.col;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawFloatTexts() {
+  floatTexts.forEach(ft => {
+    ctx.globalAlpha = Math.max(0, ft.life);
+    ctx.fillStyle = ft.col;
+    ctx.font = 'bold ' + Math.floor(TILE * 0.4) + 'px "Segoe UI", Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(ft.text, ft.x, ft.y);
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawHUD() {
+  var barH = TILE * 1.5;
+
+  // Top bar background
+  ctx.fillStyle = 'rgba(10,10,20,0.75)';
+  ctx.fillRect(0, 0, W, barH);
+
+  var pad = TILE * 0.5;
+  ctx.textAlign = 'left';
+
+  // Day
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold ' + Math.floor(TILE * 0.5) + 'px "Segoe UI", Arial';
+  ctx.fillText('Day ' + day, pad, TILE * 0.55);
+
+  // Time
+  var timeLeft = Math.max(0, dayLength - dayTime);
+  var mins = Math.floor(timeLeft / 60);
+  var secs = Math.floor(timeLeft % 60);
+  ctx.fillStyle = timeLeft < 15 ? '#ff4444' : '#ddd';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold ' + Math.floor(TILE * 0.5) + 'px "Segoe UI", Arial';
+  ctx.fillText(mins + ':' + (secs < 10 ? '0' : '') + secs, W/2, TILE * 0.55);
+
+  // Score
+  ctx.fillStyle = '#88ff88';
+  ctx.textAlign = 'right';
+  ctx.fillText('Score: ' + score, W - pad * 2 - 40, TILE * 0.55);
+
+  // Cleanliness bar
+  var cleanW = Math.min(W * 0.4, 300);
+  var cleanH = TILE * 0.28;
+  var cleanX = (W - cleanW) / 2;
+  var cleanY = TILE * 0.8;
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  roundRect(ctx, cleanX, cleanY, cleanW, cleanH, 3); ctx.fill();
+  var pct = cleanliness / 100;
+  ctx.fillStyle = pct > 0.5 ? '#44cc44' : pct > 0.25 ? '#cccc44' : '#cc4444';
+  roundRect(ctx, cleanX, cleanY, cleanW * pct, cleanH, 3); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 1;
+  roundRect(ctx, cleanX, cleanY, cleanW, cleanH, 3); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = Math.floor(TILE * 0.22) + 'px "Segoe UI", Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('Cleanliness ' + Math.floor(cleanliness) + '%', W/2, cleanY + cleanH + TILE * 0.22);
+
+  // Bottom kid status bar
+  var botH = TILE * 1.3;
+  ctx.fillStyle = 'rgba(10,10,20,0.7)';
+  ctx.fillRect(0, H - botH, W, botH);
+
+  var kidW = W / kids.length;
+  kids.forEach((k, i) => {
+    var kx = kidW * i + kidW / 2;
+    var ky = H - botH / 2;
+    var dotR = TILE * 0.15;
+
+    // Color indicator (use kid's shirt color)
+    ctx.fillStyle = k.shirtCol || '#aaa';
+    ctx.beginPath(); ctx.arc(kx - kidW * 0.32, ky - TILE * 0.05, dotR, 0, Math.PI * 2); ctx.fill();
+
+    // Name
+    ctx.fillStyle = '#ddd';
+    ctx.font = 'bold ' + Math.floor(TILE * 0.32) + 'px "Segoe UI", Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(k.name, kx - kidW * 0.22, ky - TILE * 0.08);
+
+    // State
+    var stTxt = k.state === 'idle' ? 'Idle' :
+                k.state === 'moving' ? 'On my way...' :
+                k.state === 'working' ? 'Cleaning!' :
+                k.state === 'distracted' ? 'Distracted!' :
+                k.state === 'complaining' ? 'Ugh, fine...' : '';
+    var stCol = k.state === 'working' ? '#88ff88' :
+                k.state === 'distracted' ? '#ff8844' :
+                k.state === 'complaining' ? '#ffcc44' : '#777';
+    ctx.fillStyle = stCol;
+    ctx.font = Math.floor(TILE * 0.26) + 'px "Segoe UI", Arial';
+    ctx.fillText(stTxt, kx - kidW * 0.22, ky + TILE * 0.22);
+  });
+
+  // Mute
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  roundRect(ctx, W - 42, 10, 32, 32, 4); ctx.fill();
+  ctx.fillStyle = '#aaa';
+  ctx.font = '16px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(SFX.muted ? 'X' : '♪', W - 26, 31);
+
+  // Screen-edge warning when cleanliness is low
+  if (cleanliness < 30) {
+    var flash = Math.sin(Date.now() * 0.006) * 0.15 + 0.15;
+    ctx.fillStyle = 'rgba(255,30,30,' + flash * (1 - cleanliness/30) + ')';
+    ctx.fillRect(0, 0, W, 4);
+    ctx.fillRect(0, H-4, W, 4);
+    ctx.fillRect(0, 0, 4, H);
+    ctx.fillRect(W-4, 0, 4, H);
+  }
+}
+
+function drawTutorialHint() {
+  // Floating hint at top of play area, fades out over 8 seconds
+  var alpha = Math.max(0, 1 - dayTime / 8);
+  if (alpha <= 0) return;
+  ctx.globalAlpha = alpha * 0.9;
+  var hintY = TILE * 2.2;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  roundRect(ctx, W/2 - TILE * 5, hintY - TILE * 0.4, TILE * 10, TILE * 1.1, 6);
+  ctx.fill();
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold ' + Math.floor(TILE * 0.4) + 'px "Segoe UI", Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('Tap a KID to select, then tap a MESS to send them!', W/2, hintY + TILE * 0.15);
+  ctx.globalAlpha = 1;
+}
+
+function drawDayEnd() {
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold ' + Math.floor(TILE * 1.8) + 'px "Segoe UI", Arial';
+  ctx.fillText('Bedtime!', W/2, H * 0.25);
+
+  ctx.fillStyle = '#ccc';
+  ctx.font = Math.floor(TILE * 0.55) + 'px "Segoe UI", Arial';
+  var y = H * 0.37;
+  var lh = TILE * 1.0;
+  ctx.fillText('Day ' + day + ' Complete', W/2, y); y += lh * 1.3;
+
+  var choreScore = score - Math.floor(cleanliness * day);
+  var bonus = Math.floor(cleanliness * day);
+  ctx.fillStyle = '#88ff88';
+  ctx.fillText('Chores Score: ' + choreScore, W/2, y); y += lh;
+  ctx.fillText('Cleanliness Bonus: +' + bonus, W/2, y); y += lh * 1.3;
+
+  ctx.fillStyle = '#ffdd44';
+  ctx.font = 'bold ' + Math.floor(TILE * 0.65) + 'px "Segoe UI", Arial';
+  ctx.fillText('Day Total: ' + score, W/2, y); y += lh;
+  ctx.fillText('Grand Total: ' + totalScore, W/2, y); y += lh * 1.5;
+
+  ctx.fillStyle = '#88ff88';
+  ctx.font = Math.floor(TILE * 0.5) + 'px "Segoe UI", Arial';
+  var p2 = 0.7 + Math.sin(Date.now() * 0.004) * 0.3;
+  ctx.globalAlpha = p2;
+  ctx.fillText('Tap to start Day ' + (day + 1), W/2, y);
+  ctx.globalAlpha = 1;
+
+  score = 0;
+}
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = '#ff4444';
+  ctx.font = 'bold ' + Math.floor(TILE * 1.8) + 'px "Segoe UI", Arial';
+  ctx.fillText('Total Mess!', W/2, H * 0.28);
+
+  ctx.fillStyle = '#ccc';
+  ctx.font = Math.floor(TILE * 0.6) + 'px "Segoe UI", Arial';
+  ctx.fillText('The house got too messy to live in!', W/2, H * 0.4);
+
+  ctx.fillStyle = '#ffdd44';
+  ctx.font = 'bold ' + Math.floor(TILE * 0.75) + 'px "Segoe UI", Arial';
+  ctx.fillText('Survived ' + day + ' day' + (day > 1 ? 's' : ''), W/2, H * 0.52);
+  ctx.fillText('Final Score: ' + totalScore, W/2, H * 0.62);
+
+  ctx.fillStyle = '#88ff88';
+  ctx.font = Math.floor(TILE * 0.45) + 'px "Segoe UI", Arial';
+  ctx.fillText('Tap to Submit Score & Play Again', W/2, H * 0.76);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+function gameLoop(ts) {
+  var dt = Math.min(0.05, (ts - lastTime) / 1000);
+  lastTime = ts;
+  update(dt);
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// Build sprites then start
+try { buildSprites(); } catch(e) { console.warn('SpriteForge not loaded, using fallback:', e); }
+initGame();
+requestAnimationFrame(ts => { lastTime = ts; gameLoop(ts); });
+
+</script>
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px Segoe UI,Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px"><span id="vc-count">...</span> Hustlers</div>
+<script>
+(function(){var G="home-hustle",SU="https://ivhpqkqnfqcgrfrsvszf.supabase.co",SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM";function hdr(){return{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json"}}async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("").slice(0,32)}catch(e){return"anon-"+Math.random().toString(36).slice(2,10)}}async function run(){var h=await vh();try{await fetch(SU+"/rest/v1/game_visits",{method:"POST",headers:Object.assign(hdr(),{"Prefer":"resolution=merge-duplicates,return=minimal"}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}try{var r=await fetch(SU+"/rest/v1/game_visits?game=eq."+G+"&select=id",{headers:Object.assign(hdr(),{"Prefer":"count=exact"})});var c=r.headers.get("content-range");if(c){var n=c.split("/")[1];if(n&&n!=="*")document.getElementById("vc-count").textContent=Number(n).toLocaleString()}}catch(e){}}run()})();
+</script>
+</body>
+</html>

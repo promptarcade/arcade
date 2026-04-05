@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Sudoku</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #f0ebe3; font-family: 'Segoe UI', Arial, sans-serif; }
+canvas { display: block; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function() {
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// SOUND
+// ============================================================
+const SFX = {
+  _ctx: null,
+  _get() { if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this._ctx.state === 'suspended') this._ctx.resume(); return this._ctx; },
+  _tone(f, type, dur, vol) { try { const c = this._get(), o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(vol, c.currentTime); g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur); o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + dur); } catch(e) {} },
+  place() { this._tone(500, 'sine', 0.05, 0.06); },
+  error() { this._tone(200, 'triangle', 0.12, 0.08); },
+  complete() { this._tone(523, 'sine', 0.1, 0.08); setTimeout(() => this._tone(659, 'sine', 0.1, 0.07), 80); setTimeout(() => this._tone(784, 'sine', 0.15, 0.06), 160); setTimeout(() => this._tone(1047, 'sine', 0.25, 0.05), 260); },
+  select() { this._tone(400, 'sine', 0.03, 0.04); },
+};
+
+// ============================================================
+// SUDOKU GENERATOR
+// ============================================================
+function generateSolution() {
+  const grid = Array.from({length: 9}, () => Array(9).fill(0));
+
+  function isValid(grid, row, col, num) {
+    for (let i = 0; i < 9; i++) {
+      if (grid[row][i] === num || grid[i][col] === num) return false;
+    }
+    const br = Math.floor(row / 3) * 3, bc = Math.floor(col / 3) * 3;
+    for (let r = br; r < br + 3; r++)
+      for (let c = bc; c < bc + 3; c++)
+        if (grid[r][c] === num) return false;
+    return true;
+  }
+
+  function fill(grid) {
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        if (grid[r][c] === 0) {
+          const nums = [1,2,3,4,5,6,7,8,9].sort(() => Math.random() - 0.5);
+          for (const n of nums) {
+            if (isValid(grid, r, c, n)) {
+              grid[r][c] = n;
+              if (fill(grid)) return true;
+              grid[r][c] = 0;
+            }
+          }
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  fill(grid);
+  return grid;
+}
+
+function createPuzzle(difficulty) {
+  const solution = generateSolution();
+  const puzzle = solution.map(row => [...row]);
+  // Remove cells based on difficulty
+  const removals = { easy: 36, medium: 46, hard: 54 };
+  let toRemove = removals[difficulty] || 46;
+
+  const cells = [];
+  for (let r = 0; r < 9; r++)
+    for (let c = 0; c < 9; c++)
+      cells.push([r, c]);
+  // Shuffle
+  cells.sort(() => Math.random() - 0.5);
+
+  for (const [r, c] of cells) {
+    if (toRemove <= 0) break;
+    puzzle[r][c] = 0;
+    toRemove--;
+  }
+
+  return { puzzle, solution };
+}
+
+// ============================================================
+// STATE
+// ============================================================
+let state = 'menu'; // menu, playing, complete
+let difficulty = 'easy';
+let puzzle = null;    // current puzzle (0 = empty)
+let solution = null;  // solution
+let playerGrid = null; // player's entries
+let given = null;     // which cells are given (can't edit)
+let pencilMarks = null; // pencilMarks[r][c] = Set of numbers
+let selectedCell = null; // {r, c}
+let pencilMode = false;
+let timer = 0;
+let errors = 0;
+let animTimer = 0;
+let completeCells = []; // cells that animate on completion
+let menuBtns = [];
+
+function startGame(diff) {
+  difficulty = diff;
+  const p = createPuzzle(diff);
+  puzzle = p.puzzle;
+  solution = p.solution;
+  playerGrid = puzzle.map(row => [...row]);
+  given = puzzle.map(row => row.map(v => v !== 0));
+  pencilMarks = Array.from({length: 9}, () => Array.from({length: 9}, () => new Set()));
+  selectedCell = null;
+  pencilMode = false;
+  timer = 0;
+  errors = 0;
+  completeCells = [];
+  state = 'playing';
+}
+
+function placeNumber(num) {
+  if (!selectedCell || state !== 'playing') return;
+  const { r, c } = selectedCell;
+  if (given[r][c]) return;
+
+  if (pencilMode) {
+    if (num === 0) { pencilMarks[r][c].clear(); }
+    else if (pencilMarks[r][c].has(num)) { pencilMarks[r][c].delete(num); }
+    else { pencilMarks[r][c].add(num); playerGrid[r][c] = 0; }
+    SFX.select();
+    return;
+  }
+
+  if (num === 0) {
+    playerGrid[r][c] = 0;
+    SFX.select();
+    return;
+  }
+
+  playerGrid[r][c] = num;
+  pencilMarks[r][c].clear();
+
+  if (num === solution[r][c]) {
+    SFX.place();
+    // Clear pencil marks for this number in same row/col/box
+    for (let i = 0; i < 9; i++) {
+      pencilMarks[r][i].delete(num);
+      pencilMarks[i][c].delete(num);
+    }
+    const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
+    for (let dr = 0; dr < 3; dr++)
+      for (let dc = 0; dc < 3; dc++)
+        pencilMarks[br + dr][bc + dc].delete(num);
+
+    checkComplete();
+  } else {
+    errors++;
+    SFX.error();
+  }
+}
+
+function checkComplete() {
+  for (let r = 0; r < 9; r++)
+    for (let c = 0; c < 9; c++)
+      if (playerGrid[r][c] !== solution[r][c]) return;
+  state = 'complete';
+  SFX.complete();
+  // Animate cells
+  completeCells = [];
+  for (let r = 0; r < 9; r++)
+    for (let c = 0; c < 9; c++)
+      completeCells.push({ r, c, delay: (r + c) * 0.06 });
+}
+
+// ============================================================
+// LAYOUT
+// ============================================================
+function getGridLayout() {
+  const maxGridSize = Math.min(W - 20, H - 160);
+  const gridSize = Math.min(450, maxGridSize);
+  const cellSize = Math.floor(gridSize / 9);
+  const gridW = cellSize * 9;
+  const gridX = (W - gridW) / 2;
+  const gridY = 50;
+  return { gridX, gridY, cellSize, gridW };
+}
+
+function getNumPadLayout() {
+  const gl = getGridLayout();
+  const padY = gl.gridY + gl.gridW + 15;
+  const btnSize = Math.min(44, (W - 40) / 11);
+  const padW = btnSize * 11 + 10;
+  const padX = (W - padW) / 2;
+  return { padX, padY, btnSize };
+}
+
+// ============================================================
+// DRAWING
+// ============================================================
+function drawGrid() {
+  const { gridX, gridY, cellSize, gridW } = getGridLayout();
+
+  // Background
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(gridX - 1, gridY - 1, gridW + 2, gridW + 2);
+
+  // Cells
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const x = gridX + c * cellSize;
+      const y = gridY + r * cellSize;
+      const isSelected = selectedCell && selectedCell.r === r && selectedCell.c === c;
+      const isSameRow = selectedCell && selectedCell.r === r;
+      const isSameCol = selectedCell && selectedCell.c === c;
+      const isSameBox = selectedCell &&
+        Math.floor(selectedCell.r / 3) === Math.floor(r / 3) &&
+        Math.floor(selectedCell.c / 3) === Math.floor(c / 3);
+      const isSameNum = selectedCell && playerGrid[r][c] !== 0 &&
+        playerGrid[r][c] === playerGrid[selectedCell.r][selectedCell.c];
+
+      // Cell background
+      if (isSelected) {
+        ctx.fillStyle = '#bbddff';
+      } else if (isSameNum) {
+        ctx.fillStyle = '#d0e8ff';
+      } else if (isSameRow || isSameCol || isSameBox) {
+        ctx.fillStyle = '#e8eef5';
+      } else {
+        ctx.fillStyle = '#fff';
+      }
+      ctx.fillRect(x, y, cellSize, cellSize);
+
+      // Completion animation
+      if (state === 'complete') {
+        const cc = completeCells.find(cc => cc.r === r && cc.c === c);
+        if (cc && animTimer > cc.delay) {
+          const t = Math.min(1, (animTimer - cc.delay) * 3);
+          ctx.fillStyle = `hsla(${(r + c) * 40}, 70%, 80%, ${t * 0.4})`;
+          ctx.fillRect(x, y, cellSize, cellSize);
+        }
+      }
+
+      // Number
+      const val = playerGrid[r][c];
+      if (val !== 0) {
+        const isGiven = given[r][c];
+        const isWrong = !isGiven && val !== solution[r][c];
+
+        ctx.font = `${isGiven ? 'bold' : ''} ${Math.floor(cellSize * 0.55)}px 'Segoe UI', Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = isWrong ? '#cc3333' : (isGiven ? '#1a1a2a' : '#2255aa');
+        ctx.fillText(val, x + cellSize / 2, y + cellSize / 2 + 1);
+      } else {
+        // Pencil marks
+        const marks = pencilMarks[r][c];
+        if (marks.size > 0) {
+          ctx.font = `${Math.floor(cellSize * 0.22)}px 'Segoe UI', Arial`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#8899aa';
+          for (const m of marks) {
+            const mr = Math.floor((m - 1) / 3);
+            const mc = (m - 1) % 3;
+            const mx = x + cellSize * (mc + 0.5) / 3;
+            const my = y + cellSize * (mr + 0.5) / 3;
+            ctx.fillText(m, mx, my);
+          }
+        }
+      }
+    }
+  }
+
+  // Grid lines
+  ctx.strokeStyle = '#bbb';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 9; i++) {
+    if (i % 3 === 0) continue; // thick lines drawn separately
+    ctx.beginPath();
+    ctx.moveTo(gridX + i * cellSize, gridY);
+    ctx.lineTo(gridX + i * cellSize, gridY + gridW);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(gridX, gridY + i * cellSize);
+    ctx.lineTo(gridX + gridW, gridY + i * cellSize);
+    ctx.stroke();
+  }
+
+  // Thick box lines
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 2.5;
+  for (let i = 0; i <= 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(gridX + i * cellSize * 3, gridY);
+    ctx.lineTo(gridX + i * cellSize * 3, gridY + gridW);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(gridX, gridY + i * cellSize * 3);
+    ctx.lineTo(gridX + gridW, gridY + i * cellSize * 3);
+    ctx.stroke();
+  }
+}
+
+function drawNumPad() {
+  const { padX, padY, btnSize } = getNumPadLayout();
+
+  // Numbers 1-9, erase, pencil toggle
+  const btns = ['1','2','3','4','5','6','7','8','9','X','P'];
+  for (let i = 0; i < btns.length; i++) {
+    const x = padX + i * (btnSize + 1);
+    const isNum = i < 9;
+    const isErase = i === 9;
+    const isPencil = i === 10;
+
+    // Count remaining for this number
+    let remaining = 0;
+    if (isNum) {
+      const num = i + 1;
+      for (let r = 0; r < 9; r++)
+        for (let c = 0; c < 9; c++)
+          if (playerGrid[r][c] === num) remaining++;
+      remaining = 9 - remaining;
+    }
+
+    // Background
+    if (isPencil && pencilMode) {
+      ctx.fillStyle = '#aaddcc';
+    } else if (isNum && remaining === 0) {
+      ctx.fillStyle = '#e8e8e8';
+    } else {
+      ctx.fillStyle = '#fff';
+    }
+    ctx.fillRect(x, padY, btnSize, btnSize);
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, padY, btnSize, btnSize);
+
+    // Label
+    ctx.font = `bold ${Math.floor(btnSize * 0.45)}px 'Segoe UI', Arial`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (isErase) {
+      ctx.fillStyle = '#aa4444';
+      ctx.fillText('\u232B', x + btnSize / 2, padY + btnSize / 2);
+    } else if (isPencil) {
+      ctx.fillStyle = pencilMode ? '#227755' : '#666';
+      ctx.fillText('\u270E', x + btnSize / 2, padY + btnSize / 2);
+    } else {
+      ctx.fillStyle = remaining === 0 ? '#ccc' : '#333';
+      ctx.fillText(btns[i], x + btnSize / 2, padY + btnSize / 2);
+      // Remaining count
+      if (remaining > 0 && remaining < 9) {
+        ctx.font = `${Math.floor(btnSize * 0.2)}px 'Segoe UI'`;
+        ctx.fillStyle = '#aaa';
+        ctx.fillText(remaining, x + btnSize / 2, padY + btnSize - 6);
+      }
+    }
+  }
+}
+
+function drawHUD() {
+  const { gridX, gridW } = getGridLayout();
+
+  // Timer
+  const mins = Math.floor(timer / 60);
+  const secs = Math.floor(timer % 60);
+  ctx.font = '16px Segoe UI';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#666';
+  ctx.fillText(mins + ':' + (secs < 10 ? '0' : '') + secs, gridX, 35);
+
+  // Difficulty
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#999';
+  ctx.fillText(difficulty.charAt(0).toUpperCase() + difficulty.slice(1), gridX + gridW / 2, 35);
+
+  // Errors
+  ctx.textAlign = 'right';
+  ctx.fillStyle = errors > 0 ? '#cc3333' : '#999';
+  ctx.fillText('Errors: ' + errors, gridX + gridW, 35);
+
+  // Pencil mode indicator
+  if (pencilMode) {
+    const { padX, padY, btnSize } = getNumPadLayout();
+    ctx.font = '12px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#227755';
+    ctx.fillText('Pencil mode ON', W / 2, padY + btnSize + 18);
+  }
+
+  // New game button
+  const nbw = 90, nbh = 30;
+  const nbx = W / 2 - nbw / 2;
+  const { padY, btnSize } = getNumPadLayout();
+  const nby = padY + btnSize + 30;
+  ctx.fillStyle = '#e8e8e8';
+  ctx.fillRect(nbx, nby, nbw, nbh);
+  ctx.strokeStyle = '#ccc';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(nbx, nby, nbw, nbh);
+  ctx.font = '13px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#666';
+  ctx.fillText('New Game', W / 2, nby + nbh / 2 + 4);
+}
+
+function drawMenu() {
+  ctx.fillStyle = '#f0ebe3';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.font = 'bold ' + Math.min(48, W * 0.08) + 'px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#2a2a3a';
+  ctx.fillText('SUDOKU', W / 2, H * 0.2);
+
+  ctx.font = Math.min(16, W * 0.025) + 'px Segoe UI';
+  ctx.fillStyle = '#888';
+  ctx.fillText('Fill every row, column, and box with 1-9', W / 2, H * 0.28);
+
+  menuBtns = [];
+  const diffs = ['easy', 'medium', 'hard'];
+  const labels = ['Easy', 'Medium', 'Hard'];
+  const descs = ['36 cells removed', '46 cells removed', '54 cells removed'];
+  const btnW = Math.min(200, W * 0.5);
+  const btnH = 55;
+  const gap = 12;
+
+  for (let i = 0; i < 3; i++) {
+    const bx = W / 2 - btnW / 2;
+    const by = H * 0.38 + i * (btnH + gap);
+    menuBtns.push({ x: bx, y: by, w: btnW, h: btnH, diff: diffs[i] });
+
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(bx, by, btnW, btnH);
+    ctx.strokeStyle = '#ddd';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(bx, by, btnW, btnH);
+
+    ctx.font = 'bold 18px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#333';
+    ctx.fillText(labels[i], W / 2, by + 24);
+    ctx.font = '12px Segoe UI';
+    ctx.fillStyle = '#999';
+    ctx.fillText(descs[i], W / 2, by + 42);
+  }
+
+  // Best times from localStorage
+  ctx.font = '13px Segoe UI';
+  ctx.fillStyle = '#aaa';
+  for (let i = 0; i < 3; i++) {
+    const best = localStorage.getItem('sudoku-best-' + diffs[i]);
+    if (best) {
+      const bm = Math.floor(best / 60), bs = Math.floor(best % 60);
+      ctx.fillText('Best: ' + bm + ':' + (bs < 10 ? '0' : '') + bs,
+        W / 2, H * 0.38 + i * (btnH + gap) + btnH + 14);
+    }
+  }
+}
+
+function drawComplete() {
+  // Overlay
+  ctx.fillStyle = 'rgba(240,235,227,0.7)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.font = 'bold ' + Math.min(42, W * 0.06) + 'px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#227755';
+  ctx.fillText('COMPLETE!', W / 2, H * 0.3);
+
+  const mins = Math.floor(timer / 60);
+  const secs = Math.floor(timer % 60);
+  ctx.font = Math.min(24, W * 0.035) + 'px Segoe UI';
+  ctx.fillStyle = '#444';
+  ctx.fillText('Time: ' + mins + ':' + (secs < 10 ? '0' : '') + secs, W / 2, H * 0.38);
+  ctx.fillText('Errors: ' + errors, W / 2, H * 0.44);
+  ctx.fillText(difficulty.charAt(0).toUpperCase() + difficulty.slice(1), W / 2, H * 0.5);
+
+  // Save best time
+  const bestKey = 'sudoku-best-' + difficulty;
+  const prev = parseFloat(localStorage.getItem(bestKey) || '99999');
+  if (timer < prev) localStorage.setItem(bestKey, timer);
+
+  const pulse = 0.6 + Math.sin(animTimer * 3) * 0.4;
+  ctx.globalAlpha = pulse;
+  ctx.font = 'bold ' + Math.min(20, W * 0.03) + 'px Segoe UI';
+  ctx.fillStyle = '#2255aa';
+  ctx.fillText('Tap for New Game', W / 2, H * 0.65);
+  ctx.globalAlpha = 1;
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+function handleTap(x, y) {
+  SFX._get();
+  if (state === 'menu') {
+    for (const btn of menuBtns) {
+      if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) {
+        startGame(btn.diff);
+        return;
+      }
+    }
+    return;
+  }
+
+  if (state === 'complete') {
+    state = 'menu';
+    return;
+  }
+
+  if (state !== 'playing') return;
+
+  const gl = getGridLayout();
+  const nl = getNumPadLayout();
+
+  // Grid tap — select cell
+  if (x >= gl.gridX && x < gl.gridX + gl.gridW && y >= gl.gridY && y < gl.gridY + gl.gridW) {
+    const c = Math.floor((x - gl.gridX) / gl.cellSize);
+    const r = Math.floor((y - gl.gridY) / gl.cellSize);
+    if (r >= 0 && r < 9 && c >= 0 && c < 9) {
+      selectedCell = { r, c };
+      SFX.select();
+    }
+    return;
+  }
+
+  // Number pad tap
+  if (y >= nl.padY && y <= nl.padY + nl.btnSize) {
+    const idx = Math.floor((x - nl.padX) / (nl.btnSize + 1));
+    if (idx >= 0 && idx < 9) {
+      placeNumber(idx + 1);
+    } else if (idx === 9) {
+      placeNumber(0); // erase
+    } else if (idx === 10) {
+      pencilMode = !pencilMode;
+      SFX.select();
+    }
+    return;
+  }
+
+  // New game button
+  const nbw = 90, nbh = 30;
+  const nbx = W / 2 - nbw / 2;
+  const nby = nl.padY + nl.btnSize + 30;
+  if (x >= nbx && x <= nbx + nbw && y >= nby && y <= nby + nbh) {
+    state = 'menu';
+    return;
+  }
+}
+
+canvas.addEventListener('click', e => {
+  handleTap(e.offsetX * W / canvas.clientWidth, e.offsetY * H / canvas.clientHeight);
+});
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  const t = e.changedTouches[0], r = canvas.getBoundingClientRect();
+  handleTap((t.clientX - r.left) / r.width * W, (t.clientY - r.top) / r.height * H);
+}, { passive: false });
+canvas.addEventListener('touchstart', e => { e.preventDefault(); SFX._get(); }, { passive: false });
+
+// Keyboard
+window.addEventListener('keydown', e => {
+  if (state !== 'playing') return;
+  const k = e.key;
+  if (k >= '1' && k <= '9') { placeNumber(parseInt(k)); return; }
+  if (k === 'Backspace' || k === 'Delete' || k === '0') { placeNumber(0); return; }
+  if (k === 'p' || k === 'P') { pencilMode = !pencilMode; SFX.select(); return; }
+  if (!selectedCell) return;
+  let { r, c } = selectedCell;
+  if (k === 'ArrowUp' || k === 'w') r = Math.max(0, r - 1);
+  else if (k === 'ArrowDown' || k === 's') r = Math.min(8, r + 1);
+  else if (k === 'ArrowLeft' || k === 'a') c = Math.max(0, c - 1);
+  else if (k === 'ArrowRight' || k === 'd') c = Math.min(8, c + 1);
+  else return;
+  e.preventDefault();
+  selectedCell = { r, c };
+  SFX.select();
+});
+
+// ============================================================
+// LOOP
+// ============================================================
+let lastTime = performance.now();
+
+function loop() {
+  const now = performance.now();
+  const dt = Math.min((now - lastTime) / 1000, 0.1);
+  lastTime = now;
+  animTimer += dt;
+  if (state === 'playing') timer += dt;
+
+  ctx.fillStyle = '#f0ebe3';
+  ctx.fillRect(0, 0, W, H);
+
+  if (state === 'menu') {
+    drawMenu();
+  } else if (state === 'playing' || state === 'complete') {
+    drawGrid();
+    drawNumPad();
+    drawHUD();
+    if (state === 'complete') drawComplete();
+  }
+
+  requestAnimationFrame(loop);
+}
+loop();
+
+})();
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.35);color:#999;font:11px 'Segoe UI',Arial,sans-serif;padding:3px 12px;border-radius:10px;z-index:9999;pointer-events:none;white-space:nowrap;">
+  <span id="vc-count">...</span> Puzzlers
+</div>
+<script>
+(function(){
+  var G='sudoku',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

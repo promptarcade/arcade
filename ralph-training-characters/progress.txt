@@ -1,0 +1,209 @@
+# Ralph Character Training Progress
+# Read this at the start of EVERY iteration.
+
+## Lessons from dragon eye training (ralph-training/):
+
+### Key technique discoveries (41 principles — see qa-knowledge.json for full list):
+- Zone-based rendering for small forms (<30px) — 5 discrete tonal zones > smooth gradient
+- Voronoi tessellation for guaranteed coverage
+- Palette tone DISTRIBUTION > range endpoints (L=20% gives distinct tones, L=12% doesn't)
+- Bump on normals COMPRESSES tonal range — modulate brightness AFTER clean lighting
+- Hue pre-compensation for engine's +20° shadow shift
+- Value hierarchy via tonal window capping
+- Gamma 0.65 > S-curve for per-feature rendering
+- 2 colour groups for max tonal range (16 tones)
+
+### Meta lessons:
+- Drawing skill doesn't transfer between sessions — principles do
+- The critic must be harsh but fair (calibrated for pixel art, not photographs)
+- Regression checks prevent quality drops when adding complexity
+- Progressive exercises compound — exercise 1 took 37 attempts, exercises 7-9 all passed first try
+
+## CRITICAL: Character-specific lessons from prior training (10 failed iterations):
+
+### Face rendering (feedback_character_faces.md):
+- Faces ≠ props. Flat fill + feature placement, NOT sphere lighting
+- At 32px head, sphere lighting covers HALF the face in shadow, obscuring features
+- Face is a CANVAS for features — keep it BRIGHT and SIMPLE
+- 2-3 flat tones placed directionally, NOT a lighting model
+- Professional games (Stardew, CrossCode, Shovel Knight) all use flat or near-flat face fills
+
+### Face shading traps (feedback_face_shading_traps.md):
+- Chin monkey-face: extend bias zone to ny < 0.7
+- Mustard pallor: never clamp face values near warm/cool threshold
+- Shadow-covered mouth: mouth must sit inside the bright zone
+- Working formula: if (ny > -0.2 && ny < 0.7 && abs(nx) < 0.55 && nz > 0.6) v = 0.5 + v * 0.5
+
+### Chibi template (PROVEN working — SpriteForge):
+- Canvas 32×48, head rx=10 ry=10 cy=12 (62.5% width — HUGE head)
+- Eyes 4×4, gap=5, with white fill + iris + pupil + specular
+- Torso w=14 h=8, legs w=4 h=7, arms w=3 h=7
+- Mouth: 3px hline at headCy + ry*0.4 in shadow skin tone
+
+### The 12 failure modes to avoid:
+1. Sphere-shaded face → use flat fill
+2. Bug eyes → match template proportions
+3. Bouffant hair → hair wraps around head
+4. Dark holes in hair → solid base under tufts
+5. Mouth on chin → follow 3-section face division
+6. Fez hat → study actual chef toque
+7. Flat body → cylinder lighting
+8. Skipped silhouette step → silhouette FIRST
+9. Skipped greyscale step → greyscale before colour
+10. Oversold output → list problems first
+11. Abandoned proven method → manual drawPost is proven for props, auto-shading for faces
+12. Iterated without studying → study references before drawing
+
+## Iteration 1 (Exercise 1 — STUDY, no drawing) — 2026-03-29
+
+### SpriteForge Chibi Reference Measurements (32×40 frame)
+
+| Part | Position | Size | Notes |
+|------|----------|------|-------|
+| Head | cy=12 | rx=10, ry=10 | 62.5% canvas width, 50% canvas height |
+| Eyes | y≈10 | 4×4 each | gap=5, white sclera + iris + pupil + specular |
+| Mouth | y≈17 | 3px wide | shadow skin tone hline |
+| Hair | y=2-15 | wraps head | extends 1-2px beyond head edges |
+| Neck | y=22-23 | w=5, h=2 | dark occlusion, cylinder shaded |
+| Torso | y=25-32 | w=14, h=8 | cylinder shading, rounded top corners |
+| Arms | y=26-32 | w=3, h=7 | cylinder, hands 2px below |
+| Legs | y=33-39 | w=4, h=7 | gap=2, cylinder shading |
+| Shoes | y=40-41 | w=5, h=2 | slight extension past leg width |
+
+**Key ratios**: Head = 50% of total height. Body (torso+legs) = 37%. Head:body width = 20:14 (1.43:1).
+Face area (front of head minus hair) ≈ 16×14px = 224 pixels.
+
+### Quality Gap Analysis: lvl5-3 vs Dragon Eye References
+
+**What lvl5-3 does well:**
+- Proportions correct (matches SpriteForge template)
+- Each character identifiable by silhouette (toque, long hair, spiky hair, bun)
+- Eyes are readable with proper structure (sclera/iris/pupil/specular)
+- Dual-palette cylinder shading on bodies
+- Face bias formula keeps features visible
+
+**What lvl5-3 lacks (comparing against dragon eye quality):**
+1. **No per-form tonal range**: Arms get ×0.7 flat multiplier. Dragon eye gives each scale its own full 0→1 range modulated by global position. Body parts should each have their own lighting.
+2. **No surface texture**: Torso is smooth cylinder gradient. Dragon eye has per-scale bump texture breaking banding. Fabric should have subtle woven texture, skin should have micro-roughness.
+3. **No edge pairs**: Belt is a single dark line. Dragon eye has dark crevice + bright ridge at every boundary. Every clothing seam (collar, belt, sleeve, waistband) needs a deliberate dark-bright pair.
+4. **No material distinction**: Skin, fabric, and hair all render identically (same cylinder formula, different palette). Dragon eye uses different specular exponents and bump patterns for different materials.
+5. **No value hierarchy**: Face brightness is a bias hack, not a compositional decision. Dragon eye caps scale tonal window (gb × 6 not gb × 9) to make iris pop. Character needs: face = full range (brightest), torso = slightly reduced, legs/shoes = most muted.
+6. **Hair is decorative, not structural**: Hair in lvl5-3 is edge strips and a few highlight pixels. Dragon eye's overlapping scale forms suggest hair could be rendered as overlapping dome forms — each strand a small arc with its own lighting.
+
+### Dragon Eye Technique Transfer Analysis
+
+**TECHNIQUE → BODY PART → SCALE VIABILITY**
+
+| Dragon Eye Technique | Character Application | Chibi (32px) | HD (64px) |
+|---------------------|----------------------|--------------|-----------|
+| Zone-based rendering (5 zones) | Arm/leg cross-section | NO (3-4px wide) | YES (8-16px wide) |
+| Per-form tonal sweep | Each body part lit independently | PARTIAL (few parts) | YES |
+| Voronoi tessellation | Hair strands as overlapping forms | NO (5px hair cap) | MAYBE (15px+) |
+| Multi-pass pipeline | Body parts back→front + cast shadows | YES | YES |
+| Value hierarchy (tonal window capping) | Face brightest, body mid, feet dark | YES | YES |
+| Edge pairs (crevice + ridge) | Collar, belt, sleeve boundaries | PARTIAL (1px each) | YES (2-3px) |
+| Surface bump texture | Fabric, skin, hair materials | NO (too small) | YES |
+| Gamma 0.65 (per-form) | Per-limb tonal distribution | YES | YES |
+| Range-band shifting | Limbs shift based on global position | YES | YES |
+| 2 colour groups (16 tones) | Skin warm/cool, fabric warm/cool | YES | YES |
+
+### Where Flat-Fill MUST Stay
+
+1. **Face at chibi scale (20px wide)**: Sphere lighting covers half the face in shadow at this size, obscuring features. Proven in 10 failed iterations. The face IS a canvas for features — keep it bright and simple.
+2. **Arms/legs at chibi scale (3-4px wide)**: No room for zones. Single cylinder gradient is the best possible.
+3. **Eyes at any scale**: Eyes are feature placement (white + iris + pupil + specular), not a lit surface.
+
+### Where Flat-Fill Should Be REPLACED (Testing in Exercises 1-4)
+
+1. **Face at HD scale (64px head)**: Exercise 3 will test whether dome rendering + zone-based tonal sweep produces readable faces at this resolution. The face is 40-50px wide at HD — enough room for subtle tonal zones IF the face bias keeps the center bright. HYPOTHESIS: dome rendering works for the BACK and SIDES of the head but should fade to flat-fill for the front face surface.
+2. **Hair at HD scale**: Exercise 3-4 will test overlapping dome forms (like scales) for hair strands. Each strand = a small arc with its own zone-based lighting.
+3. **Torso/arms at HD scale (exercises 1-2)**: Zone-based cylinder rendering with fabric bump texture.
+4. **Body at chibi scale (exercise 6)**: Per-form tonal sweep + value hierarchy, even without zone-based rendering.
+
+### Rendering Plan for Exercise 2 — Single Arm (64×32 HD)
+
+Canvas: 64×32. A character arm from shoulder to hand.
+
+**Silhouette**: Tapered cylinder — wider at shoulder (~16px), narrower at wrist (~10px), hand bulge at end.
+
+**Construction order** (multi-pass, back-to-front):
+1. Profile function: define halfWidth(t) with shoulder→elbow→wrist→hand taper
+2. Flat fill to verify silhouette reads as an arm
+3. Replace flat fill with zone-based cylinder rendering
+
+**Zone-based cylinder rendering** (5 zones across cross-section):
+- Zone 0 (far shadow edge, NdotL < 0.1): near-black outline
+- Zone 1 (shadow, NdotL 0.1-0.3): dark fabric tone
+- Zone 2 (mid, NdotL 0.3-0.5): mid fabric tone
+- Zone 3 (lit, NdotL 0.5-0.75): bright fabric tone
+- Zone 4 (highlight, NdotL > 0.75): near-white + specular
+
+**Materials** (2 materials, different rendering):
+- Sleeve fabric (shoulder→wrist): bump texture (hash noise 0.15 strength), matte specular (exp=20), warm/cool dual palette
+- Skin (hand): smooth, no bump, slightly shinier (exp=35), warmer palette
+
+**Edge treatment**:
+- Dark outline (1px) at silhouette edges
+- Bright rim (1px inside outline on lit side) — edge pair
+- Material transition at sleeve→hand boundary: dark crevice + bright skin ridge
+
+**Post-processing**:
+- Cast shadow at shoulder attachment (darker top 2-3px)
+- Specular cluster on lit upper arm (2-3px, asymmetric L-shape)
+- Global vertical falloff (brighter near shoulder, darker toward hand)
+
+**Palette**: 2 colour groups (cool shadow, warm highlight), 16 tones total. Fabric in green or blue, skin in warm peach.
+
+## Iteration 2 (Exercise 2 — Single Arm, 64×32 HD) — 2026-03-29
+
+### What happened:
+- 3 attempts to pass critic
+- Attempt 1: FAIL — no visible bump texture (normal perturbation compressed range), zone transitions too mechanical, no visible specular, edge pairs too subtle
+- Attempt 2: FAIL — fold lines segmented arm into panels, texture still invisible, specular overwritten by outline pass, tonal range compressed
+- Attempt 3: PASS — bump texture via post-zone brightness variation (4px blocks), wider palette range (near-black to near-white), specular placed after outline pass, variable outline thickness
+
+### Transferable lessons:
+
+1. **Bump texture AFTER zone assignment, not normal perturbation**: Perturbing normals before lighting compresses tonal range (darks get brighter, brights get darker). Instead, compute clean zone-based lighting first, then add brightness variation as a post-step. This preserves the tonal sweep while adding texture.
+
+2. **Post-processing order matters for specular**: If outline is applied as a pass, specular must come AFTER outline and explicitly skip outline pixels. Otherwise specular lands on pixels that get overwritten.
+
+3. **Palette hex range determines visual tonal range**: Using `#0e2040` (very dark) to `#88b8e8` (bright) as palette endpoints gave much wider visual range than `#2a4a6e` to `#5a8ab8`. The palette defines the ceiling — wider hex range = wider visual range.
+
+4. **4px block texture reads as pattern, not noise**: 1px hash noise reads as dithering. 4px blocks with hash variation read as a visible texture pattern. However, regular block grids look like plaid — need irregular block sizes for organic texture.
+
+5. **Variable outline weight sells form**: Thicker darker outline on shadow side (bottom), thinner lighter on lit side (top). This reinforces the cylinder's cross-section lighting.
+
+6. **Material boundary needs 2+2px**: 2px dark crevice at fabric end + 2px bright ridge at skin start. Single pixels are too subtle for material transitions.
+
+7. **Zone-based cylinder WORKS for character bodies at HD**: Hypothesis 1 CONFIRMED. The 5-zone approach with dithered boundaries produces better form read than smooth cylinder gradient. The discrete tonal steps give the arm more dimensionality.
+
+## Iteration 3 (Exercise 1 — Single Arm, 64×32 HD, REDO) — 2026-03-29
+
+### What happened:
+- Iteration 2 passed the critic but the visual result was a telescope, not an arm
+- Root causes: zones were quantized brightness steps (hard segments), texture was grid checkerboard, fold creases cut arm into blocks
+- Rewrote from scratch with 3 key fixes:
+  1. Zones defined by cylinder normal angle with DITHERED transitions (hash-based blend over 6% of value range)
+  2. Profile function uses cubic smoothstep interpolation, not linear segments
+  3. Texture from multi-scale hash noise (fine + medium) with sine drape, not grid blocks
+- 1 attempt, PASS (narrow — all criteria 3/5)
+
+### Transferable lessons:
+
+1. **Zone transitions must be dithered for organic forms**: Hard zone boundaries create segmented/blocky appearance on smooth anatomy. Use blend bands where hash-based dithering probabilistically assigns pixels to adjacent zones. Width of blend band controls softness.
+
+2. **Profile functions need cubic interpolation**: Linear interpolation between control points creates angular silhouettes that read as mechanical, not organic. Using `s*s*(3-2*s)` smoothstep between points produces curves that taper naturally.
+
+3. **Grid-aligned texture creates patterns, not texture**: Any texture based on `(bx+by)%2` or regular block grids reads as checkerboard/plaid. Multi-scale hash noise (fine per-pixel + medium 3px block) with different seeds creates organic variation.
+
+4. **Drape modulation > fold creases for fabric**: Hard vertical fold lines segment cylindrical forms into panels. Subtle sine-wave tonal modulation along the length suggests fabric drape without breaking the form.
+
+### Key Hypotheses to Test in This Training Run
+
+1. **Zone-based cylinder > smooth cylinder for bodies at HD scale?** (Exercise 2)
+2. **Dome rendering + face bias > flat fill for faces at HD scale?** (Exercise 3)
+3. **Overlapping dome forms > edge strips for hair?** (Exercises 3-4)
+4. **Value hierarchy tonal capping > uniform rendering for full characters?** (Exercise 5)
+5. **Which HD techniques survive downscaling to chibi?** (Exercise 6)
+6. **Can 3 distinct characters maintain quality consistency?** (Exercise 7)

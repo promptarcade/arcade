@@ -1,0 +1,254 @@
+[
+  {
+    "promptKey": "Write a JavaScript function body that bounces an object off horizontal boundarie",
+    "prompt": "Write a JavaScript function body that bounces an object off horizontal boundaries.\n\nArguments available: obj, H, S\n- obj has properties: y (number), vy (number), h (number)\n- H: canvas height\n- S: scale factor\n\nRules:\n- var halfH = obj.h * S / 2\n- If obj.y - halfH < 0: set obj.y = halfH, set obj.vy = Math.abs(obj.vy)\n- If obj.y + halfH > H: set obj.y = H - halfH, set obj.vy = -Math.abs(obj.vy)\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var halfH = obj.h * S / 2;\nif (obj.y - halfH < 0) {\n  obj.y = halfH;\n  obj.vy = Math.abs(obj.vy);\n}\nif (obj.y + halfH > H) {\n  obj.y = H - halfH;\n  obj.vy = -Math.abs(obj.vy);\n}",
+    "timestamp": 1774320919617,
+    "runId": "mn40t2tr-0"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that detects when an object has passed the left",
+    "prompt": "Write a JavaScript function body that detects when an object has passed the left or right edge of the canvas and returns an event string.\n\nArguments available: obj, W, S\n- obj has properties: x (number), w (number)\n- W: canvas width\n- S: scale factor\n\nRules:\n- var halfW = obj.w * S / 2\n- If obj.x - halfW < 0: return \"left-edge\"\n- If obj.x + halfW > W: return \"right-edge\"\n- Otherwise: return \"\"\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var halfW = obj.w * S / 2;\nif (obj.x - halfW < 0) {\n  return \"left-edge\";\n}\nif (obj.x + halfW > W) {\n  return \"right-edge\";\n}\nreturn \"\";",
+    "timestamp": 1774320920021,
+    "runId": "mn40t2tr-0"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that sets an object's vertical velocity based o",
+    "prompt": "Write a JavaScript function body that sets an object's vertical velocity based on input state.\n\nArguments available: obj, S, inputState\n- obj has properties: vy (number)\n- S: scale factor\n- inputState has property keys: object mapping key names to true/false\n\nRules:\n- Set obj.vy to 0 first\n- If inputState.keys.ArrowUp is true: obj.vy = -250 * S\n- If inputState.keys.ArrowDown is true: obj.vy = 250 * S\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "obj.vy = 0;\nif (inputState.keys.ArrowUp) {\n  obj.vy = -250 * S;\n}\nif (inputState.keys.ArrowDown) {\n  obj.vy = 250 * S;\n}",
+    "timestamp": 1774320921624,
+    "runId": "mn40t2tr-0"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that detects overlap between two rectangular ar",
+    "prompt": "Write a JavaScript function body that detects overlap between two rectangular areas and reverses the first object's horizontal velocity, pushing it out of the overlap.\n\nArguments available: a, b, S\n- a has properties: x, y (center), w, h (dimensions), vx (horizontal velocity)\n- b has properties: x, y (center), w, h (dimensions)\n- S: scale factor\n\nRules:\n- var hw = (a.w * S + b.w * S) / 2\n- var hh = (a.h * S + b.h * S) / 2\n- var dx = Math.abs(a.x - b.x)\n- var dy = Math.abs(a.y - b.y)\n- If dx < hw AND dy < hh (overlap detected):\n  - Reverse: a.vx = -a.vx\n  - Push out: if a.x < b.x then a.x = b.x - hw, else a.x = b.x + hw\n  - Return true\n- Else return false\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var hw = (a.w * S + b.w * S) / 2;\nvar hh = (a.h * S + b.h * S) / 2;\nvar dx = Math.abs(a.x - b.x);\nvar dy = Math.abs(a.y - b.y);\nif (dx < hw && dy < hh) {\n  a.vx = -a.vx;\n  if (a.x < b.x) {\n    a.x = b.x - hw;\n  } else {\n    a.x = b.x + hw;\n  }\n  return true;\n} else {\n  return false;\n}",
+    "timestamp": 1774320921825,
+    "runId": "mn40t2tr-0"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that updates an object's position from its velo",
+    "prompt": "Write a JavaScript function body that updates an object's position from its velocity and clamps vertical position to bounds.\n\nArguments available: obj, dt, H, S\n- obj has properties: x, y, vx, vy (all numbers), h (number)\n- dt: seconds elapsed\n- H: canvas height\n- S: scale factor\n\nRules:\n- obj.x += obj.vx * dt\n- obj.y += obj.vy * dt\n- var halfH = obj.h * S / 2\n- Clamp: obj.y = Math.max(halfH, Math.min(H - halfH, obj.y))\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "obj.x += obj.vx * dt;\nobj.y += obj.vy * dt;\nvar halfH = obj.h * S / 2;\nobj.y = Math.max(halfH, Math.min(H - halfH, obj.y));",
+    "timestamp": 1774320923760,
+    "runId": "mn40t2tr-0"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that moves an object's vertical position toward",
+    "prompt": "Write a JavaScript function body that moves an object's vertical position toward a target y-coordinate at a fixed speed.\n\nArguments available: obj, targetY, S, dt\n- obj has properties: vy (number), y (number)\n- targetY: number (the y position to move toward)\n- S: scale factor\n- dt: seconds elapsed\n\nRules:\n- If obj.y < targetY - 5: set obj.vy = 200 * S\n- Else if obj.y > targetY + 5: set obj.vy = -200 * S\n- Else: set obj.vy = 0\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "if (obj.y < targetY - 5) {\n  obj.vy = 200 * S;\n} else if (obj.y > targetY + 5) {\n  obj.vy = -200 * S;\n} else {\n  obj.vy = 0;\n}\nobj.y += obj.vy * dt;",
+    "timestamp": 1774320926769,
+    "runId": "mn40t2tr-0"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that bounces an object off horizontal boundarie",
+    "prompt": "Write a JavaScript function body that bounces an object off horizontal boundaries.\n\nArguments available: obj, H, S\n- obj has properties: y (number), vy (number), h (number)\n- H: canvas height\n- S: scale factor\n\nRules:\n- var halfH = obj.h * S / 2\n- If obj.y - halfH < 0: set obj.y = halfH, set obj.vy = Math.abs(obj.vy)\n- If obj.y + halfH > H: set obj.y = H - halfH, set obj.vy = -Math.abs(obj.vy)\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var halfH = obj.h * S / 2;\nif (obj.y - halfH < 0) {\n  obj.y = halfH;\n  obj.vy = Math.abs(obj.vy);\n}\nif (obj.y + halfH > H) {\n  obj.y = H - halfH;\n  obj.vy = -Math.abs(obj.vy);\n}",
+    "timestamp": 1774320970160,
+    "runId": "mn40t2tr-1"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that updates an object's position from its velo",
+    "prompt": "Write a JavaScript function body that updates an object's position from its velocity and clamps vertical position to bounds.\n\nArguments available: obj, dt, H, S\n- obj has properties: x, y, vx, vy (all numbers), h (number)\n- dt: seconds elapsed\n- H: canvas height\n- S: scale factor\n\nRules:\n- obj.x += obj.vx * dt\n- obj.y += obj.vy * dt\n- var halfH = obj.h * S / 2\n- Clamp: obj.y = Math.max(halfH, Math.min(H - halfH, obj.y))\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "obj.x += obj.vx * dt;\nobj.y += obj.vy * dt;\nvar halfH = obj.h * S / 2;\nobj.y = Math.max(halfH, Math.min(H - halfH, obj.y));",
+    "timestamp": 1774320970426,
+    "runId": "mn40t2tr-1"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that moves an object's vertical position toward",
+    "prompt": "Write a JavaScript function body that moves an object's vertical position toward a target y-coordinate at a fixed speed.\n\nArguments available: obj, targetY, S, dt\n- obj has properties: vy (number), y (number)\n- targetY: number (the y position to move toward)\n- S: scale factor\n- dt: seconds elapsed\n\nRules:\n- If obj.y < targetY - 5: set obj.vy = 200 * S\n- Else if obj.y > targetY + 5: set obj.vy = -200 * S\n- Else: set obj.vy = 0\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "if (obj.y < targetY - 5) {\n  obj.vy = 200 * S;\n} else if (obj.y > targetY + 5) {\n  obj.vy = -200 * S;\n} else {\n  obj.vy = 0;\n}\nobj.y += obj.vy * dt;",
+    "timestamp": 1774320970626,
+    "runId": "mn40t2tr-1"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that detects overlap between two rectangular ar",
+    "prompt": "Write a JavaScript function body that detects overlap between two rectangular areas and reverses the first object's horizontal velocity, pushing it out of the overlap.\n\nArguments available: a, b, S\n- a has properties: x, y (center), w, h (dimensions), vx (horizontal velocity)\n- b has properties: x, y (center), w, h (dimensions)\n- S: scale factor\n\nRules:\n- var hw = (a.w * S + b.w * S) / 2\n- var hh = (a.h * S + b.h * S) / 2\n- var dx = Math.abs(a.x - b.x)\n- var dy = Math.abs(a.y - b.y)\n- If dx < hw AND dy < hh (overlap detected):\n  - Reverse: a.vx = -a.vx\n  - Push out: if a.x < b.x then a.x = b.x - hw, else a.x = b.x + hw\n  - Return true\n- Else return false\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var hw = (a.w * S + b.w * S) / 2;\nvar hh = (a.h * S + b.h * S) / 2;\nvar dx = Math.abs(a.x - b.x);\nvar dy = Math.abs(a.y - b.y);\nif (dx < hw && dy < hh) {\n  a.vx = -a.vx;\n  if (a.x < b.x) {\n    a.x = b.x - hw;\n  } else {\n    a.x = b.x + hw;\n  }\n  return true;\n} else {\n  return false;\n}",
+    "timestamp": 1774320971669,
+    "runId": "mn40t2tr-1"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that sets an object's vertical velocity based o",
+    "prompt": "Write a JavaScript function body that sets an object's vertical velocity based on input state.\n\nArguments available: obj, S, inputState\n- obj has properties: vy (number)\n- S: scale factor\n- inputState has property keys: object mapping key names to true/false\n\nRules:\n- Set obj.vy to 0 first\n- If inputState.keys.ArrowUp is true: obj.vy = -250 * S\n- If inputState.keys.ArrowDown is true: obj.vy = 250 * S\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "obj.vy = 0;\nif (inputState.keys.ArrowUp) {\n  obj.vy = -250 * S;\n}\nif (inputState.keys.ArrowDown) {\n  obj.vy = 250 * S;\n}",
+    "timestamp": 1774320972682,
+    "runId": "mn40t2tr-1"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that detects when an object has passed the left",
+    "prompt": "Write a JavaScript function body that detects when an object has passed the left or right edge of the canvas and returns an event string.\n\nArguments available: obj, W, S\n- obj has properties: x (number), w (number)\n- W: canvas width\n- S: scale factor\n\nRules:\n- var halfW = obj.w * S / 2\n- If obj.x - halfW < 0: return \"left-edge\"\n- If obj.x + halfW > W: return \"right-edge\"\n- Otherwise: return \"\"\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var halfW = obj.w * S / 2;\nif (obj.x - halfW < 0) {\n  return \"left-edge\";\n}\nif (obj.x + halfW > W) {\n  return \"right-edge\";\n}\nreturn \"\";",
+    "timestamp": 1774320972947,
+    "runId": "mn40t2tr-1"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that detects when an object has passed the left",
+    "prompt": "Write a JavaScript function body that detects when an object has passed the left or right edge of the canvas and returns an event string.\n\nArguments available: obj, W, S\n- obj has properties: x (number), w (number)\n- W: canvas width\n- S: scale factor\n\nRules:\n- var halfW = obj.w * S / 2\n- If obj.x - halfW < 0: return \"left-edge\"\n- If obj.x + halfW > W: return \"right-edge\"\n- Otherwise: return \"\"\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var halfW = obj.w * S / 2;\nif (obj.x - halfW < 0) {\n  return \"left-edge\";\n}\nif (obj.x + halfW > W) {\n  return \"right-edge\";\n}\nreturn \"\";",
+    "timestamp": 1774321016516,
+    "runId": "mn40t2tr-2"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that updates an object's position from its velo",
+    "prompt": "Write a JavaScript function body that updates an object's position from its velocity and clamps vertical position to bounds.\n\nArguments available: obj, dt, H, S\n- obj has properties: x, y, vx, vy (all numbers), h (number)\n- dt: seconds elapsed\n- H: canvas height\n- S: scale factor\n\nRules:\n- obj.x += obj.vx * dt\n- obj.y += obj.vy * dt\n- var halfH = obj.h * S / 2\n- Clamp: obj.y = Math.max(halfH, Math.min(H - halfH, obj.y))\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "obj.x += obj.vx * dt;\nobj.y += obj.vy * dt;\nvar halfH = obj.h * S / 2;\nobj.y = Math.max(halfH, Math.min(H - halfH, obj.y));",
+    "timestamp": 1774321017401,
+    "runId": "mn40t2tr-2"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that bounces an object off horizontal boundarie",
+    "prompt": "Write a JavaScript function body that bounces an object off horizontal boundaries.\n\nArguments available: obj, H, S\n- obj has properties: y (number), vy (number), h (number)\n- H: canvas height\n- S: scale factor\n\nRules:\n- var halfH = obj.h * S / 2\n- If obj.y - halfH < 0: set obj.y = halfH, set obj.vy = Math.abs(obj.vy)\n- If obj.y + halfH > H: set obj.y = H - halfH, set obj.vy = -Math.abs(obj.vy)\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var halfH = obj.h * S / 2;\nif (obj.y - halfH < 0) {\n  obj.y = halfH;\n  obj.vy = Math.abs(obj.vy);\n}\nif (obj.y + halfH > H) {\n  obj.y = H - halfH;\n  obj.vy = -Math.abs(obj.vy);\n}",
+    "timestamp": 1774321017809,
+    "runId": "mn40t2tr-2"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that detects overlap between two rectangular ar",
+    "prompt": "Write a JavaScript function body that detects overlap between two rectangular areas and reverses the first object's horizontal velocity, pushing it out of the overlap.\n\nArguments available: a, b, S\n- a has properties: x, y (center), w, h (dimensions), vx (horizontal velocity)\n- b has properties: x, y (center), w, h (dimensions)\n- S: scale factor\n\nRules:\n- var hw = (a.w * S + b.w * S) / 2\n- var hh = (a.h * S + b.h * S) / 2\n- var dx = Math.abs(a.x - b.x)\n- var dy = Math.abs(a.y - b.y)\n- If dx < hw AND dy < hh (overlap detected):\n  - Reverse: a.vx = -a.vx\n  - Push out: if a.x < b.x then a.x = b.x - hw, else a.x = b.x + hw\n  - Return true\n- Else return false\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var hw = (a.w * S + b.w * S) / 2;\nvar hh = (a.h * S + b.h * S) / 2;\nvar dx = Math.abs(a.x - b.x);\nvar dy = Math.abs(a.y - b.y);\nif (dx < hw && dy < hh) {\n  a.vx = -a.vx;\n  if (a.x < b.x) {\n    a.x = b.x - hw;\n  } else {\n    a.x = b.x + hw;\n  }\n  return true;\n}\nreturn false;",
+    "timestamp": 1774321018028,
+    "runId": "mn40t2tr-2"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that moves an object's vertical position toward",
+    "prompt": "Write a JavaScript function body that moves an object's vertical position toward a target y-coordinate at a fixed speed.\n\nArguments available: obj, targetY, S, dt\n- obj has properties: vy (number), y (number)\n- targetY: number (the y position to move toward)\n- S: scale factor\n- dt: seconds elapsed\n\nRules:\n- If obj.y < targetY - 5: set obj.vy = 200 * S\n- Else if obj.y > targetY + 5: set obj.vy = -200 * S\n- Else: set obj.vy = 0\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "if (obj.y < targetY - 5) {\n  obj.vy = 200 * S;\n} else if (obj.y > targetY + 5) {\n  obj.vy = -200 * S;\n} else {\n  obj.vy = 0;\n}",
+    "timestamp": 1774321018979,
+    "runId": "mn40t2tr-2"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that sets an object's vertical velocity based o",
+    "prompt": "Write a JavaScript function body that sets an object's vertical velocity based on input state.\n\nArguments available: obj, S, inputState\n- obj has properties: vy (number)\n- S: scale factor\n- inputState has property keys: object mapping key names to true/false\n\nRules:\n- Set obj.vy to 0 first\n- If inputState.keys.ArrowUp is true: obj.vy = -250 * S\n- If inputState.keys.ArrowDown is true: obj.vy = 250 * S\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "obj.vy = 0;\nif (inputState.keys.ArrowUp) {\n  obj.vy = -250 * S;\n}\nif (inputState.keys.ArrowDown) {\n  obj.vy = 250 * S;\n}",
+    "timestamp": 1774321022094,
+    "runId": "mn40t2tr-2"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that detects when an object has passed the left",
+    "prompt": "Write a JavaScript function body that detects when an object has passed the left or right edge of the canvas and returns an event string.\n\nArguments available: obj, W, S\n- obj has properties: x (number), w (number)\n- W: canvas width\n- S: scale factor\n\nRules:\n- var halfW = obj.w * S / 2\n- If obj.x - halfW < 0: return \"left-edge\"\n- If obj.x + halfW > W: return \"right-edge\"\n- Otherwise: return \"\"\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var halfW = obj.w * S / 2;\nif (obj.x - halfW < 0) {\n  return \"left-edge\";\n}\nif (obj.x + halfW > W) {\n  return \"right-edge\";\n}\nreturn \"\";",
+    "timestamp": 1774322883043,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that updates an object's position from its velo",
+    "prompt": "Write a JavaScript function body that updates an object's position from its velocity and clamps vertical position to bounds.\n\nArguments available: obj, dt, H, S\n- obj has properties: x, y, vx, vy (all numbers), h (number)\n- dt: seconds elapsed\n- H: canvas height\n- S: scale factor\n\nRules:\n- obj.x += obj.vx * dt\n- obj.y += obj.vy * dt\n- var halfH = obj.h * S / 2\n- Clamp: obj.y = Math.max(halfH, Math.min(H - halfH, obj.y))\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "obj.x += obj.vx * dt;\nobj.y += obj.vy * dt;\nvar halfH = obj.h * S / 2;\nobj.y = Math.max(halfH, Math.min(H - halfH, obj.y));",
+    "timestamp": 1774322883105,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that bounces an object off horizontal boundarie",
+    "prompt": "Write a JavaScript function body that bounces an object off horizontal boundaries.\n\nArguments available: obj, H, S\n- obj has properties: y (number), vy (number), h (number)\n- H: canvas height\n- S: scale factor\n\nRules:\n- var halfH = obj.h * S / 2\n- If obj.y - halfH < 0: set obj.y = halfH, set obj.vy = Math.abs(obj.vy)\n- If obj.y + halfH > H: set obj.y = H - halfH, set obj.vy = -Math.abs(obj.vy)\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var halfH = obj.h * S / 2;\nif (obj.y - halfH < 0) {\n  obj.y = halfH;\n  obj.vy = Math.abs(obj.vy);\n}\nif (obj.y + halfH > H) {\n  obj.y = H - halfH;\n  obj.vy = -Math.abs(obj.vy);\n}",
+    "timestamp": 1774322883388,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that sets an object's vertical velocity based o",
+    "prompt": "Write a JavaScript function body that sets an object's vertical velocity based on input state.\n\nArguments available: obj, S, inputState\n- obj has properties: vy (number)\n- S: scale factor\n- inputState has property keys: object mapping key names to true/false\n\nRules:\n- Set obj.vy to 0 first\n- If inputState.keys.ArrowUp is true: obj.vy = -250 * S\n- If inputState.keys.ArrowDown is true: obj.vy = 250 * S\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "obj.vy = 0;\nif (inputState.keys.ArrowUp) {\n  obj.vy = -250 * S;\n}\nif (inputState.keys.ArrowDown) {\n  obj.vy = 250 * S;\n}",
+    "timestamp": 1774322885744,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that moves an object's vertical position toward",
+    "prompt": "Write a JavaScript function body that moves an object's vertical position toward a target y-coordinate at a fixed speed.\n\nArguments available: obj, targetY, S, dt\n- obj has properties: vy (number), y (number)\n- targetY: number (the y position to move toward)\n- S: scale factor\n- dt: seconds elapsed\n\nRules:\n- If obj.y < targetY - 5: set obj.vy = 200 * S\n- Else if obj.y > targetY + 5: set obj.vy = -200 * S\n- Else: set obj.vy = 0\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "if (obj.y < targetY - 5) {\n  obj.vy = 200 * S;\n} else if (obj.y > targetY + 5) {\n  obj.vy = -200 * S;\n} else {\n  obj.vy = 0;\n}\nobj.y += obj.vy * dt;",
+    "timestamp": 1774322886914,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that detects overlap between two rectangular ar",
+    "prompt": "Write a JavaScript function body that detects overlap between two rectangular areas and reverses the first object's horizontal velocity, pushing it out of the overlap.\n\nArguments available: a, b, S\n- a has properties: x, y (center), w, h (dimensions), vx (horizontal velocity)\n- b has properties: x, y (center), w, h (dimensions)\n- S: scale factor\n\nRules:\n- var hw = (a.w * S + b.w * S) / 2\n- var hh = (a.h * S + b.h * S) / 2\n- var dx = Math.abs(a.x - b.x)\n- var dy = Math.abs(a.y - b.y)\n- If dx < hw AND dy < hh (overlap detected):\n  - Reverse: a.vx = -a.vx\n  - Push out: if a.x < b.x then a.x = b.x - hw, else a.x = b.x + hw\n  - Return true\n- Else return false\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var hw = (a.w * S + b.w * S) / 2;\nvar hh = (a.h * S + b.h * S) / 2;\nvar dx = Math.abs(a.x - b.x);\nvar dy = Math.abs(a.y - b.y);\nif (dx < hw && dy < hh) {\n  a.vx = -a.vx;\n  if (a.x < b.x) {\n    a.x = b.x - hw;\n  } else {\n    a.x = b.x + hw;\n  }\n  return true;\n}\nreturn false;",
+    "timestamp": 1774322887223,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that moves an object's vertical position toward",
+    "prompt": "Write a JavaScript function body that moves an object's vertical position toward a target y-coordinate at a fixed speed.\n\nArguments available: obj, targetY, S, dt\n- obj has properties: vy (number), y (number)\n- targetY: number (the y position to move toward)\n- S: scale factor\n- dt: seconds elapsed\n\nRules:\n- If obj.y < targetY - 5: set obj.vy = 200 * S\n- Else if obj.y > targetY + 5: set obj.vy = -200 * S\n- Else: set obj.vy = 0\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "if (obj.y < targetY - 5) {\n  obj.vy = 200 * S;\n} else if (obj.y > targetY + 5) {\n  obj.vy = -200 * S;\n} else {\n  obj.vy = 0;\n}",
+    "timestamp": 1774323150860,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that updates an object's position from its velo",
+    "prompt": "Write a JavaScript function body that updates an object's position from its velocity and clamps vertical position to bounds.\n\nArguments available: obj, dt, H, S\n- obj has properties: x, y, vx, vy (all numbers), h (number)\n- dt: seconds elapsed\n- H: canvas height\n- S: scale factor\n\nRules:\n- obj.x += obj.vx * dt\n- obj.y += obj.vy * dt\n- var halfH = obj.h * S / 2\n- Clamp: obj.y = Math.max(halfH, Math.min(H - halfH, obj.y))\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "obj.x += obj.vx * dt;\nobj.y += obj.vy * dt;\nvar halfH = obj.h * S / 2;\nobj.y = Math.max(halfH, Math.min(H - halfH, obj.y));",
+    "timestamp": 1774323151644,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that bounces an object off horizontal boundarie",
+    "prompt": "Write a JavaScript function body that bounces an object off horizontal boundaries.\n\nArguments available: obj, H, S\n- obj has properties: y (number), vy (number), h (number)\n- H: canvas height\n- S: scale factor\n\nRules:\n- var halfH = obj.h * S / 2\n- If obj.y - halfH < 0: set obj.y = halfH, set obj.vy = Math.abs(obj.vy)\n- If obj.y + halfH > H: set obj.y = H - halfH, set obj.vy = -Math.abs(obj.vy)\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var halfH = obj.h * S / 2;\nif (obj.y - halfH < 0) {\n  obj.y = halfH;\n  obj.vy = Math.abs(obj.vy);\n}\nif (obj.y + halfH > H) {\n  obj.y = H - halfH;\n  obj.vy = -Math.abs(obj.vy);\n}",
+    "timestamp": 1774323152426,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that sets an object's vertical velocity based o",
+    "prompt": "Write a JavaScript function body that sets an object's vertical velocity based on input state.\n\nArguments available: obj, S, inputState\n- obj has properties: vy (number)\n- S: scale factor\n- inputState has property keys: object mapping key names to true/false\n\nRules:\n- Set obj.vy to 0 first\n- If inputState.keys.ArrowUp is true: obj.vy = -250 * S\n- If inputState.keys.ArrowDown is true: obj.vy = 250 * S\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "obj.vy = 0;\nif (inputState.keys.ArrowUp) {\n  obj.vy = -250 * S;\n}\nif (inputState.keys.ArrowDown) {\n  obj.vy = 250 * S;\n}",
+    "timestamp": 1774323153981,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that detects when an object has passed the left",
+    "prompt": "Write a JavaScript function body that detects when an object has passed the left or right edge of the canvas and returns an event string.\n\nArguments available: obj, W, S\n- obj has properties: x (number), w (number)\n- W: canvas width\n- S: scale factor\n\nRules:\n- var halfW = obj.w * S / 2\n- If obj.x - halfW < 0: return \"left-edge\"\n- If obj.x + halfW > W: return \"right-edge\"\n- Otherwise: return \"\"\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var halfW = obj.w * S / 2;\nif (obj.x - halfW < 0) {\n  return \"left-edge\";\n}\nif (obj.x + halfW > W) {\n  return \"right-edge\";\n}\nreturn \"\";",
+    "timestamp": 1774323154933,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that detects overlap between two rectangular ar",
+    "prompt": "Write a JavaScript function body that detects overlap between two rectangular areas and reverses the first object's horizontal velocity, pushing it out of the overlap.\n\nArguments available: a, b, S\n- a has properties: x, y (center), w, h (dimensions), vx (horizontal velocity)\n- b has properties: x, y (center), w, h (dimensions)\n- S: scale factor\n\nRules:\n- var hw = (a.w * S + b.w * S) / 2\n- var hh = (a.h * S + b.h * S) / 2\n- var dx = Math.abs(a.x - b.x)\n- var dy = Math.abs(a.y - b.y)\n- If dx < hw AND dy < hh (overlap detected):\n  - Reverse: a.vx = -a.vx\n  - Push out: if a.x < b.x then a.x = b.x - hw, else a.x = b.x + hw\n  - Return true\n- Else return false\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var hw = (a.w * S + b.w * S) / 2;\nvar hh = (a.h * S + b.h * S) / 2;\nvar dx = Math.abs(a.x - b.x);\nvar dy = Math.abs(a.y - b.y);\nif (dx < hw && dy < hh) {\n  a.vx = -a.vx;\n  if (a.x < b.x) {\n    a.x = b.x - hw;\n  } else {\n    a.x = b.x + hw;\n  }\n  return true;\n} else {\n  return false;\n}",
+    "timestamp": 1774323157786,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that moves an object's vertical position toward",
+    "prompt": "Write a JavaScript function body that moves an object's vertical position toward a target y-coordinate at a fixed speed.\n\nArguments available: obj, targetY, S, dt\n- obj has properties: vy (number), y (number)\n- targetY: number (the y position to move toward)\n- S: scale factor\n- dt: seconds elapsed\n\nRules:\n- If obj.y < targetY - 5: set obj.vy = 200 * S\n- Else if obj.y > targetY + 5: set obj.vy = -200 * S\n- Else: set obj.vy = 0\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "if (obj.y < targetY - 5) {\n  obj.vy = 200 * S;\n} else if (obj.y > targetY + 5) {\n  obj.vy = -200 * S;\n} else {\n  obj.vy = 0;\n}\nobj.y += obj.vy * dt;",
+    "timestamp": 1774323359456,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that updates an object's position from its velo",
+    "prompt": "Write a JavaScript function body that updates an object's position from its velocity and clamps vertical position to bounds.\n\nArguments available: obj, dt, H, S\n- obj has properties: x, y, vx, vy (all numbers), h (number)\n- dt: seconds elapsed\n- H: canvas height\n- S: scale factor\n\nRules:\n- obj.x += obj.vx * dt\n- obj.y += obj.vy * dt\n- var halfH = obj.h * S / 2\n- Clamp: obj.y = Math.max(halfH, Math.min(H - halfH, obj.y))\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "obj.x += obj.vx * dt;\nobj.y += obj.vy * dt;\nvar halfH = obj.h * S / 2;\nobj.y = Math.max(halfH, Math.min(H - halfH, obj.y));",
+    "timestamp": 1774323360055,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that detects overlap between two rectangular ar",
+    "prompt": "Write a JavaScript function body that detects overlap between two rectangular areas and reverses the first object's horizontal velocity, pushing it out of the overlap.\n\nArguments available: a, b, S\n- a has properties: x, y (center), w, h (dimensions), vx (horizontal velocity)\n- b has properties: x, y (center), w, h (dimensions)\n- S: scale factor\n\nRules:\n- var hw = (a.w * S + b.w * S) / 2\n- var hh = (a.h * S + b.h * S) / 2\n- var dx = Math.abs(a.x - b.x)\n- var dy = Math.abs(a.y - b.y)\n- If dx < hw AND dy < hh (overlap detected):\n  - Reverse: a.vx = -a.vx\n  - Push out: if a.x < b.x then a.x = b.x - hw, else a.x = b.x + hw\n  - Return true\n- Else return false\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var hw = (a.w * S + b.w * S) / 2;\nvar hh = (a.h * S + b.h * S) / 2;\nvar dx = Math.abs(a.x - b.x);\nvar dy = Math.abs(a.y - b.y);\nif (dx < hw && dy < hh) {\n  a.vx = -a.vx;\n  if (a.x < b.x) {\n    a.x = b.x - hw;\n  } else {\n    a.x = b.x + hw;\n  }\n  return true;\n} else {\n  return false;\n}",
+    "timestamp": 1774323360127,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that detects when an object has passed the left",
+    "prompt": "Write a JavaScript function body that detects when an object has passed the left or right edge of the canvas and returns an event string.\n\nArguments available: obj, W, S\n- obj has properties: x (number), w (number)\n- W: canvas width\n- S: scale factor\n\nRules:\n- var halfW = obj.w * S / 2\n- If obj.x - halfW < 0: return \"left-edge\"\n- If obj.x + halfW > W: return \"right-edge\"\n- Otherwise: return \"\"\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var halfW = obj.w * S / 2;\nif (obj.x - halfW < 0) {\n  return \"left-edge\";\n}\nif (obj.x + halfW > W) {\n  return \"right-edge\";\n}\nreturn \"\";",
+    "timestamp": 1774323361122,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that bounces an object off horizontal boundarie",
+    "prompt": "Write a JavaScript function body that bounces an object off horizontal boundaries.\n\nArguments available: obj, H, S\n- obj has properties: y (number), vy (number), h (number)\n- H: canvas height\n- S: scale factor\n\nRules:\n- var halfH = obj.h * S / 2\n- If obj.y - halfH < 0: set obj.y = halfH, set obj.vy = Math.abs(obj.vy)\n- If obj.y + halfH > H: set obj.y = H - halfH, set obj.vy = -Math.abs(obj.vy)\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "var halfH = obj.h * S / 2;\nif (obj.y - halfH < 0) {\n  obj.y = halfH;\n  obj.vy = Math.abs(obj.vy);\n}\nif (obj.y + halfH > H) {\n  obj.y = H - halfH;\n  obj.vy = -Math.abs(obj.vy);\n}",
+    "timestamp": 1774323364180,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "Write a JavaScript function body that sets an object's vertical velocity based o",
+    "prompt": "Write a JavaScript function body that sets an object's vertical velocity based on input state.\n\nArguments available: obj, S, inputState\n- obj has properties: vy (number)\n- S: scale factor\n- inputState has property keys: object mapping key names to true/false\n\nRules:\n- Set obj.vy to 0 first\n- If inputState.keys.ArrowUp is true: obj.vy = -250 * S\n- If inputState.keys.ArrowDown is true: obj.vy = 250 * S\n\nOutput function body only. No function declaration. No TypeScript. Plain JavaScript.",
+    "output": "obj.vy = 0;\nif (inputState.keys.ArrowUp) {\n  obj.vy = -250 * S;\n}\nif (inputState.keys.ArrowDown) {\n  obj.vy = 250 * S;\n}",
+    "timestamp": 1774323373313,
+    "runId": "mesh"
+  }
+]

@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Rope Swing</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a1a; }
+canvas { display: block; touch-action: none; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function() {
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// SOUND
+// ============================================================
+const SFX = {
+  _ctx: null,
+  _get() { if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this._ctx.state === 'suspended') this._ctx.resume(); return this._ctx; },
+  _tone(f, type, dur, vol) { try { const c = this._get(), o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(vol, c.currentTime); g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur); o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + dur); } catch(e) {} },
+  attach() { this._tone(400, 'sine', 0.06, 0.1); this._tone(600, 'sine', 0.04, 0.08); },
+  release() { this._tone(300, 'sine', 0.05, 0.08); },
+  hookPass() { this._tone(500 + Math.random() * 200, 'sine', 0.04, 0.06); },
+  die() { this._tone(200, 'sawtooth', 0.2, 0.12); setTimeout(() => this._tone(100, 'sawtooth', 0.3, 0.08), 100); },
+};
+
+// ============================================================
+// SCORE
+// ============================================================
+const _SU = 'https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+const _SK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(score) {
+  const n = prompt('Distance: ' + score + 'm! Enter name (max 5):');
+  if (!n) return; const name = n.trim().slice(0, 5).toUpperCase(); if (!name) return;
+  let hash = '';
+  try { const d = navigator.userAgent + screen.width + screen.height + new Date().getTimezoneOffset(); const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(d)); hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('').slice(0,32); } catch(e) {}
+  try { await fetch(_SU + '/rest/v1/high_scores', { method: 'POST', headers: { 'apikey': _SK, 'Authorization': 'Bearer ' + _SK, 'Content-Type': 'application/json' }, body: JSON.stringify({ game: 'rope-swing', initials: name, score: score, player_hash: hash }) }); } catch(e) {}
+}
+
+// ============================================================
+// PHYSICS CONFIG
+// ============================================================
+const GRAVITY = 900;
+const ROPE_STIFFNESS = 8;
+const DAMPING = 0.995;
+const PLAYER_RADIUS = 8;
+const HOOK_RADIUS = 6;
+const HOOK_GLOW_RADIUS = 20;
+const MIN_HOOK_GAP = 180;
+const MAX_HOOK_GAP = 350;
+const HOOK_Y_MIN = 80;
+const HOOK_Y_MAX_FRAC = 0.45; // fraction of screen height
+const GROUND_Y_FRAC = 0.92;
+const START_SPEED = 80; // initial horizontal launch speed
+
+// ============================================================
+// STATE
+// ============================================================
+let state = 'title'; // title, playing, dead
+let player = { x: 0, y: 0, vx: 0, vy: 0 };
+let hooks = [];
+let attachedHook = null;
+let ropeLen = 0;
+let camX = 0;
+let distance = 0;
+let bestDistance = parseInt(localStorage.getItem('rope-swing-best') || '0');
+let time = 0;
+let trail = [];
+let particles = [];
+let hooksPassed = 0;
+let deathTimer = 0;
+
+function groundY() { return H * GROUND_Y_FRAC; }
+
+// ============================================================
+// HOOKS
+// ============================================================
+function generateHooks(startX, count) {
+  let x = startX;
+  // Track previous hook Y so next one is always reachable
+  let prevY = hooks.length > 0 ? hooks[hooks.length - 1].y : H * 0.2;
+  for (let i = 0; i < count; i++) {
+    x += MIN_HOOK_GAP + Math.random() * (MAX_HOOK_GAP - MIN_HOOK_GAP);
+    // Next hook Y stays within ±80px of previous, clamped to safe range
+    const yMin = H * 0.1;
+    const yMax = H * 0.4;
+    const drift = (Math.random() - 0.5) * 80;
+    const y = Math.max(yMin, Math.min(yMax, prevY + drift));
+    hooks.push({ x, y, passed: false });
+    prevY = y;
+  }
+}
+
+function ensureHooksAhead() {
+  const lastHook = hooks.length > 0 ? hooks[hooks.length - 1].x : player.x;
+  if (lastHook < player.x + W * 2) {
+    generateHooks(lastHook, 8);
+  }
+  // Remove hooks far behind
+  hooks = hooks.filter(h => h.x > camX - W);
+}
+
+// ============================================================
+// GAME
+// ============================================================
+function startGame() {
+  state = 'playing';
+  hooks = [];
+  attachedHook = null;
+  camX = 0;
+  distance = 0;
+  hooksPassed = 0;
+  trail = [];
+  particles = [];
+  deathTimer = 0;
+
+  // Place first hook directly above the player start position
+  const firstHookX = W * 0.3;
+  const firstHookY = H * 0.15;
+  hooks.push({ x: firstHookX, y: firstHookY, passed: false });
+  generateHooks(firstHookX, 10);
+
+  // Start player swinging from the first hook with momentum
+  player = { x: firstHookX - 40, y: firstHookY + 70, vx: 120, vy: 0 };
+  attachedHook = hooks[0];
+  ropeLen = Math.sqrt((player.x - firstHookX) ** 2 + (player.y - firstHookY) ** 2);
+}
+
+function attachToNearest() {
+  let best = null, bestDist = Infinity;
+  for (const h of hooks) {
+    if (h.x < player.x - 50) continue; // don't attach behind
+    const d = Math.sqrt((h.x - player.x) ** 2 + (h.y - player.y) ** 2);
+    if (d < bestDist && d < 300) {
+      bestDist = d;
+      best = h;
+    }
+  }
+  if (best) {
+    attachedHook = best;
+    ropeLen = Math.sqrt((best.x - player.x) ** 2 + (best.y - player.y) ** 2);
+    SFX.attach();
+  }
+}
+
+function releaseRope() {
+  if (!attachedHook) return;
+  attachedHook = null;
+  SFX.release();
+}
+
+function die() {
+  state = 'dead';
+  deathTimer = 0;
+  SFX.die();
+  const finalDist = Math.floor(distance);
+  if (finalDist > bestDistance) {
+    bestDistance = finalDist;
+    localStorage.setItem('rope-swing-best', bestDistance);
+  }
+  if (finalDist > 0) submitScore(finalDist);
+  // Death particles
+  for (let i = 0; i < 15; i++) {
+    particles.push({
+      x: player.x, y: player.y,
+      vx: (Math.random() - 0.5) * 150, vy: -50 - Math.random() * 100,
+      life: 0.5 + Math.random() * 0.5, maxLife: 1,
+      size: 2 + Math.random() * 3, color: '#ff8844',
+    });
+  }
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+function handleTap() {
+  SFX._get();
+  if (state === 'title') { startGame(); return; }
+  if (state === 'dead' && deathTimer > 0.5) { startGame(); return; }
+  if (state !== 'playing') return;
+
+  if (attachedHook) {
+    // If swinging forward (vx > 0), release and fly
+    if (player.vx > 30) {
+      releaseRope();
+    } else {
+      // Pump the swing — add energy in the direction of current velocity
+      const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+      if (speed > 5) {
+        player.vx += (player.vx / speed) * 60;
+        player.vy += (player.vy / speed) * 40;
+      } else {
+        // Barely moving — give a push to the right
+        player.vx += 80;
+      }
+      SFX.attach();
+    }
+  } else {
+    attachToNearest();
+  }
+}
+
+function pumpSwing(dir) {
+  // dir: -1 = left, 1 = right
+  if (state !== 'playing' || !attachedHook) return;
+  player.vx += dir * 80;
+  SFX.attach();
+}
+
+canvas.addEventListener('click', () => handleTap());
+canvas.addEventListener('touchstart', e => { e.preventDefault(); handleTap(); }, { passive: false });
+window.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === ' ' || k === 'enter') { e.preventDefault(); handleTap(); }
+  else if (k === 'arrowleft' || k === 'a') { e.preventDefault(); pumpSwing(-1); }
+  else if (k === 'arrowright' || k === 'd') { e.preventDefault(); pumpSwing(1); }
+});
+
+// ============================================================
+// UPDATE
+// ============================================================
+function update(dt) {
+  time += dt;
+
+  // Particles
+  for (const p of particles) {
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vy += 300 * dt;
+    p.life -= dt;
+  }
+  particles = particles.filter(p => p.life > 0);
+
+  if (state === 'dead') { deathTimer += dt; return; }
+  if (state !== 'playing') return;
+
+  // Gravity
+  player.vy += GRAVITY * dt;
+
+  if (attachedHook) {
+    // Rope constraint — pendulum physics
+    const dx = player.x - attachedHook.x;
+    const dy = player.y - attachedHook.y;
+    const currentLen = Math.sqrt(dx * dx + dy * dy);
+
+    if (currentLen > ropeLen) {
+      // Pull back to rope length
+      const nx = dx / currentLen;
+      const ny = dy / currentLen;
+      player.x = attachedHook.x + nx * ropeLen;
+      player.y = attachedHook.y + ny * ropeLen;
+
+      // Remove velocity component along rope
+      const velAlongRope = player.vx * nx + player.vy * ny;
+      if (velAlongRope > 0) {
+        player.vx -= velAlongRope * nx;
+        player.vy -= velAlongRope * ny;
+      }
+    }
+
+    // Damping
+    player.vx *= DAMPING;
+    player.vy *= DAMPING;
+  }
+
+  // Apply velocity
+  player.x += player.vx * dt;
+  player.y += player.vy * dt;
+
+  // Trail
+  trail.push({ x: player.x, y: player.y, life: 0.4 });
+  if (trail.length > 30) trail.shift();
+  for (const t of trail) t.life -= dt;
+  trail = trail.filter(t => t.life > 0);
+
+  // Distance tracking
+  distance = Math.max(distance, (player.x - W * 0.3) / 50);
+
+  // Track hooks passed
+  for (const h of hooks) {
+    if (!h.passed && h.x < player.x) {
+      h.passed = true;
+      hooksPassed++;
+      SFX.hookPass();
+    }
+  }
+
+  // Camera follows player
+  const targetCamX = player.x - W * 0.3;
+  camX += (targetCamX - camX) * 5 * dt;
+
+  // Ground collision
+  if (player.y > groundY()) {
+    die();
+    return;
+  }
+
+  // Gone too far left (fell behind)
+  if (player.x < camX - 50) {
+    die();
+    return;
+  }
+
+  // Ceiling
+  if (player.y < 0) {
+    player.y = 0;
+    player.vy = Math.abs(player.vy) * 0.3;
+  }
+
+  ensureHooksAhead();
+}
+
+// ============================================================
+// DRAWING
+// ============================================================
+function drawBackground() {
+  // Sky gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0a0a2a');
+  grad.addColorStop(0.5, '#1a1a3a');
+  grad.addColorStop(0.8, '#2a2a4a');
+  grad.addColorStop(1, '#1a2a3a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars
+  ctx.fillStyle = '#fff';
+  for (let i = 0; i < 40; i++) {
+    const sx = ((i * 73.7 + 100) % (W + 200)) - 100;
+    const sy = (i * 41.3) % (H * 0.6);
+    const twinkle = Math.sin(time * 1.5 + i * 2.1);
+    ctx.globalAlpha = 0.2 + twinkle * 0.15;
+    ctx.fillRect(sx, sy, 1.5, 1.5);
+  }
+  ctx.globalAlpha = 1;
+
+  // Close-up buildings — player swings past windows
+  const gY = groundY();
+
+  // Building definitions — varied widths, colours, window sizes
+  const buildingDefs = [];
+  let bxAccum = 0;
+  const seed = 12345;
+  for (let i = 0; i < 30; i++) {
+    const s = Math.sin(i * 73.13 + seed) * 10000;
+    const rng = () => { return (Math.sin(s + buildingDefs.length * 127.1) * 10000) % 1; };
+    const bw = 100 + Math.floor(Math.abs(Math.sin(i * 31.7)) * 140);
+    const wallHues = ['#1a1a2e','#2a1a1a','#1a2a1a','#1a1a1a','#2a2a1a','#1e1428','#1a2228','#281a1a','#1e2a1e','#2a1e2a'];
+    buildingDefs.push({
+      x: bxAccum,
+      w: bw,
+      top: 5 + Math.floor(Math.abs(Math.sin(i * 47.3)) * 90),
+      wallColor: wallHues[i % wallHues.length],
+      winW: 30 + Math.floor(Math.abs(Math.sin(i * 19.7)) * 40),
+      winH: 35 + Math.floor(Math.abs(Math.sin(i * 23.1)) * 25),
+      winPadX: 8 + Math.floor(Math.abs(Math.sin(i * 11.3)) * 10),
+      winPadY: 6 + Math.floor(Math.abs(Math.sin(i * 7.9)) * 8),
+    });
+    bxAccum += bw + 2; // 2px gap between buildings
+  }
+  const totalBuildingSpan = bxAccum;
+
+  // Buildings scroll at 0.7x player speed (close parallax)
+  const scrollX = camX * 0.7;
+  // Offset so buildings tile seamlessly in both directions
+  const scrollOff = ((scrollX % totalBuildingSpan) + totalBuildingSpan * 2) % totalBuildingSpan;
+  for (let bi = 0; bi < buildingDefs.length; bi++) {
+    const def = buildingDefs[bi];
+    // Draw at two positions to cover wrapping seam
+    let bx = def.x - scrollOff;
+    if (bx < -totalBuildingSpan / 2) bx += totalBuildingSpan;
+    if (bx > totalBuildingSpan / 2) bx -= totalBuildingSpan;
+    if (bx > W + def.w || bx < -def.w - 10) continue;
+    const bTop = def.top;
+    const wallCol = def.wallColor;
+    const windowW = def.winW;
+    const windowH = def.winH;
+    const winPadX = def.winPadX;
+    const winPadY = def.winPadY;
+    const floorH = windowH + winPadY * 2;
+    const buildingW = def.w;
+
+    // Wall
+    ctx.fillStyle = wallCol;
+    ctx.fillRect(bx, bTop, buildingW - 3, gY - bTop);
+
+    // Wall edge line
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    ctx.fillRect(bx + buildingW - 4, bTop, 1, gY - bTop);
+
+    // Windows with scenes inside
+    const winCols = Math.max(1, Math.floor((buildingW - winPadX) / (windowW + winPadX)));
+    for (let wy = bTop + winPadY; wy + windowH < gY - 10; wy += floorH) {
+      for (let wc = 0; wc < winCols; wc++) {
+        const wx = bx + winPadX + wc * (windowW + winPadX);
+        if (wx > W + 10 || wx + windowW < -10) continue;
+        // Window background — varied room colours
+        const litSeed = (bi * 7 + Math.floor(wy / floorH) * 3 + wc * 11);
+        const lit = (litSeed % 10) > 2;
+        const roomColors = ['#2a2a1a','#1a2a2a','#2a1a2a','#2a2820','#1a2028','#28201a','#201a28','#1e2a20'];
+        ctx.fillStyle = lit ? roomColors[litSeed % roomColors.length] : '#08080e';
+        ctx.fillRect(wx, wy, windowW, windowH);
+
+        if (lit) {
+          // Room interior glow
+          ctx.fillStyle = 'rgba(255,230,180,0.08)';
+          ctx.fillRect(wx, wy, windowW, windowH);
+
+          // Quirky scene inside — deterministic per window
+          const scene = (bi * 13 + Math.floor(wy / floorH) * 7 + wc * 19) % 8;
+          const scx = wx + windowW / 2;
+          const scy = wy + windowH / 2;
+          // Varied skin/clothing tones per window
+          const skinTones = ['rgba(240,200,160,0.5)','rgba(200,160,120,0.5)','rgba(160,120,80,0.5)','rgba(120,80,50,0.5)','rgba(220,180,140,0.5)'];
+          const skinCol = skinTones[(bi * 3 + wc * 7 + Math.floor(wy/floorH)) % skinTones.length];
+          ctx.fillStyle = skinCol;
+
+          switch(scene) {
+            case 0: // Person at desk
+              ctx.fillRect(wx + 8, wy + windowH - 18, 35, 4); // desk
+              ctx.fillStyle = skinCol;
+              ctx.fillRect(wx + 20, wy + windowH - 30, 8, 14); // body
+              ctx.beginPath(); ctx.arc(wx + 24, wy + windowH - 34, 5, 0, Math.PI * 2); ctx.fill(); // head
+              ctx.fillStyle = 'rgba(100,200,255,0.3)';
+              ctx.fillRect(wx + 12, wy + windowH - 28, 6, 8); // monitor
+              break;
+            case 1: // Cat on windowsill
+              ctx.fillStyle = 'rgba(200,150,100,0.5)';
+              ctx.beginPath(); ctx.ellipse(wx + 15, wy + windowH - 8, 7, 5, 0, 0, Math.PI * 2); ctx.fill();
+              ctx.beginPath(); ctx.arc(wx + 10, wy + windowH - 14, 4, 0, Math.PI * 2); ctx.fill();
+              // ears
+              ctx.beginPath(); ctx.moveTo(wx+7, wy+windowH-17); ctx.lineTo(wx+5, wy+windowH-22); ctx.lineTo(wx+10, wy+windowH-17); ctx.fill();
+              ctx.beginPath(); ctx.moveTo(wx+11, wy+windowH-17); ctx.lineTo(wx+13, wy+windowH-22); ctx.lineTo(wx+14, wy+windowH-17); ctx.fill();
+              break;
+            case 2: // Dancing person
+              ctx.fillStyle = skinCol;
+              const danceOff = Math.sin(time * 3 + bi) * 4;
+              ctx.fillRect(scx - 4 + danceOff, scy - 2, 8, 16); // body
+              ctx.beginPath(); ctx.arc(scx + danceOff, scy - 6, 5, 0, Math.PI * 2); ctx.fill();
+              // arms up
+              ctx.strokeStyle = skinCol; ctx.lineWidth = 2;
+              ctx.beginPath(); ctx.moveTo(scx - 4 + danceOff, scy + 2); ctx.lineTo(scx - 12 + danceOff, scy - 8 + Math.sin(time*4+bi)*4); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(scx + 4 + danceOff, scy + 2); ctx.lineTo(scx + 12 + danceOff, scy - 8 - Math.sin(time*4+bi)*4); ctx.stroke();
+              break;
+            case 3: // Plant in window
+              ctx.fillStyle = 'rgba(140,80,40,0.5)';
+              ctx.fillRect(wx + 18, wy + windowH - 12, 12, 12); // pot
+              ctx.fillStyle = 'rgba(50,160,50,0.5)';
+              ctx.beginPath(); ctx.ellipse(wx + 24, wy + windowH - 18, 10, 8, 0, 0, Math.PI * 2); ctx.fill();
+              ctx.beginPath(); ctx.ellipse(wx + 20, wy + windowH - 22, 7, 6, -0.3, 0, Math.PI * 2); ctx.fill();
+              break;
+            case 4: // TV watcher
+              ctx.fillStyle = skinCol;
+              ctx.fillRect(scx + 4, scy, 8, 16); // person sitting
+              ctx.beginPath(); ctx.arc(scx + 8, scy - 4, 4, 0, Math.PI * 2); ctx.fill();
+              // TV glow
+              ctx.fillStyle = 'rgba(100,150,255,0.25)';
+              ctx.fillRect(wx + 6, scy - 4, 14, 10);
+              // Flickering
+              if (Math.sin(time * 8 + bi * 3) > 0) {
+                ctx.fillStyle = 'rgba(150,200,255,0.15)';
+                ctx.fillRect(wx + 4, scy - 6, 18, 14);
+              }
+              break;
+            case 5: // Couple arguing (arms waving)
+              ctx.fillStyle = skinCol;
+              ctx.fillRect(scx - 14, scy, 7, 14);
+              ctx.beginPath(); ctx.arc(scx - 11, scy - 4, 4, 0, Math.PI * 2); ctx.fill();
+              ctx.fillRect(scx + 6, scy, 7, 14);
+              ctx.beginPath(); ctx.arc(scx + 9, scy - 4, 4, 0, Math.PI * 2); ctx.fill();
+              // Waving arms
+              ctx.strokeStyle = skinCol; ctx.lineWidth = 2;
+              ctx.beginPath(); ctx.moveTo(scx - 8, scy + 3); ctx.lineTo(scx - 2, scy - 4 + Math.sin(time * 5 + bi) * 5); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(scx + 10, scy + 3); ctx.lineTo(scx + 4, scy - 4 - Math.sin(time * 5 + bi) * 5); ctx.stroke();
+              break;
+            case 6: // Bookshelf
+              ctx.fillStyle = 'rgba(100,70,40,0.4)';
+              ctx.fillRect(wx + 6, wy + 6, 40, windowH - 12); // shelf
+              for (let bk = 0; bk < 5; bk++) {
+                const bookColors = ['rgba(180,50,50,0.4)','rgba(50,80,180,0.4)','rgba(50,150,50,0.4)','rgba(180,150,50,0.4)','rgba(150,50,150,0.4)'];
+                ctx.fillStyle = bookColors[bk];
+                ctx.fillRect(wx + 8 + bk * 7, wy + 8, 5, windowH - 16);
+              }
+              break;
+            case 7: // Person doing yoga
+              ctx.fillStyle = skinCol;
+              const yogaPhase = Math.sin(time * 1.5 + bi * 2);
+              ctx.beginPath(); ctx.arc(scx, scy - 8, 4, 0, Math.PI * 2); ctx.fill();
+              ctx.strokeStyle = skinCol; ctx.lineWidth = 2;
+              // Body
+              ctx.beginPath(); ctx.moveTo(scx, scy - 4); ctx.lineTo(scx, scy + 8); ctx.stroke();
+              // Arms stretched
+              ctx.beginPath(); ctx.moveTo(scx, scy); ctx.lineTo(scx - 14, scy - 6 + yogaPhase * 4); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(scx, scy); ctx.lineTo(scx + 14, scy - 6 - yogaPhase * 4); ctx.stroke();
+              // Legs
+              ctx.beginPath(); ctx.moveTo(scx, scy + 8); ctx.lineTo(scx - 10, scy + 16); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(scx, scy + 8); ctx.lineTo(scx + 10, scy + 16); ctx.stroke();
+              break;
+          }
+        }
+
+        // Window frame
+        ctx.strokeStyle = 'rgba(150,150,170,0.25)';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(wx, wy, windowW, windowH);
+        // Cross divider
+        ctx.beginPath();
+        ctx.moveTo(wx + windowW / 2, wy); ctx.lineTo(wx + windowW / 2, wy + windowH);
+        ctx.stroke();
+        // Window reflection
+        ctx.fillStyle = 'rgba(150,180,220,0.04)';
+        ctx.fillRect(wx + 2, wy + 2, windowW * 0.35, windowH * 0.4);
+      }
+    }
+  }
+
+  // Ground
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, gY, W, H - gY);
+  // Sidewalk
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(0, gY, W, 6);
+  ctx.fillStyle = '#333';
+  ctx.fillRect(0, gY + 6, W, 2);
+}
+
+function drawHooks() {
+  for (const h of hooks) {
+    const sx = h.x - camX;
+    if (sx < -30 || sx > W + 30) continue;
+
+    // Glow
+    const isAttached = h === attachedHook;
+    ctx.fillStyle = isAttached ? 'rgba(100,200,255,0.15)' : 'rgba(255,200,100,0.08)';
+    ctx.beginPath();
+    ctx.arc(sx, h.y, HOOK_GLOW_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hook mount (line to top of screen)
+    ctx.strokeStyle = 'rgba(100,100,120,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sx, 0);
+    ctx.lineTo(sx, h.y);
+    ctx.stroke();
+
+    // Hook circle
+    ctx.fillStyle = isAttached ? '#66ccff' : '#ffcc44';
+    ctx.beginPath();
+    ctx.arc(sx, h.y, HOOK_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = isAttached ? '#88ddff' : '#ffdd66';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Inner dot
+    ctx.fillStyle = isAttached ? '#aaeeff' : '#ffee88';
+    ctx.beginPath();
+    ctx.arc(sx, h.y, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawRope() {
+  if (!attachedHook) return;
+  const sx = attachedHook.x - camX;
+  const px = player.x - camX;
+  ctx.strokeStyle = '#aabbcc';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(sx, attachedHook.y);
+  // Slight curve for rope sag
+  const midX = (sx + px) / 2;
+  const midY = (attachedHook.y + player.y) / 2 + 10;
+  ctx.quadraticCurveTo(midX, midY, px, player.y);
+  ctx.stroke();
+
+  // Rope glow
+  ctx.strokeStyle = 'rgba(150,180,200,0.2)';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(sx, attachedHook.y);
+  ctx.quadraticCurveTo(midX, midY, px, player.y);
+  ctx.stroke();
+}
+
+function drawPlayer() {
+  const px = player.x - camX;
+  const py = player.y;
+
+  // Speed lines when moving fast
+  const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+  if (speed > 200) {
+    const lineCount = Math.min(5, Math.floor(speed / 150));
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < lineCount; i++) {
+      const ox = (Math.random() - 0.5) * 15;
+      const oy = (Math.random() - 0.5) * 15;
+      const len = 10 + speed * 0.03;
+      const angle = Math.atan2(player.vy, player.vx) + Math.PI;
+      ctx.beginPath();
+      ctx.moveTo(px + ox, py + oy);
+      ctx.lineTo(px + ox + Math.cos(angle) * len, py + oy + Math.sin(angle) * len);
+      ctx.stroke();
+    }
+  }
+
+  // Trail
+  for (let i = 0; i < trail.length; i++) {
+    const t = trail[i];
+    const a = t.life / 0.4;
+    ctx.globalAlpha = a * 0.3;
+    ctx.fillStyle = '#88aacc';
+    ctx.beginPath();
+    ctx.arc(t.x - camX, t.y, PLAYER_RADIUS * a * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Stick figure
+  const swing = attachedHook ? Math.sin(time * 5) * 0.2 : Math.atan2(player.vy, player.vx) * 0.3;
+
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(swing);
+
+  // Head
+  ctx.fillStyle = '#ffcc88';
+  ctx.beginPath();
+  ctx.arc(0, -12, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#dd9955';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Eyes
+  ctx.fillStyle = '#222';
+  ctx.fillRect(2, -13, 2, 2);
+  ctx.fillRect(-3, -13, 2, 2);
+
+  // Body
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(0, -6);
+  ctx.lineTo(0, 8);
+  ctx.stroke();
+
+  // Arms
+  const armSwing = attachedHook ? 0.5 : Math.sin(time * 8) * 0.4;
+  ctx.beginPath();
+  ctx.moveTo(0, -2);
+  ctx.lineTo(-8, 2 + Math.sin(time * 6 + armSwing) * 4);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, -2);
+  ctx.lineTo(8, 2 - Math.sin(time * 6 + armSwing) * 4);
+  ctx.stroke();
+
+  // Legs
+  const legSwing = attachedHook ? Math.sin(time * 4) * 3 : Math.sin(time * 10) * 5;
+  ctx.beginPath();
+  ctx.moveTo(0, 8);
+  ctx.lineTo(-5, 16 + legSwing);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, 8);
+  ctx.lineTo(5, 16 - legSwing);
+  ctx.stroke();
+
+  ctx.restore();
+
+  // Glow around player
+  ctx.fillStyle = 'rgba(100,180,255,0.06)';
+  ctx.beginPath();
+  ctx.arc(px, py, 25, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    const a = Math.max(0, p.life / p.maxLife);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x - camX, p.y, p.size * a, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawHUD() {
+  const dist = Math.floor(distance);
+  ctx.font = 'bold ' + Math.min(28, W * 0.04) + 'px Segoe UI';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#fff';
+  ctx.fillText(dist + 'm', 14, 32);
+
+  ctx.font = Math.min(14, W * 0.02) + 'px Segoe UI';
+  ctx.fillStyle = '#886';
+  ctx.textAlign = 'right';
+  ctx.fillText('Best: ' + bestDistance + 'm', W - 14, 28);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#668';
+  ctx.fillText('Hooks: ' + hooksPassed, W / 2, 28);
+
+  // Control hint — fades after first few hooks
+  if (hooksPassed < 3) {
+    const hintAlpha = Math.max(0, 1 - hooksPassed * 0.3);
+    ctx.globalAlpha = hintAlpha * 0.6;
+    ctx.font = Math.min(16, W * 0.022) + 'px Segoe UI';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(attachedHook ? (player.vx > 30 ? 'Tap/Space to fly!' : 'Left/Right to swing, Tap when ready!') : 'Tap/Space to grab!', W / 2, H * 0.92);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawTitle() {
+  drawBackground();
+
+  // Animated stick figure swinging
+  const demoT = time;
+  const demoX = W * 0.5 + Math.sin(demoT * 1.5) * 80;
+  const demoY = H * 0.35 + Math.cos(demoT * 1.5) * 60;
+  const hookX = W * 0.5;
+  const hookY = H * 0.15;
+
+  // Hook
+  ctx.fillStyle = '#ffcc44';
+  ctx.beginPath(); ctx.arc(hookX, hookY, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(100,100,120,0.3)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(hookX, 0); ctx.lineTo(hookX, hookY); ctx.stroke();
+
+  // Rope
+  ctx.strokeStyle = '#aabbcc'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(hookX, hookY);
+  ctx.quadraticCurveTo((hookX + demoX) / 2, (hookY + demoY) / 2 + 15, demoX, demoY);
+  ctx.stroke();
+
+  // Stick figure
+  ctx.save(); ctx.translate(demoX, demoY);
+  ctx.rotate(Math.sin(demoT * 1.5) * 0.3);
+  ctx.fillStyle = '#ffcc88';
+  ctx.beginPath(); ctx.arc(0, -12, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(0, 8); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, -2); ctx.lineTo(-8, 4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, -2); ctx.lineTo(8, 0); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, 8); ctx.lineTo(-5, 18); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, 8); ctx.lineTo(5, 16); ctx.stroke();
+  ctx.restore();
+
+  ctx.font = 'bold ' + Math.min(48, W * 0.07) + 'px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffcc44';
+  ctx.fillText('ROPE SWING', W / 2, H * 0.65);
+
+  ctx.font = Math.min(18, W * 0.028) + 'px Segoe UI';
+  ctx.fillStyle = '#aaa';
+  ctx.fillText('Left/Right to swing, Tap/Space to grab & release', W / 2, H * 0.72);
+  ctx.fillText('Build momentum and fly to the next hook!', W / 2, H * 0.77);
+
+  if (bestDistance > 0) {
+    ctx.fillStyle = '#ff8';
+    ctx.fillText('Best: ' + bestDistance + 'm', W / 2, H * 0.83);
+  }
+
+  const pulse = 0.6 + Math.sin(time * 3) * 0.4;
+  ctx.globalAlpha = pulse;
+  ctx.font = 'bold ' + Math.min(24, W * 0.035) + 'px Segoe UI';
+  ctx.fillStyle = '#7f7';
+  ctx.fillText('Tap to Start', W / 2, H * 0.92);
+  ctx.globalAlpha = 1;
+}
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, 0, W, H);
+
+  const dist = Math.floor(distance);
+  ctx.font = 'bold ' + Math.min(42, W * 0.06) + 'px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ff6644';
+  ctx.fillText('SPLAT!', W / 2, H * 0.3);
+
+  ctx.font = Math.min(28, W * 0.04) + 'px Segoe UI';
+  ctx.fillStyle = '#fff';
+  ctx.fillText(dist + ' metres', W / 2, H * 0.42);
+  ctx.fillText(hooksPassed + ' hooks', W / 2, H * 0.49);
+
+  if (dist >= bestDistance && dist > 0) {
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold ' + Math.min(20, W * 0.03) + 'px Segoe UI';
+    ctx.fillText('NEW BEST!', W / 2, H * 0.57);
+  }
+
+  if (deathTimer > 0.5) {
+    const pulse = 0.6 + Math.sin(time * 3) * 0.4;
+    ctx.globalAlpha = pulse;
+    ctx.font = 'bold ' + Math.min(22, W * 0.032) + 'px Segoe UI';
+    ctx.fillStyle = '#7f7';
+    ctx.fillText('Tap to Retry', W / 2, H * 0.75);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+// LOOP
+// ============================================================
+let lastTime = performance.now();
+
+function loop() {
+  const now = performance.now();
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+
+  update(dt);
+
+  ctx.clearRect(0, 0, W, H);
+  if (state === 'title') { drawTitle(); }
+  else {
+    drawBackground();
+    drawHooks();
+    drawRope();
+    drawPlayer();
+    drawParticles();
+    drawHUD();
+    if (state === 'dead') drawGameOver();
+  }
+
+  requestAnimationFrame(loop);
+}
+loop();
+
+})();
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px 'Segoe UI',Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px;">
+  <span id="vc-count">...</span> Players
+</div>
+<script>
+(function(){
+  var G='rope-swing',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

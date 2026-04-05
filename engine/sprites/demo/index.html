@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SpriteForge v2 — Demo</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', Arial, sans-serif; padding: 20px; }
+h1 { color: #88aaff; margin-bottom: 8px; }
+h2 { color: #aaccff; margin: 20px 0 8px; font-size: 18px; }
+.subtitle { color: #556; margin-bottom: 20px; }
+.row { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; }
+.sprite-box {
+  background: #12122a; border: 1px solid #2a2a4a; border-radius: 8px;
+  padding: 12px; text-align: center; min-width: 100px;
+}
+.sprite-box canvas {
+  image-rendering: pixelated; image-rendering: crisp-edges;
+  border: 1px solid #2a2a4a; background: #0a0a1a; display: block; margin: 0 auto;
+}
+.label { font-size: 12px; color: #888; margin-top: 6px; }
+.info { font-size: 11px; color: #556; }
+canvas#big-preview {
+  image-rendering: pixelated; image-rendering: crisp-edges;
+  background: #0a0a1a; border: 1px solid #2a2a4a; border-radius: 8px;
+  display: block; margin: 12px 0;
+}
+pre { background: #12122a; border: 1px solid #2a2a4a; border-radius: 6px; padding: 12px; font-size: 12px; color: #aaccee; overflow-x: auto; margin: 8px 0 16px; }
+</style>
+</head>
+<body>
+
+<h1>SpriteForge v2 — Infrastructure Demo</h1>
+<p class="subtitle">PixelCanvas + ColorRamp + PostProcess + buildSheet. Games write custom draw functions.</p>
+
+<h2>Example Sprites (custom-drawn, click to animate)</h2>
+<div class="row" id="examples-row"></div>
+
+<h2>Animation Preview</h2>
+<canvas id="big-preview" width="256" height="256"></canvas>
+<div id="anim-info" class="info"></div>
+
+<script>
+// ============================================================
+// SpriteForge v2 — Tier 3 Pixel-Level Sprite Engine
+// ============================================================
+// Procedural sprite generation with pixel-level rendering,
+// directional shading, tinted outlines, and hue-shifted palettes.
+// Designed for inlining into single-file HTML games.
+//
+// Usage:
+//   const { sheet, animator } = SpriteForge.character({
+//     style: 'chibi',
+//     colors: { skin: '#ffcc99', hair: '#553322', shirt: '#3355aa', ... },
+//     body: { build: 'medium', hair: 'flowing' },
+//     animations: { idle: { frames: 4, speed: 0.2 }, walk: { frames: 6, speed: 0.1 } },
+//   });
+//   // In game loop:
+//   animator.play('walk');
+//   animator.update(dt);
+//   animator.draw(ctx, x, y);
+// ============================================================
+
+'use strict';
+
+// ============================================================
+// UTILITIES
+// ============================================================
+
+function sf2_makeCanvas(w, h) {
+  // Always use DOM canvas — OffscreenCanvas has drawImage compat issues on file://
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+function sf2_seededRNG(seed) {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function sf2_hashStr(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  return h;
+}
+
+// ============================================================
+// MODULE A: COLOR UTILITIES & RAMP GENERATION
+// ============================================================
+
+function sf2_hexToRGB(hex) {
+  if (typeof hex !== 'string') return hex;
+  hex = hex.replace('#', '');
+  if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return {
+    r: parseInt(hex.slice(0,2), 16),
+    g: parseInt(hex.slice(2,4), 16),
+    b: parseInt(hex.slice(4,6), 16),
+  };
+}
+
+function sf2_rgbToHSL(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return { h: h * 360, s, l };
+}
+
+function sf2_hslToRGB(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  h /= 360;
+  let r, g, b;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+}
+
+function sf2_packRGBA(r, g, b, a) {
+  return ((a & 0xFF) << 24) | ((b & 0xFF) << 16) | ((g & 0xFF) << 8) | (r & 0xFF);
+}
+
+function sf2_unpackRGBA(v) {
+  return { r: v & 0xFF, g: (v >> 8) & 0xFF, b: (v >> 16) & 0xFF, a: (v >> 24) & 0xFF };
+}
+
+const ColorRamp = {
+  // Generate a 4-tone ramp with hue shifting
+  generate(baseHex) {
+    const rgb = sf2_hexToRGB(baseHex);
+    const hsl = sf2_rgbToHSL(rgb.r, rgb.g, rgb.b);
+
+    const deepShadow = sf2_hslToRGB(
+      hsl.h + 20, // cool shift
+      Math.min(1, hsl.s * 0.80),
+      Math.max(0.05, hsl.l * 0.45)
+    );
+    const shadow = sf2_hslToRGB(
+      hsl.h + 10,
+      Math.min(1, hsl.s * 0.90),
+      Math.max(0.08, hsl.l * 0.70)
+    );
+    const base = rgb;
+    const highlight = sf2_hslToRGB(
+      hsl.h - 15, // warm shift
+      Math.min(1, hsl.s * 0.85),
+      Math.min(0.95, hsl.l * 1.30)
+    );
+
+    return [deepShadow, shadow, base, highlight];
+  },
+
+  // Generate packed RGBA values
+  generatePacked(baseHex) {
+    return ColorRamp.generate(baseHex).map(c => sf2_packRGBA(c.r, c.g, c.b, 255));
+  },
+
+  // Build a complete indexed palette from color group definitions
+  // Returns { palette: Uint32Array, groups: { name: { startIdx, ramp } }, groupForIndex: Uint8Array }
+  buildPalette(colorGroups) {
+    // Index 0 = transparent
+    const palette = new Uint32Array(256);
+    const groupForIndex = new Uint8Array(256);
+    const groups = {};
+    palette[0] = 0; // transparent
+    let idx = 1;
+    let groupId = 1;
+
+    for (const [name, baseHex] of Object.entries(colorGroups)) {
+      let ramp;
+      if (name === 'eyes') {
+        // Special eye palette: pupil(near-black), iris(user color), white, specular(bright white)
+        const iris = sf2_hexToRGB(baseHex);
+        ramp = [
+          sf2_packRGBA(15, 10, 20, 255),           // 0: pupil — near black
+          sf2_packRGBA(iris.r, iris.g, iris.b, 255), // 1: iris — user's eye color
+          sf2_packRGBA(240, 240, 245, 255),          // 2: white of eye
+          sf2_packRGBA(255, 255, 255, 255),          // 3: specular highlight
+        ];
+      } else {
+        ramp = ColorRamp.generatePacked(baseHex);
+      }
+      const startIdx = idx;
+      for (let i = 0; i < 4; i++) {
+        palette[idx] = ramp[i];
+        groupForIndex[idx] = groupId;
+        idx++;
+      }
+      groups[name] = { startIdx, groupId, ramp };
+      groupId++;
+    }
+
+    // Reserve index for outline (will be set per-pixel by post-processing)
+    palette[idx] = sf2_packRGBA(0, 0, 0, 255); // black fallback
+    const outlineIdx = idx;
+    idx++;
+
+    return { palette, groups, groupForIndex, outlineIdx, nextIdx: idx };
+  },
+};
+
+// ============================================================
+// MODULE B: PIXEL CANVAS
+// ============================================================
+
+class PixelCanvas {
+  constructor(width, height) {
+    this.width = width;
+    this.height = height;
+    this.pixels = new Uint8Array(width * height);       // palette index
+    this.groupMap = new Uint8Array(width * height);      // color group ID
+    this.palette = null;         // Uint32Array(256), set by setPalette
+    this.groupForIndex = null;   // Uint8Array(256), maps palette idx -> group ID
+  }
+
+  setPalette(palette, groupForIndex) {
+    this.palette = palette;
+    this.groupForIndex = groupForIndex;
+  }
+
+  clear() {
+    this.pixels.fill(0);
+    this.groupMap.fill(0);
+  }
+
+  // ---- Pixel Access ----
+
+  setPixel(x, y, idx) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+    const off = y * this.width + x;
+    this.pixels[off] = idx;
+    if (this.groupForIndex) this.groupMap[off] = this.groupForIndex[idx];
+  }
+
+  getPixel(x, y) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return 0;
+    return this.pixels[y * this.width + x];
+  }
+
+  isFilled(x, y) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return false;
+    return this.pixels[y * this.width + x] !== 0;
+  }
+
+  // ---- Drawing Primitives ----
+
+  hline(x, y, len, idx) {
+    for (let i = 0; i < len; i++) this.setPixel(x + i, y, idx);
+  }
+
+  vline(x, y, len, idx) {
+    for (let i = 0; i < len; i++) this.setPixel(x, y + i, idx);
+  }
+
+  fillRect(x, y, w, h, idx) {
+    for (let row = 0; row < h; row++) {
+      this.hline(x, y + row, w, idx);
+    }
+  }
+
+  // Midpoint ellipse algorithm
+  fillEllipse(cx, cy, rx, ry, idx) {
+    if (rx <= 0 || ry <= 0) return;
+    cx = Math.round(cx); cy = Math.round(cy);
+    rx = Math.round(rx); ry = Math.round(ry);
+    const rx2 = rx * rx, ry2 = ry * ry;
+    for (let y = -ry; y <= ry; y++) {
+      const yf = y * y;
+      const xSpan = Math.floor(rx * Math.sqrt(1 - yf / ry2));
+      this.hline(cx - xSpan, cy + y, xSpan * 2 + 1, idx);
+    }
+  }
+
+  fillCircle(cx, cy, r, idx) {
+    this.fillEllipse(cx, cy, r, r, idx);
+  }
+
+  // Bresenham line
+  line(x0, y0, x1, y1, idx) {
+    x0 = Math.round(x0); y0 = Math.round(y0);
+    x1 = Math.round(x1); y1 = Math.round(y1);
+    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    while (true) {
+      this.setPixel(x0, y0, idx);
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x0 += sx; }
+      if (e2 < dx) { err += dx; y0 += sy; }
+    }
+  }
+
+  // Fill triangle via scanline
+  fillTriangle(x0, y0, x1, y1, x2, y2, idx) {
+    // Sort by Y
+    if (y0 > y1) { [x0,y0,x1,y1] = [x1,y1,x0,y0]; }
+    if (y0 > y2) { [x0,y0,x2,y2] = [x2,y2,x0,y0]; }
+    if (y1 > y2) { [x1,y1,x2,y2] = [x2,y2,x1,y1]; }
+    const lerp = (a, b, t) => a + (b - a) * t;
+    for (let y = Math.round(y0); y <= Math.round(y2); y++) {
+      let xa, xb;
+      if (y < y1) {
+        if (y1 === y0) continue;
+        const t1 = (y - y0) / (y1 - y0);
+        const t2 = (y - y0) / (y2 - y0);
+        xa = lerp(x0, x1, t1);
+        xb = lerp(x0, x2, t2);
+      } else {
+        if (y2 === y1) continue;
+        const t1 = (y - y1) / (y2 - y1);
+        const t2 = (y - y0) / (y2 - y0);
+        xa = lerp(x1, x2, t1);
+        xb = lerp(x0, x2, t2);
+      }
+      if (xa > xb) { const tmp = xa; xa = xb; xb = tmp; }
+      this.hline(Math.round(xa), y, Math.round(xb - xa) + 1, idx);
+    }
+  }
+
+  // ---- Bulk Operations ----
+
+  mirrorHorizontal() {
+    const { width, height, pixels, groupMap } = this;
+    const half = Math.floor(width / 2);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < half; x++) {
+        const src = y * width + x;
+        const dst = y * width + (width - 1 - x);
+        pixels[dst] = pixels[src];
+        groupMap[dst] = groupMap[src];
+      }
+    }
+  }
+
+  scatterNoise(x, y, w, h, idx, density, rng) {
+    rng = rng || Math.random;
+    for (let py = y; py < y + h; py++) {
+      for (let px = x; px < x + w; px++) {
+        if (this.isFilled(px, py) && rng() < density) {
+          this.setPixel(px, py, idx);
+        }
+      }
+    }
+  }
+
+  ditherCheckerboard(x, y, w, h, idxA, idxB) {
+    for (let py = y; py < y + h; py++) {
+      for (let px = x; px < x + w; px++) {
+        if (this.isFilled(px, py)) {
+          this.setPixel(px, py, (px + py) % 2 === 0 ? idxA : idxB);
+        }
+      }
+    }
+  }
+
+  // ---- Export ----
+
+  toCanvas() {
+    const cvs = sf2_makeCanvas(this.width, this.height);
+    const ctx = cvs.getContext('2d');
+    const imgData = ctx.createImageData(this.width, this.height);
+    const data = imgData.data;
+    const { pixels, palette, width, height } = this;
+    for (let i = 0; i < width * height; i++) {
+      const idx = pixels[i];
+      if (idx === 0) continue; // transparent
+      const rgba = palette[idx];
+      const off = i * 4;
+      data[off]     = rgba & 0xFF;
+      data[off + 1] = (rgba >> 8) & 0xFF;
+      data[off + 2] = (rgba >> 16) & 0xFF;
+      data[off + 3] = (rgba >> 24) & 0xFF;
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return cvs;
+  }
+
+  blitTo(ctx, destX, destY) {
+    const cvs = this.toCanvas();
+    ctx.drawImage(cvs, destX, destY);
+  }
+}
+
+// ============================================================
+// MODULE C: POST-PROCESSING
+// ============================================================
+
+const PostProcess = {
+  // Direction vectors for 8 neighbors
+  _dirs: [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]],
+
+  // Normalize light direction
+  _lightDir: (function() {
+    const lx = -0.7, ly = -0.7;
+    const len = Math.sqrt(lx*lx + ly*ly);
+    return { x: lx/len, y: ly/len };
+  })(),
+
+  // Pass 1: Directional shading
+  // Remaps each filled pixel to the correct tone within its color group
+  // based on surface normal computed from empty neighbors
+  applyShading(pc, groups) {
+    const { width, height, pixels, groupMap } = pc;
+    const dirs = PostProcess._dirs;
+    const light = PostProcess._lightDir;
+    const newPixels = new Uint8Array(pixels.length);
+    newPixels.set(pixels);
+
+    // Build group base index lookup: groupId -> startIdx
+    const groupBase = new Uint8Array(256);
+    for (const g of Object.values(groups)) {
+      groupBase[g.groupId] = g.startIdx;
+    }
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const off = y * width + x;
+        if (pixels[off] === 0) continue; // transparent
+
+        const gid = groupMap[off];
+        if (gid === 0) continue;
+        const base = groupBase[gid];
+        if (base === 0) continue;
+
+        // Compute surface normal from empty neighbors
+        let nx = 0, ny = 0;
+        let emptyCount = 0;
+        for (const [dx, dy] of dirs) {
+          const px2 = x + dx, py2 = y + dy;
+          if (px2 < 0 || px2 >= width || py2 < 0 || py2 >= height || pixels[py2 * width + px2] === 0) {
+            // Empty neighbor — normal points away from it (toward center)
+            nx -= dx;
+            ny -= dy;
+            emptyCount++;
+          }
+        }
+
+        if (emptyCount === 0) {
+          // Interior pixel — use base tone
+          newPixels[off] = base + 2; // base
+          continue;
+        }
+
+        // Normalize
+        const len = Math.sqrt(nx * nx + ny * ny);
+        if (len > 0) { nx /= len; ny /= len; }
+
+        // Dot with light direction
+        const dot = nx * light.x + ny * light.y;
+
+        // Map to tone (0=deepShadow, 1=shadow, 2=base, 3=highlight)
+        let tone;
+        if (dot > 0.4) tone = 3;       // highlight (facing light)
+        else if (dot > -0.1) tone = 2;  // base
+        else if (dot > -0.5) tone = 1;  // shadow
+        else tone = 0;                   // deep shadow
+
+        newPixels[off] = base + tone;
+      }
+    }
+
+    pc.pixels.set(newPixels);
+  },
+
+  // Pass 2: Tinted outlines
+  // Empty pixels adjacent to filled pixels become the deepShadow of the nearest filled neighbor's group
+  applyOutlines(pc, groups, mode) {
+    if (mode === 'none') return;
+
+    const { width, height, pixels, groupMap } = pc;
+    const dirs = PostProcess._dirs;
+    const newPixels = new Uint8Array(pixels.length);
+    const newGroupMap = new Uint8Array(groupMap.length);
+    newPixels.set(pixels);
+    newGroupMap.set(groupMap);
+
+    // Build group base index lookup
+    const groupBase = new Uint8Array(256);
+    for (const g of Object.values(groups)) {
+      groupBase[g.groupId] = g.startIdx;
+    }
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const off = y * width + x;
+        if (pixels[off] !== 0) continue; // skip filled pixels
+
+        // Check neighbors for filled pixels
+        let nearestGroup = 0;
+        let found = false;
+        // Check cardinals first (stronger adjacency), then diagonals
+        for (const [dx, dy] of dirs) {
+          const px2 = x + dx, py2 = y + dy;
+          if (px2 >= 0 && px2 < width && py2 >= 0 && py2 < height) {
+            const noff = py2 * width + px2;
+            if (pixels[noff] !== 0) {
+              nearestGroup = groupMap[noff];
+              found = true;
+              break;
+            }
+          }
+        }
+
+        if (!found) continue;
+
+        const base = groupBase[nearestGroup];
+        if (base === 0) continue;
+
+        if (mode === 'tinted') {
+          // Use the deepShadow tone of the neighbor's group
+          newPixels[off] = base + 0; // deepShadow
+        } else if (mode === 'black') {
+          // Use a fixed dark color — we'll set palette index 255 to black
+          newPixels[off] = 255;
+        } else if (mode === 'silhouette') {
+          // Only outline if ALL pixels on one side are empty (exterior edge)
+          let leftEmpty = true, rightEmpty = true, topEmpty = true, bottomEmpty = true;
+          for (let dy = -1; dy <= 1; dy++) {
+            if (x - 1 >= 0 && pixels[(y+dy) * width + (x-1)] !== 0) leftEmpty = false;
+            if (x + 1 < width && pixels[(y+dy) * width + (x+1)] !== 0) rightEmpty = false;
+          }
+          for (let dx = -1; dx <= 1; dx++) {
+            if (y - 1 >= 0 && pixels[(y-1) * width + (x+dx)] !== 0) topEmpty = false;
+            if (y + 1 < height && pixels[(y+1) * width + (x+dx)] !== 0) bottomEmpty = false;
+          }
+          if (leftEmpty || rightEmpty || topEmpty || bottomEmpty) {
+            newPixels[off] = base + 0;
+          }
+        }
+
+        if (newPixels[off] !== 0) {
+          newGroupMap[off] = nearestGroup;
+        }
+      }
+    }
+
+    pc.pixels.set(newPixels);
+    pc.groupMap.set(newGroupMap);
+  },
+};
+
+// ============================================================
+// MODULE D: SHEET BUILDER — helper to turn custom draw functions into animated sprite sheets
+// ============================================================
+
+// Usage:
+//   const { sheet, animator } = SpriteForge.buildSheet({
+//     frameWidth: 24, frameHeight: 32,
+//     palette: ColorRamp.buildPalette({ skin: '#ffddbb', hair: '#664422', ... }),
+//     outlineMode: 'tinted',
+//     animations: {
+//       idle: { frames: 4, speed: 0.2, draw: (pc, pal, t) => { /* draw one frame */ } },
+//       walk: { frames: 6, speed: 0.1, draw: (pc, pal, t) => { /* draw one frame */ } },
+//     },
+//   });
+//
+// Each draw function receives:
+//   pc   — PixelCanvas (cleared, palette set)
+//   pal  — palette object from ColorRamp.buildPalette
+//   t    — animation progress 0..1 for this frame
+//
+// Shading + outlines are applied automatically after each draw call.
+// To protect eyes/details from shading, draw them in the optional `drawPost` callback
+// which runs after shading but before outlines.
+
+// ============================================================
+// MODULE G: SPRITESHEET, ANIMATOR, CACHE (carried from v1)
+// ============================================================
+
+class SpriteSheet {
+  constructor(canvas, frameWidth, frameHeight, cols, rows) {
+    this.canvas = canvas;
+    this.frameWidth = frameWidth;
+    this.frameHeight = frameHeight;
+    this.cols = cols;
+    this.rows = rows;
+    this._names = {};
+  }
+
+  getFrame(index) {
+    const col = index % this.cols;
+    const row = Math.floor(index / this.cols);
+    return {
+      x: col * this.frameWidth,
+      y: row * this.frameHeight,
+      w: this.frameWidth,
+      h: this.frameHeight,
+      canvas: this.canvas,
+    };
+  }
+
+  nameFrame(name, index) { this._names[name] = index; }
+
+  getFrameByName(name) {
+    const idx = this._names[name];
+    return idx != null ? this.getFrame(idx) : null;
+  }
+
+  drawFrame(ctx, index, x, y, opts) {
+    const f = this.getFrame(index);
+    if (!f) return;
+    const o = opts || {};
+    ctx.save();
+    const scale = o.scale || 1;
+    const alpha = o.alpha != null ? o.alpha : 1;
+    ctx.globalAlpha = alpha;
+    if (o.flipX || o.flipY) {
+      ctx.translate(x + f.w * scale / 2, y + f.h * scale / 2);
+      ctx.scale(o.flipX ? -1 : 1, o.flipY ? -1 : 1);
+      ctx.drawImage(f.canvas, f.x, f.y, f.w, f.h, -f.w * scale / 2, -f.h * scale / 2, f.w * scale, f.h * scale);
+    } else {
+      ctx.drawImage(f.canvas, f.x, f.y, f.w, f.h, x, y, f.w * scale, f.h * scale);
+    }
+    ctx.restore();
+  }
+}
+
+class SpriteAnimator {
+  constructor(sheet, animations) {
+    this.sheet = sheet;
+    this.animations = animations;
+    this.current = null;
+    this.frame = 0;
+    this.elapsed = 0;
+    this.playing = false;
+    this._dir = 1; // 1 forward, -1 backward (pingpong)
+  }
+
+  play(name, opts) {
+    if (this.current === name && this.playing) return;
+    this.current = name;
+    this.frame = 0;
+    this.elapsed = 0;
+    this.playing = true;
+    this._dir = 1;
+    this._opts = opts || {};
+  }
+
+  stop() { this.playing = false; }
+
+  update(dt) {
+    if (!this.playing || !this.current) return;
+    const anim = this.animations[this.current];
+    if (!anim) return;
+
+    this.elapsed += dt;
+    if (this.elapsed >= anim.speed) {
+      this.elapsed -= anim.speed;
+      this.frame += this._dir;
+
+      if (this.frame >= anim.frames.length) {
+        if (anim.pingpong) {
+          this._dir = -1;
+          this.frame = anim.frames.length - 2;
+        } else if (anim.loop !== false) {
+          this.frame = 0;
+        } else {
+          this.frame = anim.frames.length - 1;
+          this.playing = false;
+          if (anim.onComplete) anim.onComplete();
+        }
+      } else if (this.frame < 0) {
+        this._dir = 1;
+        this.frame = 1;
+      }
+    }
+  }
+
+  getCurrentFrame() {
+    if (!this.current) return 0;
+    const anim = this.animations[this.current];
+    if (!anim) return 0;
+    return anim.frames[Math.max(0, Math.min(this.frame, anim.frames.length - 1))];
+  }
+
+  draw(ctx, x, y, opts) {
+    this.sheet.drawFrame(ctx, this.getCurrentFrame(), x, y, opts);
+  }
+}
+
+class SpriteCache {
+  constructor(maxEntries) {
+    this.max = maxEntries || 128;
+    this._map = new Map();
+  }
+
+  get(key) {
+    const entry = this._map.get(key);
+    if (!entry) return null;
+    entry.ts = Date.now();
+    return entry.value;
+  }
+
+  set(key, value) {
+    if (this._map.size >= this.max) {
+      let oldest = null, oldestKey = null;
+      for (const [k, v] of this._map) {
+        if (!oldest || v.ts < oldest.ts) { oldest = v; oldestKey = k; }
+      }
+      if (oldestKey) this._map.delete(oldestKey);
+    }
+    this._map.set(key, { value, ts: Date.now() });
+  }
+
+  has(key) { return this._map.has(key); }
+  clear() { this._map.clear(); }
+}
+
+// ============================================================
+// SPRITEFORGE v2 PUBLIC API
+// ============================================================
+
+const SpriteForge = {
+  VERSION: 2,
+
+  // Build a sprite sheet from custom drawing functions.
+  // This is the primary API — each game writes its own draw functions.
+  //
+  // config = {
+  //   frameWidth, frameHeight,
+  //   palette: ColorRamp.buildPalette({...}),
+  //   outlineMode: 'tinted' | 'black' | 'none',
+  //   animations: {
+  //     idle: { frames: 4, speed: 0.2, loop: true, pingpong: true,
+  //             draw: (pc, pal, t) => { ... },
+  //             drawPost: (pc, pal, t) => { ... }  // optional: after shading, before outlines
+  //     },
+  //   },
+  // }
+  buildSheet(config) {
+    const fw = config.frameWidth;
+    const fh = config.frameHeight;
+    const pal = config.palette;
+    const outlineMode = config.outlineMode || 'tinted';
+
+    // Ensure black outline index
+    pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+
+    // Count total frames
+    let totalFrames = 0;
+    const animList = [];
+    for (const [name, def] of Object.entries(config.animations)) {
+      animList.push({ name, ...def });
+      totalFrames += def.frames;
+    }
+
+    const cols = Math.ceil(Math.sqrt(totalFrames));
+    const rows = Math.ceil(totalFrames / cols);
+    const sheetCanvas = sf2_makeCanvas(cols * fw, rows * fh);
+    const sheetCtx = sheetCanvas.getContext('2d');
+    sheetCtx.imageSmoothingEnabled = false;
+
+    let frameIdx = 0;
+    const animationDefs = {};
+
+    for (const anim of animList) {
+      const frameIndices = [];
+      for (let f = 0; f < anim.frames; f++) {
+        const pc = new PixelCanvas(fw, fh);
+        pc.setPalette(pal.palette, pal.groupForIndex);
+        const t = anim.frames > 1 ? f / (anim.frames - 1) : 0;
+
+        // Draw the frame
+        anim.draw(pc, pal, t);
+
+        // Post-processing
+        PostProcess.applyShading(pc, pal.groups);
+
+        // Optional post-shading draw (for eyes, details that shouldn't be shaded)
+        if (anim.drawPost) anim.drawPost(pc, pal, t);
+
+        PostProcess.applyOutlines(pc, pal.groups, outlineMode);
+
+        // Blit to sheet
+        const col = frameIdx % cols;
+        const row = Math.floor(frameIdx / cols);
+        pc.blitTo(sheetCtx, col * fw, row * fh);
+        frameIndices.push(frameIdx);
+        frameIdx++;
+      }
+
+      animationDefs[anim.name] = {
+        frames: frameIndices,
+        speed: anim.speed || 0.15,
+        loop: anim.loop !== false,
+        pingpong: !!anim.pingpong,
+      };
+    }
+
+    const sheet = new SpriteSheet(sheetCanvas, fw, fh, cols, rows);
+    const animator = new SpriteAnimator(sheet, animationDefs);
+    const firstName = animList[0] ? animList[0].name : 'idle';
+    animator.play(firstName);
+
+    return { sheet, animator, animations: animationDefs };
+  },
+
+  clearCache() {},
+};
+
+// Export for inline usage (no modules)
+if (typeof window !== 'undefined') {
+  window.SpriteForge = SpriteForge;
+  window.SpriteSheet = SpriteSheet;
+  window.SpriteAnimator = SpriteAnimator;
+  window.PixelCanvas = PixelCanvas;
+  window.ColorRamp = ColorRamp;
+  window.PostProcess = PostProcess;
+}
+
+</script>
+<script>
+'use strict';
+
+const previewCtx = document.getElementById('big-preview').getContext('2d');
+previewCtx.imageSmoothingEnabled = false;
+let activeAnimator = null, activeSheet = null, activeScale = 1;
+
+const examplesRow = document.getElementById('examples-row');
+
+// ---- Blob ----
+function makeBlob() {
+  const pal = ColorRamp.buildPalette({ body: '#44aa44', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 24, frameHeight: 24, palette: pal, outlineMode: 'tinted',
+    animations: {
+      idle: {
+        frames: 4, speed: 0.2, pingpong: true,
+        draw: (pc, pal, t) => {
+          const cx = 12, cy = 13, body = pal.groups.body.startIdx + 2;
+          const squish = Math.sin(t * Math.PI * 2) * 0.08;
+          const rx = Math.floor(8 * (1 + squish)), ry = Math.floor(7 * (1 - squish));
+          pc.fillEllipse(cx, cy, rx, ry, body);
+          pc.fillRect(cx - rx, cy, rx * 2 + 1, Math.floor(ry * 0.3), body);
+          pc.fillEllipse(cx - 2, cy - 3, 3, 2, body + 1);
+        },
+        drawPost: (pc, pal, t) => {
+          const eye = pal.groups.eyes.startIdx;
+          pc.fillCircle(9, 11, 2, eye + 2); pc.fillCircle(15, 11, 2, eye + 2);
+          pc.setPixel(9, 11, eye); pc.setPixel(15, 11, eye);
+          pc.setPixel(8, 10, eye + 3); pc.setPixel(14, 10, eye + 3);
+          pc.hline(10, 15, 4, pal.groups.body.startIdx);
+        },
+      },
+    },
+  });
+}
+
+// ---- Knight ----
+function makeKnight() {
+  const pal = ColorRamp.buildPalette({ skin: '#ffddbb', armor: '#8899aa', hair: '#553322', cape: '#cc3333', eyes: '#4466aa' });
+  return SpriteForge.buildSheet({
+    frameWidth: 24, frameHeight: 32, palette: pal, outlineMode: 'tinted',
+    animations: {
+      idle: {
+        frames: 4, speed: 0.2, pingpong: true,
+        draw: (pc, pal, t) => {
+          const cx = 12, bob = Math.round(Math.sin(t * Math.PI * 2) * 0.5);
+          const skin = pal.groups.skin.startIdx + 2, armor = pal.groups.armor.startIdx + 2;
+          const hair = pal.groups.hair.startIdx + 2, cape = pal.groups.cape.startIdx + 2;
+          pc.fillRect(cx - 4, 13, 8, 12, cape);
+          pc.fillCircle(cx, 8 + bob, 5, skin);
+          pc.fillEllipse(cx, 5 + bob, 5, 3, armor);
+          pc.fillRect(cx - 5, 7 + bob, 10, 2, armor);
+          pc.fillRect(cx - 5, 9 + bob, 2, 3, hair);
+          pc.fillRect(cx + 4, 9 + bob, 2, 3, hair);
+          pc.fillRect(cx - 5, 14, 10, 8, armor);
+          pc.hline(cx - 4, 20, 8, armor - 1);
+          pc.fillRect(cx - 7, 14, 2, 7, armor);
+          pc.fillRect(cx + 6, 14, 2, 7, armor);
+          pc.fillRect(cx - 7, 21, 2, 2, skin);
+          pc.fillRect(cx + 6, 21, 2, 2, skin);
+          pc.fillRect(cx - 4, 22, 3, 6, armor - 1);
+          pc.fillRect(cx + 2, 22, 3, 6, armor - 1);
+          pc.fillRect(cx - 5, 28, 4, 3, armor - 2);
+          pc.fillRect(cx + 2, 28, 4, 3, armor - 2);
+        },
+        drawPost: (pc, pal, t) => {
+          const eye = pal.groups.eyes.startIdx, bob = Math.round(Math.sin(t * Math.PI * 2) * 0.5);
+          pc.setPixel(10, 8 + bob, eye + 2); pc.setPixel(14, 8 + bob, eye + 2);
+          pc.setPixel(10, 9 + bob, eye); pc.setPixel(14, 9 + bob, eye);
+        },
+      },
+    },
+  });
+}
+
+// ---- Crawling Baby ----
+function makeBaby() {
+  const pal = ColorRamp.buildPalette({ skin: '#ffe0cc', onesie: '#88ccff', hair: '#ddaa66', eyes: '#445533' });
+  return SpriteForge.buildSheet({
+    frameWidth: 24, frameHeight: 16, palette: pal, outlineMode: 'black',
+    animations: {
+      crawl: {
+        frames: 6, speed: 0.08,
+        draw: (pc, pal, t) => {
+          const skin = pal.groups.skin.startIdx + 2, onesie = pal.groups.onesie.startIdx + 2;
+          const hair = pal.groups.hair.startIdx + 2;
+          const crawl = Math.round(Math.sin(t * Math.PI * 2) * 2);
+          pc.fillEllipse(12, 8, 7, 4, onesie);
+          pc.fillCircle(7, 6, 3, onesie);
+          pc.fillCircle(19, 6, 4, skin);
+          pc.fillTriangle(18, 2, 21, 2, 19, 0, hair);
+          pc.fillRect(15 + crawl, 11, 2, 3, skin);
+          pc.fillRect(11 - crawl, 11, 2, 3, skin);
+          pc.fillRect(7 - crawl, 10, 2, 3, onesie);
+          pc.fillRect(4 + crawl, 10, 2, 3, onesie);
+        },
+        drawPost: (pc, pal, t) => {
+          const eye = pal.groups.eyes.startIdx;
+          pc.setPixel(20, 5, eye + 2); pc.setPixel(21, 5, eye + 2);
+          pc.setPixel(20, 6, eye + 1); pc.setPixel(21, 6, eye);
+        },
+      },
+    },
+  });
+}
+
+// ---- Tree ----
+function makeTree() {
+  const pal = ColorRamp.buildPalette({ trunk: '#885533', leaves: '#338833' });
+  return SpriteForge.buildSheet({
+    frameWidth: 24, frameHeight: 32, palette: pal, outlineMode: 'tinted',
+    animations: {
+      idle: {
+        frames: 2, speed: 0.5, pingpong: true,
+        draw: (pc, pal, t) => {
+          const trunk = pal.groups.trunk.startIdx + 2, leaves = pal.groups.leaves.startIdx + 2;
+          const sway = Math.round(Math.sin(t * Math.PI * 2) * 1);
+          pc.fillRect(10, 16, 4, 14, trunk);
+          pc.fillRect(9, 28, 6, 2, trunk);
+          pc.fillEllipse(12 + sway, 12, 9, 7, leaves);
+          pc.fillEllipse(8 + sway, 9, 6, 5, leaves);
+          pc.fillEllipse(15 + sway, 10, 5, 5, leaves);
+          pc.fillEllipse(12 + sway, 6, 7, 5, leaves + 1);
+        },
+      },
+    },
+  });
+}
+
+// ---- Render ----
+const examples = [
+  { name: 'Blob', make: makeBlob },
+  { name: 'Knight', make: makeKnight },
+  { name: 'Baby (crawl)', make: makeBaby },
+  { name: 'Tree', make: makeTree },
+];
+
+for (const ex of examples) {
+  const result = ex.make();
+  const box = document.createElement('div');
+  box.className = 'sprite-box';
+  const scale = 4;
+  const fw = result.sheet.frameWidth, fh = result.sheet.frameHeight;
+  const cvs = document.createElement('canvas');
+  cvs.width = fw * scale; cvs.height = fh * scale;
+  const cctx = cvs.getContext('2d');
+  cctx.imageSmoothingEnabled = false;
+  result.sheet.drawFrame(cctx, 0, 0, 0, { scale });
+  box.appendChild(cvs);
+  const lbl = document.createElement('div'); lbl.className = 'label'; lbl.textContent = ex.name;
+  const inf = document.createElement('div'); inf.className = 'info'; inf.textContent = fw + 'x' + fh;
+  box.appendChild(lbl); box.appendChild(inf);
+  examplesRow.appendChild(box);
+  cvs.style.cursor = 'pointer';
+  cvs.addEventListener('click', () => {
+    activeAnimator = result.animator; activeSheet = result.sheet;
+    activeScale = Math.floor(180 / fh);
+    activeAnimator.play(Object.keys(result.animations)[0]);
+    document.getElementById('anim-info').textContent = ex.name + ' — click to animate @ ' + activeScale + 'x';
+  });
+}
+
+let lastTime = 0;
+function animate(timestamp) {
+  const dt = lastTime ? (timestamp - lastTime) / 1000 : 0;
+  lastTime = timestamp;
+  if (activeAnimator && activeSheet) {
+    activeAnimator.update(dt);
+    const cvs = document.getElementById('big-preview');
+    previewCtx.clearRect(0, 0, cvs.width, cvs.height);
+    const fw = activeSheet.frameWidth, fh = activeSheet.frameHeight;
+    activeAnimator.draw(previewCtx, Math.floor((cvs.width - fw * activeScale) / 2), Math.floor((cvs.height - fh * activeScale) / 2), { scale: activeScale });
+  }
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

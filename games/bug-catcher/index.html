@@ -1,0 +1,3289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bug Catcher - Adelaide</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a2a1a; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: 'Segoe UI', Arial, sans-serif; }
+canvas { display: block; touch-action: none; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  W = canvas.width;
+  H = canvas.height;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// SUPABASE
+// ============================================================
+const _SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+const _SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(g,s){var n=prompt('Score: '+s+'! Enter initials (max 5):');if(!n)return;n=n.trim().slice(0,5).toUpperCase();if(!n)return;try{await fetch(_SU+'/rest/v1/high_scores',{method:'POST',headers:{'apikey':_SK,'Authorization':'Bearer '+_SK,'Content-Type':'application/json'},body:JSON.stringify({game:g,initials:n,score:s})})}catch(e){}}
+
+// ============================================================
+// SFX
+// ============================================================
+var SFX = (function() {
+  var actx = null, muted = false;
+  function getCtx() {
+    if (!actx) try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return null; }
+    if (actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  function play(fn) { if (muted) return; var c = getCtx(); if (c) fn(c); }
+  function osc(c, type, freq, freq2, dur, vol) {
+    var o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, c.currentTime);
+    if (freq2) o.frequency.linearRampToValueAtTime(freq2, c.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.08, c.currentTime);
+    g.gain.linearRampToValueAtTime(0, c.currentTime + dur);
+    o.connect(g); g.connect(c.destination);
+    o.start(); o.stop(c.currentTime + dur);
+  }
+  function noise(c, dur, vol) {
+    var bufSize = c.sampleRate * dur;
+    var buf = c.createBuffer(1, bufSize, c.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < bufSize; i++) d[i] = Math.random() * 2 - 1;
+    var src = c.createBufferSource();
+    src.buffer = buf;
+    var g = c.createGain();
+    g.gain.setValueAtTime(vol, c.currentTime);
+    g.gain.linearRampToValueAtTime(0, c.currentTime + dur);
+    src.connect(g); g.connect(c.destination);
+    src.start(); src.stop(c.currentTime + dur);
+  }
+  return {
+    get muted() { return muted; }, set muted(v) { muted = v; },
+    'catch'() { play(c => { osc(c, 'sine', 600, 1200, 0.12, 0.1); setTimeout(() => osc(c, 'sine', 900, 1400, 0.1, 0.08), 80); }); },
+    miss() { play(c => { osc(c, 'triangle', 300, 200, 0.15, 0.05); }); },
+    rockFlip() { play(c => { noise(c, 0.2, 0.06); osc(c, 'triangle', 200, 100, 0.2, 0.04); }); },
+    treeShake() { play(c => { noise(c, 0.35, 0.05); osc(c, 'sine', 150, 80, 0.3, 0.03); }); },
+    dig() { play(c => { noise(c, 0.25, 0.07); osc(c, 'triangle', 120, 60, 0.25, 0.04); }); },
+    journalOpen() { play(c => { osc(c, 'sine', 500, 700, 0.08, 0.06); osc(c, 'sine', 700, 900, 0.08, 0.05); }); },
+    journalClose() { play(c => { osc(c, 'sine', 700, 500, 0.08, 0.05); }); },
+    rareCatch() { play(c => { osc(c, 'sine', 600, 1200, 0.15, 0.1); setTimeout(() => osc(c, 'sine', 800, 1400, 0.12, 0.09), 100); setTimeout(() => osc(c, 'sine', 1000, 1600, 0.15, 0.08), 200); }); },
+    warning() { play(c => { osc(c, 'square', 600, 400, 0.15, 0.06); }); },
+    select() { play(c => osc(c, 'sine', 800, 600, 0.06, 0.05)); },
+    gameOver() { play(c => { for(var i=0;i<4;i++) setTimeout(()=>osc(c,'sawtooth',300-i*60,150-i*30,0.25,0.08),i*180); }); },
+    sting() { play(c => { osc(c, 'sawtooth', 400, 200, 0.25, 0.1); noise(c, 0.1, 0.04); }); },
+  };
+})();
+
+// ============================================================
+// SPRITEFORGE v2 ENGINE (inlined)
+// ============================================================
+
+function sf2_makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+function sf2_seededRNG(seed) {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function sf2_hashStr(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  return h;
+}
+
+function sf2_hexToRGB(hex) {
+  if (typeof hex !== 'string') return hex;
+  hex = hex.replace('#', '');
+  if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return {
+    r: parseInt(hex.slice(0,2), 16),
+    g: parseInt(hex.slice(2,4), 16),
+    b: parseInt(hex.slice(4,6), 16),
+  };
+}
+
+function sf2_rgbToHSL(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return { h: h * 360, s, l };
+}
+
+function sf2_hslToRGB(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  h /= 360;
+  let r, g, b;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+}
+
+function sf2_packRGBA(r, g, b, a) {
+  return ((a & 0xFF) << 24) | ((b & 0xFF) << 16) | ((g & 0xFF) << 8) | (r & 0xFF);
+}
+
+function sf2_unpackRGBA(v) {
+  return { r: v & 0xFF, g: (v >> 8) & 0xFF, b: (v >> 16) & 0xFF, a: (v >> 24) & 0xFF };
+}
+
+const ColorRamp = {
+  generate(baseHex) {
+    const rgb = sf2_hexToRGB(baseHex);
+    const hsl = sf2_rgbToHSL(rgb.r, rgb.g, rgb.b);
+    const deepShadow = sf2_hslToRGB(hsl.h + 20, Math.min(1, hsl.s * 0.80), Math.max(0.05, hsl.l * 0.45));
+    const shadow = sf2_hslToRGB(hsl.h + 10, Math.min(1, hsl.s * 0.90), Math.max(0.08, hsl.l * 0.70));
+    const base = rgb;
+    const highlight = sf2_hslToRGB(hsl.h - 15, Math.min(1, hsl.s * 0.85), Math.min(0.95, hsl.l * 1.30));
+    return [deepShadow, shadow, base, highlight];
+  },
+  generatePacked(baseHex) {
+    return ColorRamp.generate(baseHex).map(c => sf2_packRGBA(c.r, c.g, c.b, 255));
+  },
+  buildPalette(colorGroups) {
+    const palette = new Uint32Array(256);
+    const groupForIndex = new Uint8Array(256);
+    const groups = {};
+    palette[0] = 0;
+    let idx = 1;
+    let groupId = 1;
+    for (const [name, baseHex] of Object.entries(colorGroups)) {
+      let ramp;
+      if (name === 'eyes') {
+        const iris = sf2_hexToRGB(baseHex);
+        ramp = [
+          sf2_packRGBA(15, 10, 20, 255),
+          sf2_packRGBA(iris.r, iris.g, iris.b, 255),
+          sf2_packRGBA(240, 240, 245, 255),
+          sf2_packRGBA(255, 255, 255, 255),
+        ];
+      } else {
+        ramp = ColorRamp.generatePacked(baseHex);
+      }
+      const startIdx = idx;
+      for (let i = 0; i < 4; i++) {
+        palette[idx] = ramp[i];
+        groupForIndex[idx] = groupId;
+        idx++;
+      }
+      groups[name] = { startIdx, groupId, ramp };
+      groupId++;
+    }
+    palette[idx] = sf2_packRGBA(0, 0, 0, 255);
+    const outlineIdx = idx;
+    idx++;
+    return { palette, groups, groupForIndex, outlineIdx, nextIdx: idx };
+  },
+};
+
+class PixelCanvas {
+  constructor(width, height) {
+    this.width = width;
+    this.height = height;
+    this.pixels = new Uint8Array(width * height);
+    this.groupMap = new Uint8Array(width * height);
+    this.palette = null;
+    this.groupForIndex = null;
+  }
+  setPalette(palette, groupForIndex) {
+    this.palette = palette;
+    this.groupForIndex = groupForIndex;
+  }
+  clear() {
+    this.pixels.fill(0);
+    this.groupMap.fill(0);
+  }
+  setPixel(x, y, idx) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+    const off = y * this.width + x;
+    this.pixels[off] = idx;
+    if (this.groupForIndex) this.groupMap[off] = this.groupForIndex[idx];
+  }
+  getPixel(x, y) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return 0;
+    return this.pixels[y * this.width + x];
+  }
+  isFilled(x, y) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return false;
+    return this.pixels[y * this.width + x] !== 0;
+  }
+  hline(x, y, len, idx) {
+    for (let i = 0; i < len; i++) this.setPixel(x + i, y, idx);
+  }
+  vline(x, y, len, idx) {
+    for (let i = 0; i < len; i++) this.setPixel(x, y + i, idx);
+  }
+  fillRect(x, y, w, h, idx) {
+    for (let row = 0; row < h; row++) this.hline(x, y + row, w, idx);
+  }
+  fillEllipse(cx, cy, rx, ry, idx) {
+    if (rx <= 0 || ry <= 0) return;
+    cx = Math.round(cx); cy = Math.round(cy);
+    rx = Math.round(rx); ry = Math.round(ry);
+    const rx2 = rx * rx, ry2 = ry * ry;
+    for (let y = -ry; y <= ry; y++) {
+      const yf = y * y;
+      const xSpan = Math.floor(rx * Math.sqrt(1 - yf / ry2));
+      this.hline(cx - xSpan, cy + y, xSpan * 2 + 1, idx);
+    }
+  }
+  fillCircle(cx, cy, r, idx) {
+    this.fillEllipse(cx, cy, r, r, idx);
+  }
+  line(x0, y0, x1, y1, idx) {
+    x0 = Math.round(x0); y0 = Math.round(y0);
+    x1 = Math.round(x1); y1 = Math.round(y1);
+    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    while (true) {
+      this.setPixel(x0, y0, idx);
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x0 += sx; }
+      if (e2 < dx) { err += dx; y0 += sy; }
+    }
+  }
+  fillTriangle(x0, y0, x1, y1, x2, y2, idx) {
+    if (y0 > y1) { [x0,y0,x1,y1] = [x1,y1,x0,y0]; }
+    if (y0 > y2) { [x0,y0,x2,y2] = [x2,y2,x0,y0]; }
+    if (y1 > y2) { [x1,y1,x2,y2] = [x2,y2,x1,y1]; }
+    const lerp = (a, b, t) => a + (b - a) * t;
+    for (let y = Math.round(y0); y <= Math.round(y2); y++) {
+      let xa, xb;
+      if (y < y1) {
+        if (y1 === y0) continue;
+        const t1 = (y - y0) / (y1 - y0);
+        const t2 = (y - y0) / (y2 - y0);
+        xa = lerp(x0, x1, t1);
+        xb = lerp(x0, x2, t2);
+      } else {
+        if (y2 === y1) continue;
+        const t1 = (y - y1) / (y2 - y1);
+        const t2 = (y - y0) / (y2 - y0);
+        xa = lerp(x1, x2, t1);
+        xb = lerp(x0, x2, t2);
+      }
+      if (xa > xb) { const tmp = xa; xa = xb; xb = tmp; }
+      this.hline(Math.round(xa), y, Math.round(xb - xa) + 1, idx);
+    }
+  }
+  mirrorHorizontal() {
+    const { width, height, pixels, groupMap } = this;
+    const half = Math.floor(width / 2);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < half; x++) {
+        const src = y * width + x;
+        const dst = y * width + (width - 1 - x);
+        pixels[dst] = pixels[src];
+        groupMap[dst] = groupMap[src];
+      }
+    }
+  }
+  scatterNoise(x, y, w, h, idx, density, rng) {
+    rng = rng || Math.random;
+    for (let py = y; py < y + h; py++)
+      for (let px = x; px < x + w; px++)
+        if (this.isFilled(px, py) && rng() < density) this.setPixel(px, py, idx);
+  }
+  toCanvas() {
+    const cvs = sf2_makeCanvas(this.width, this.height);
+    const c = cvs.getContext('2d');
+    const imgData = c.createImageData(this.width, this.height);
+    const data = imgData.data;
+    const { pixels, palette, width, height } = this;
+    for (let i = 0; i < width * height; i++) {
+      const idx = pixels[i];
+      if (idx === 0) continue;
+      const rgba = palette[idx];
+      const off = i * 4;
+      data[off]     = rgba & 0xFF;
+      data[off + 1] = (rgba >> 8) & 0xFF;
+      data[off + 2] = (rgba >> 16) & 0xFF;
+      data[off + 3] = (rgba >> 24) & 0xFF;
+    }
+    c.putImageData(imgData, 0, 0);
+    return cvs;
+  }
+  blitTo(ctx, destX, destY) {
+    ctx.drawImage(this.toCanvas(), destX, destY);
+  }
+}
+
+const PostProcess = {
+  _dirs: [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]],
+  _lightDir: (function() {
+    const lx = -0.7, ly = -0.7;
+    const len = Math.sqrt(lx*lx + ly*ly);
+    return { x: lx/len, y: ly/len };
+  })(),
+  applyShading(pc, groups) {
+    const { width, height, pixels, groupMap } = pc;
+    const dirs = PostProcess._dirs;
+    const light = PostProcess._lightDir;
+    const newPixels = new Uint8Array(pixels.length);
+    newPixels.set(pixels);
+    const groupBase = new Uint8Array(256);
+    for (const g of Object.values(groups)) groupBase[g.groupId] = g.startIdx;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const off = y * width + x;
+        if (pixels[off] === 0) continue;
+        const gid = groupMap[off];
+        if (gid === 0) continue;
+        const base = groupBase[gid];
+        if (base === 0) continue;
+        let nx = 0, ny = 0, emptyCount = 0;
+        for (const [dx, dy] of dirs) {
+          const px2 = x + dx, py2 = y + dy;
+          if (px2 < 0 || px2 >= width || py2 < 0 || py2 >= height || pixels[py2 * width + px2] === 0) {
+            nx -= dx; ny -= dy; emptyCount++;
+          }
+        }
+        if (emptyCount === 0) { newPixels[off] = base + 2; continue; }
+        const len = Math.sqrt(nx * nx + ny * ny);
+        if (len > 0) { nx /= len; ny /= len; }
+        const dot = nx * light.x + ny * light.y;
+        let tone;
+        if (dot > 0.4) tone = 3;
+        else if (dot > -0.1) tone = 2;
+        else if (dot > -0.5) tone = 1;
+        else tone = 0;
+        newPixels[off] = base + tone;
+      }
+    }
+    pc.pixels.set(newPixels);
+  },
+  applyOutlines(pc, groups, mode) {
+    if (mode === 'none') return;
+    const { width, height, pixels, groupMap } = pc;
+    const dirs = PostProcess._dirs;
+    const newPixels = new Uint8Array(pixels.length);
+    const newGroupMap = new Uint8Array(groupMap.length);
+    newPixels.set(pixels);
+    newGroupMap.set(groupMap);
+    const groupBase = new Uint8Array(256);
+    for (const g of Object.values(groups)) groupBase[g.groupId] = g.startIdx;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const off = y * width + x;
+        if (pixels[off] !== 0) continue;
+        let nearestGroup = 0, found = false;
+        for (const [dx, dy] of dirs) {
+          const px2 = x + dx, py2 = y + dy;
+          if (px2 >= 0 && px2 < width && py2 >= 0 && py2 < height) {
+            const noff = py2 * width + px2;
+            if (pixels[noff] !== 0) { nearestGroup = groupMap[noff]; found = true; break; }
+          }
+        }
+        if (!found) continue;
+        const base = groupBase[nearestGroup];
+        if (base === 0) continue;
+        if (mode === 'tinted') newPixels[off] = base + 0;
+        else if (mode === 'black') newPixels[off] = 255;
+        if (newPixels[off] !== 0) newGroupMap[off] = nearestGroup;
+      }
+    }
+    pc.pixels.set(newPixels);
+    pc.groupMap.set(newGroupMap);
+  },
+};
+
+class SpriteSheet {
+  constructor(canvas, frameWidth, frameHeight, cols, rows) {
+    this.canvas = canvas;
+    this.frameWidth = frameWidth;
+    this.frameHeight = frameHeight;
+    this.cols = cols;
+    this.rows = rows;
+  }
+  getFrame(index) {
+    const col = index % this.cols;
+    const row = Math.floor(index / this.cols);
+    return { x: col * this.frameWidth, y: row * this.frameHeight, w: this.frameWidth, h: this.frameHeight, canvas: this.canvas };
+  }
+  drawFrame(ctx, index, x, y, opts) {
+    const f = this.getFrame(index);
+    if (!f) return;
+    const o = opts || {};
+    ctx.save();
+    const scale = o.scale || 1;
+    const alpha = o.alpha != null ? o.alpha : 1;
+    ctx.globalAlpha = alpha;
+    if (o.flipX || o.flipY) {
+      ctx.translate(x + f.w * scale / 2, y + f.h * scale / 2);
+      ctx.scale(o.flipX ? -1 : 1, o.flipY ? -1 : 1);
+      ctx.drawImage(f.canvas, f.x, f.y, f.w, f.h, -f.w * scale / 2, -f.h * scale / 2, f.w * scale, f.h * scale);
+    } else {
+      ctx.drawImage(f.canvas, f.x, f.y, f.w, f.h, x, y, f.w * scale, f.h * scale);
+    }
+    ctx.restore();
+  }
+}
+
+class SpriteAnimator {
+  constructor(sheet, animations) {
+    this.sheet = sheet;
+    this.animations = animations;
+    this.current = null;
+    this.frame = 0;
+    this.elapsed = 0;
+    this.playing = false;
+    this._dir = 1;
+  }
+  play(name) {
+    if (this.current === name && this.playing) return;
+    this.current = name;
+    this.frame = 0;
+    this.elapsed = 0;
+    this.playing = true;
+    this._dir = 1;
+  }
+  stop() { this.playing = false; }
+  update(dt) {
+    if (!this.playing || !this.current) return;
+    const anim = this.animations[this.current];
+    if (!anim) return;
+    this.elapsed += dt;
+    if (this.elapsed >= anim.speed) {
+      this.elapsed -= anim.speed;
+      this.frame += this._dir;
+      if (this.frame >= anim.frames.length) {
+        if (anim.pingpong) { this._dir = -1; this.frame = anim.frames.length - 2; }
+        else if (anim.loop !== false) this.frame = 0;
+        else { this.frame = anim.frames.length - 1; this.playing = false; }
+      } else if (this.frame < 0) { this._dir = 1; this.frame = 1; }
+    }
+  }
+  getCurrentFrame() {
+    if (!this.current) return 0;
+    const anim = this.animations[this.current];
+    if (!anim) return 0;
+    return anim.frames[Math.max(0, Math.min(this.frame, anim.frames.length - 1))];
+  }
+  draw(ctx, x, y, opts) {
+    this.sheet.drawFrame(ctx, this.getCurrentFrame(), x, y, opts);
+  }
+}
+
+const SpriteForge = {
+  buildSheet(config) {
+    const fw = config.frameWidth;
+    const fh = config.frameHeight;
+    const pal = config.palette;
+    const outlineMode = config.outlineMode || 'tinted';
+    pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+    let totalFrames = 0;
+    const animList = [];
+    for (const [name, def] of Object.entries(config.animations)) {
+      animList.push({ name, ...def });
+      totalFrames += def.frames;
+    }
+    const cols = Math.ceil(Math.sqrt(totalFrames));
+    const rows = Math.ceil(totalFrames / cols);
+    const sheetCanvas = sf2_makeCanvas(cols * fw, rows * fh);
+    const sheetCtx = sheetCanvas.getContext('2d');
+    sheetCtx.imageSmoothingEnabled = false;
+    let frameIdx = 0;
+    const animationDefs = {};
+    for (const anim of animList) {
+      const frameIndices = [];
+      for (let f = 0; f < anim.frames; f++) {
+        const pc = new PixelCanvas(fw, fh);
+        pc.setPalette(pal.palette, pal.groupForIndex);
+        const t = anim.frames > 1 ? f / (anim.frames - 1) : 0;
+        anim.draw(pc, pal, t);
+        PostProcess.applyShading(pc, pal.groups);
+        if (anim.drawPost) anim.drawPost(pc, pal, t);
+        PostProcess.applyOutlines(pc, pal.groups, outlineMode);
+        const col = frameIdx % cols;
+        const row = Math.floor(frameIdx / cols);
+        pc.blitTo(sheetCtx, col * fw, row * fh);
+        frameIndices.push(frameIdx);
+        frameIdx++;
+      }
+      animationDefs[anim.name] = {
+        frames: frameIndices,
+        speed: anim.speed || 0.15,
+        loop: anim.loop !== false,
+        pingpong: !!anim.pingpong,
+      };
+    }
+    const sheet = new SpriteSheet(sheetCanvas, fw, fh, cols, rows);
+    const animator = new SpriteAnimator(sheet, animationDefs);
+    const firstName = animList[0] ? animList[0].name : 'idle';
+    animator.play(firstName);
+    return { sheet, animator, animations: animationDefs };
+  },
+};
+
+// ============================================================
+// HELPER
+// ============================================================
+function makePal(colors) {
+  const pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  return pal;
+}
+
+// ============================================================
+// PLAYER SPRITE (the little girl with net — kept from original)
+// ============================================================
+function buildPlayerSprite() {
+  const pal = makePal({
+    skin: '#f5d0a9', dress: '#ee6699', hair: '#884422',
+    shoes: '#884433', eyes: '#448855', bow: '#ff4466',
+    net: '#aabbcc', handle: '#8b6914',
+  });
+
+  function drawPlayer(pc, pal, t, legOff) {
+    const s = pal.groups.skin.startIdx + 2;
+    const dr = pal.groups.dress.startIdx + 2;
+    const h = pal.groups.hair.startIdx + 2;
+    const sho = pal.groups.shoes.startIdx + 2;
+    const bw = pal.groups.bow.startIdx + 2;
+    const nt = pal.groups.net.startIdx + 2;
+    const hd = pal.groups.handle.startIdx + 2;
+    legOff = legOff || 0;
+
+    // Net held in right hand
+    pc.line(20, 18, 25, 8, hd);
+    pc.line(21, 18, 26, 8, hd);
+    pc.fillCircle(25, 6, 3, nt);
+    pc.fillCircle(25, 6, 2, 0);
+    pc.setPixel(23, 9, nt); pc.setPixel(25, 9, nt); pc.setPixel(27, 9, nt);
+    pc.setPixel(24, 10, nt); pc.setPixel(26, 10, nt);
+    pc.setPixel(25, 11, nt);
+
+    // Hair back
+    for (let y = 5; y < 22; y++) {
+      const tw = (y - 5) / 17;
+      const w = Math.round(6 - tw * 2.5);
+      pc.hline(10 - w, y, w * 2 + 1, h);
+    }
+
+    // Head
+    pc.fillEllipse(10, 7, 5, 6, s);
+    pc.fillRect(9, 13, 3, 2, s);
+    // Hair front
+    pc.fillEllipse(10, 4, 6, 3, h);
+    pc.fillRect(4, 5, 2, 6, h);
+    pc.fillRect(15, 5, 2, 5, h);
+    pc.hline(5, 5, 11, h);
+    pc.hline(6, 6, 9, h);
+    // Hair bow
+    pc.fillCircle(15, 4, 2, bw);
+    pc.setPixel(14, 3, bw + 1);
+    pc.setPixel(16, 3, bw + 1);
+
+    // Dress
+    for (let y = 15; y < 22; y++) {
+      const tw = (y - 15) / 7;
+      const halfW = Math.round(5 + tw * 3);
+      pc.hline(10 - halfW, y, halfW * 2 + 1, dr);
+    }
+    for (let y = 22; y < 26; y++) {
+      const tw = (y - 22) / 4;
+      const halfW = Math.round(8 + tw * 2);
+      pc.hline(10 - halfW, y, halfW * 2 + 1, dr);
+    }
+    pc.hline(7, 15, 7, dr + 1);
+    pc.hline(1, 25, 19, dr + 1);
+
+    // Sleeves
+    pc.fillEllipse(4, 16, 2, 2, dr);
+    pc.fillEllipse(16, 16, 2, 2, dr);
+    // Arms
+    pc.fillRect(2, 16, 2, 7, s);
+    pc.fillRect(17, 16, 2, 6, s);
+    pc.fillCircle(2, 23, 1, s);
+    pc.fillCircle(18, 22, 1, s);
+
+    // Legs with walk offset
+    pc.fillRect(6, 26 + legOff, 3, 3, s);
+    pc.fillRect(12, 26 - legOff, 3, 3, s);
+    // Shoes
+    pc.fillRect(5, 29 + legOff, 4, 2, sho);
+    pc.fillRect(12, 29 - legOff, 4, 2, sho);
+    pc.setPixel(6, 29 + legOff, sho - 1);
+    pc.setPixel(14, 29 - legOff, sho - 1);
+  }
+
+  function drawPlayerPost(pc, pal, t) {
+    const e = pal.groups.eyes.startIdx;
+    const s = pal.groups.skin.startIdx + 2;
+    pc.hline(7, 7, 3, e + 2); pc.hline(7, 8, 3, e + 2);
+    pc.setPixel(8, 8, e + 1); pc.setPixel(8, 7, e); pc.setPixel(7, 7, e + 3);
+    pc.hline(11, 7, 3, e + 2); pc.hline(11, 8, 3, e + 2);
+    pc.setPixel(12, 8, e + 1); pc.setPixel(12, 7, e); pc.setPixel(11, 7, e + 3);
+    pc.setPixel(6, 7, e); pc.setPixel(14, 7, e);
+    pc.setPixel(10, 9, s - 1);
+    pc.hline(9, 11, 3, s - 2);
+    pc.setPixel(8, 10, s - 2); pc.setPixel(12, 10, s - 2);
+    pc.setPixel(6, 10, pal.groups.bow.startIdx + 3);
+    pc.setPixel(14, 10, pal.groups.bow.startIdx + 3);
+  }
+
+  return SpriteForge.buildSheet({
+    frameWidth: 28, frameHeight: 32,
+    palette: pal,
+    outlineMode: 'tinted',
+    animations: {
+      idle: {
+        frames: 2, speed: 0.5, loop: true, pingpong: true,
+        draw: (pc, pal, t) => drawPlayer(pc, pal, t, 0),
+        drawPost: drawPlayerPost,
+      },
+      walk: {
+        frames: 4, speed: 0.12, loop: true, pingpong: false,
+        draw: (pc, pal, t) => {
+          const legOff = Math.round(Math.sin(t * Math.PI * 2) * 1);
+          drawPlayer(pc, pal, t, legOff);
+        },
+        drawPost: drawPlayerPost,
+      },
+    },
+  });
+}
+
+// ============================================================
+// INSECT SPRITES — 25 Adelaide-area species
+// ============================================================
+
+// 1. Bull Ant — large red-black aggressive ant
+function buildBullAntSprite() {
+  const pal = makePal({ body: '#cc3311', head: '#661100', legs: '#993311', mandible: '#441100', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 22, frameHeight: 14,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.15, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, h = p.groups.head.startIdx + 2;
+        const lg = p.groups.legs.startIdx + 2, m = p.groups.mandible.startIdx + 2;
+        // Abdomen
+        pc.fillEllipse(5, 7, 4, 3, b);
+        // Thorax
+        pc.fillEllipse(11, 7, 3, 2, b);
+        pc.setPixel(8, 7, b); pc.setPixel(9, 7, b);
+        // Head
+        pc.fillCircle(16, 6, 3, h);
+        // Mandibles
+        pc.line(19, 5, 21, 3, m); pc.line(19, 7, 21, 9, m);
+        pc.setPixel(21, 3, m); pc.setPixel(21, 9, m);
+        // Antennae
+        pc.line(17, 3, 19, 1, h - 1); pc.line(18, 4, 20, 2, h - 1);
+        // Legs
+        const lo = Math.round(Math.sin(t * Math.PI) * 1);
+        pc.line(9, 8, 7, 11 + lo, lg); pc.line(11, 8, 9, 11 - lo, lg);
+        pc.line(13, 8, 11, 11 + lo, lg);
+        pc.line(9, 6, 7, 3 - lo, lg); pc.line(11, 6, 9, 3 + lo, lg);
+        pc.line(13, 6, 11, 3 - lo, lg);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(15, 5, e + 2); pc.setPixel(17, 5, e + 2);
+      },
+    }},
+  });
+}
+
+// 2. Earwig
+function buildEarwigSprite() {
+  const pal = makePal({ body: '#aa7744', pincer: '#775522', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 20, frameHeight: 10,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.18, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, pn = p.groups.pincer.startIdx + 2;
+        // Body segments
+        pc.fillEllipse(10, 5, 6, 2, b);
+        pc.fillEllipse(4, 5, 2, 2, b);
+        pc.fillCircle(16, 5, 2, b);
+        // Pincers at rear
+        const po = Math.round(Math.sin(t * Math.PI) * 1);
+        pc.line(1, 5, 0, 3 - po, pn); pc.line(1, 5, 0, 7 + po, pn);
+        // Antennae
+        pc.line(18, 4, 19, 2, b - 1); pc.line(18, 4, 19, 3, b - 1);
+        // Legs
+        for (let i = 0; i < 3; i++) {
+          const lx = 8 + i * 3;
+          const lo = Math.round(Math.sin(t * Math.PI + i) * 0.5);
+          pc.setPixel(lx, 7 + lo, b - 1); pc.setPixel(lx, 3 - lo, b - 1);
+        }
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(17, 4, e + 2); pc.setPixel(17, 6, e + 2);
+      },
+    }},
+  });
+}
+
+// 3. Slater/Woodlouse
+function buildSlaterSprite() {
+  const pal = makePal({ shell: '#888899', legs: '#666677', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 14, frameHeight: 10,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.2, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const s = p.groups.shell.startIdx + 2, lg = p.groups.legs.startIdx + 2;
+        // Oval segmented body
+        pc.fillEllipse(7, 5, 6, 3, s);
+        // Segments
+        for (let i = 0; i < 5; i++) {
+          pc.vline(3 + i * 2, 3, 5, s - 1);
+        }
+        // Head
+        pc.fillCircle(12, 5, 2, s + 1);
+        // Legs
+        const lo = Math.round(Math.sin(t * Math.PI) * 0.5);
+        for (let i = 0; i < 4; i++) {
+          pc.setPixel(3 + i * 2, 8 + lo, lg);
+          pc.setPixel(3 + i * 2, 2 - lo, lg);
+        }
+        // Antennae
+        pc.setPixel(13, 3, s - 1); pc.setPixel(13, 7, s - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(12, 4, e + 2); pc.setPixel(12, 6, e + 2);
+      },
+    }},
+  });
+}
+
+// 4. Centipede
+function buildCentipedeSprite() {
+  const pal = makePal({ body: '#bba033', legs: '#887722', head: '#996622', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 28, frameHeight: 10,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 4, speed: 0.1, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, lg = p.groups.legs.startIdx + 2;
+        const hd = p.groups.head.startIdx + 2;
+        // Long segmented body with wave
+        for (let i = 0; i < 10; i++) {
+          const sx = 2 + i * 2.2;
+          const sy = 5 + Math.sin(t * Math.PI * 2 + i * 0.6) * 0.8;
+          pc.fillRect(Math.round(sx), Math.round(sy) - 1, 2, 3, b);
+          // Legs
+          const lo = Math.round(Math.sin(t * Math.PI + i * 0.8) * 1);
+          pc.setPixel(Math.round(sx), Math.round(sy) + 2 + lo, lg);
+          pc.setPixel(Math.round(sx) + 1, Math.round(sy) - 2 - lo, lg);
+        }
+        // Head
+        pc.fillCircle(25, 5, 2, hd);
+        // Antennae
+        pc.line(26, 3, 27, 1, hd - 1); pc.line(26, 4, 27, 2, hd - 1);
+        // Forcipules
+        pc.setPixel(27, 5, lg); pc.setPixel(27, 6, lg);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(25, 4, e + 2); pc.setPixel(26, 4, e + 2);
+      },
+    }},
+  });
+}
+
+// 5. Christmas Beetle — iridescent green/gold
+function buildChristmasBeetleSprite() {
+  const pal = makePal({ shell: '#55aa33', gold: '#ccaa22', body: '#334422', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 16, frameHeight: 16,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.2, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const sh = p.groups.shell.startIdx + 2, g = p.groups.gold.startIdx + 2;
+        const b = p.groups.body.startIdx + 2;
+        // Shell
+        pc.fillEllipse(8, 9, 6, 5, sh);
+        // Iridescent gold highlights
+        pc.fillEllipse(6, 7, 2, 2, g);
+        pc.fillEllipse(10, 7, 2, 1, g);
+        pc.setPixel(7, 10, g); pc.setPixel(9, 10, g);
+        // Center line
+        pc.vline(8, 5, 9, b);
+        // Head
+        pc.fillCircle(8, 4, 2, b);
+        // Antennae
+        pc.line(6, 2, 4, 0, b - 1); pc.line(10, 2, 12, 0, b - 1);
+        // Legs
+        const lo = Math.round(Math.sin(t * Math.PI) * 0.5);
+        pc.line(2, 8, 0, 10 + lo, b); pc.line(2, 10, 0, 12, b);
+        pc.line(14, 8, 16, 10 - lo, b); pc.line(14, 10, 16, 12, b);
+        pc.setPixel(3, 13 + lo, b); pc.setPixel(13, 13 - lo, b);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(7, 3, e + 2); pc.setPixel(9, 3, e + 2);
+      },
+    }},
+  });
+}
+
+// 6. Blue-banded Bee
+function buildBlueBandedBeeSprite() {
+  const pal = makePal({ body: '#222222', blue: '#3388cc', wing: '#aaddff', eyes: '#ffffff', fur: '#554433' });
+  return SpriteForge.buildSheet({
+    frameWidth: 16, frameHeight: 14,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 4, speed: 0.1, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, bl = p.groups.blue.startIdx + 2;
+        const w = p.groups.wing.startIdx + 2, f = p.groups.fur.startIdx + 2;
+        // Abdomen with blue bands
+        pc.fillEllipse(8, 8, 5, 4, b);
+        pc.hline(4, 7, 9, bl); pc.hline(4, 9, 9, bl);
+        pc.hline(5, 11, 7, bl);
+        // Thorax with fur
+        pc.fillCircle(3, 7, 2, f);
+        pc.setPixel(2, 5, f); pc.setPixel(4, 5, f);
+        // Wings
+        const wy = 3 + Math.round(Math.sin(t * Math.PI * 2) * 0.8);
+        pc.fillEllipse(7, wy, 3, 2, w);
+        pc.fillEllipse(10, wy, 3, 2, w);
+        // Head
+        pc.fillCircle(2, 6, 1, b);
+        // Legs
+        pc.setPixel(5, 12, b - 1); pc.setPixel(7, 12, b - 1); pc.setPixel(9, 12, b - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(1, 6, e + 2); pc.setPixel(2, 5, e + 2);
+      },
+    }},
+  });
+}
+
+// 7. Painted Lady Butterfly
+function buildPaintedLadySprite() {
+  const pal = makePal({ wing: '#dd7733', body: '#332222', spot: '#222244', tip: '#111111', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 22, frameHeight: 18,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 4, speed: 0.15, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const w = p.groups.wing.startIdx + 2, b = p.groups.body.startIdx + 2;
+        const sp = p.groups.spot.startIdx + 2, tp = p.groups.tip.startIdx + 2;
+        const rx = 4 + Math.round(Math.sin(t * Math.PI) * 1.5);
+        // Upper wings
+        pc.fillEllipse(5, 6, rx, 5, w);
+        pc.fillEllipse(17, 6, rx, 5, w);
+        // Lower wings
+        pc.fillEllipse(4, 12, rx - 1, 3, w);
+        pc.fillEllipse(18, 12, rx - 1, 3, w);
+        // Wing tips dark
+        pc.fillCircle(2, 3, 2, tp);
+        pc.fillCircle(20, 3, 2, tp);
+        // Eyespots
+        pc.fillCircle(5, 5, 1, sp);
+        pc.fillCircle(17, 5, 1, sp);
+        pc.setPixel(5, 5, w + 1); pc.setPixel(17, 5, w + 1);
+        pc.fillCircle(4, 11, 1, sp);
+        pc.fillCircle(18, 11, 1, sp);
+        // Body
+        pc.vline(11, 2, 14, b);
+        pc.vline(10, 3, 12, b);
+        pc.fillCircle(11, 2, 1, b);
+        // Antennae
+        pc.setPixel(9, 0, b); pc.setPixel(13, 0, b);
+        pc.setPixel(10, 1, b); pc.setPixel(12, 1, b);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(10, 2, e + 2); pc.setPixel(12, 2, e + 2);
+      },
+    }},
+  });
+}
+
+// 8. Common Brown Butterfly
+function buildCommonBrownSprite() {
+  const pal = makePal({ wing: '#8b6b3f', body: '#332211', eyespot: '#ddbb44', spot2: '#222222', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 22, frameHeight: 18,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 4, speed: 0.15, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const w = p.groups.wing.startIdx + 2, b = p.groups.body.startIdx + 2;
+        const es = p.groups.eyespot.startIdx + 2, s2 = p.groups.spot2.startIdx + 2;
+        const rx = 4 + Math.round(Math.sin(t * Math.PI) * 1.5);
+        // Wings
+        pc.fillEllipse(5, 6, rx, 5, w);
+        pc.fillEllipse(17, 6, rx, 5, w);
+        pc.fillEllipse(5, 13, rx - 1, 3, w);
+        pc.fillEllipse(17, 13, rx - 1, 3, w);
+        // Eyespots — prominent
+        pc.fillCircle(5, 5, 2, es);
+        pc.fillCircle(17, 5, 2, es);
+        pc.fillCircle(5, 5, 1, s2);
+        pc.fillCircle(17, 5, 1, s2);
+        pc.setPixel(5, 5, es + 1);
+        pc.setPixel(17, 5, es + 1);
+        // Body
+        pc.vline(11, 2, 14, b);
+        pc.vline(10, 3, 12, b);
+        pc.fillCircle(11, 2, 1, b);
+        pc.setPixel(9, 0, b); pc.setPixel(13, 0, b);
+        pc.setPixel(10, 1, b); pc.setPixel(12, 1, b);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(10, 2, e + 2); pc.setPixel(12, 2, e + 2);
+      },
+    }},
+  });
+}
+
+// 9. Emperor Gum Moth — huge
+function buildEmperorGumMothSprite() {
+  const pal = makePal({ wing: '#8b6644', body: '#553322', eyespot: '#ddaa33', ring: '#3344aa', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 28, frameHeight: 22,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.25, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const w = p.groups.wing.startIdx + 2, b = p.groups.body.startIdx + 2;
+        const es = p.groups.eyespot.startIdx + 2, rg = p.groups.ring.startIdx + 2;
+        const rx = 6 + Math.round(Math.sin(t * Math.PI) * 1);
+        // Large upper wings
+        pc.fillEllipse(6, 8, rx, 6, w);
+        pc.fillEllipse(22, 8, rx, 6, w);
+        // Lower wings — scalloped edge
+        pc.fillEllipse(5, 15, rx - 1, 4, w);
+        pc.fillEllipse(23, 15, rx - 1, 4, w);
+        // Eyespots on each wing
+        pc.fillCircle(6, 8, 3, rg);
+        pc.fillCircle(22, 8, 3, rg);
+        pc.fillCircle(6, 8, 2, es);
+        pc.fillCircle(22, 8, 2, es);
+        pc.fillCircle(6, 8, 1, b);
+        pc.fillCircle(22, 8, 1, b);
+        // Lower eyespots
+        pc.fillCircle(5, 15, 1, es);
+        pc.fillCircle(23, 15, 1, es);
+        // Furry body
+        pc.fillEllipse(14, 10, 2, 7, b);
+        pc.fillEllipse(14, 4, 2, 2, b + 1);
+        // Feathered antennae
+        pc.line(12, 3, 9, 0, b); pc.line(16, 3, 19, 0, b);
+        pc.setPixel(8, 0, b - 1); pc.setPixel(10, 1, b - 1);
+        pc.setPixel(20, 0, b - 1); pc.setPixel(18, 1, b - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(13, 3, e + 2); pc.setPixel(15, 3, e + 2);
+      },
+    }},
+  });
+}
+
+// 10. Hoverfly
+function buildHoverflySprite() {
+  const pal = makePal({ body: '#eebb33', stripes: '#222200', wing: '#ccddee', eyes: '#cc2222' });
+  return SpriteForge.buildSheet({
+    frameWidth: 16, frameHeight: 12,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 4, speed: 0.08, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const bd = p.groups.body.startIdx + 2, st = p.groups.stripes.startIdx + 2;
+        const w = p.groups.wing.startIdx + 2;
+        // Abdomen
+        pc.fillEllipse(8, 7, 5, 3, bd);
+        pc.hline(4, 6, 9, st); pc.hline(4, 8, 9, st);
+        // Head — large eyes characteristic of hoverflies
+        pc.fillCircle(3, 6, 2, bd);
+        // Wings — hover rapidly
+        const wo = Math.round(Math.sin(t * Math.PI * 2) * 1);
+        pc.fillEllipse(8, 3 + wo, 4, 1, w);
+        pc.fillEllipse(8, 10 - wo, 4, 1, w);
+        // Legs
+        pc.setPixel(6, 10, bd - 1); pc.setPixel(8, 10, bd - 1); pc.setPixel(10, 10, bd - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        // Large red compound eyes
+        pc.fillCircle(2, 5, 1, e + 1);
+        pc.fillCircle(4, 5, 1, e + 1);
+      },
+    }},
+  });
+}
+
+// 11. European Wasp
+function buildEuropeanWaspSprite() {
+  const pal = makePal({ body: '#eecc00', stripes: '#111100', wing: '#aaccee', sting: '#443300', eyes: '#222222' });
+  return SpriteForge.buildSheet({
+    frameWidth: 18, frameHeight: 14,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 4, speed: 0.1, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const bd = p.groups.body.startIdx + 2, st = p.groups.stripes.startIdx + 2;
+        const w = p.groups.wing.startIdx + 2, sg = p.groups.sting.startIdx + 2;
+        // Abdomen — pointed
+        pc.fillEllipse(10, 8, 5, 3, bd);
+        pc.hline(6, 7, 9, st); pc.hline(6, 9, 9, st);
+        pc.hline(7, 11, 7, st);
+        // Narrow waist
+        pc.setPixel(5, 7, bd); pc.setPixel(5, 8, bd);
+        // Thorax
+        pc.fillCircle(4, 7, 2, bd);
+        // Head
+        pc.fillCircle(1, 6, 2, bd);
+        // Sting
+        pc.setPixel(16, 8, sg); pc.setPixel(17, 8, sg);
+        // Wings
+        const wo = Math.round(Math.sin(t * Math.PI * 2) * 0.8);
+        pc.fillEllipse(8, 4 + wo, 3, 2, w);
+        pc.fillEllipse(10, 4 + wo, 3, 2, w);
+        // Legs
+        pc.line(5, 10, 4, 12, bd - 1); pc.line(8, 10, 7, 12, bd - 1);
+        pc.line(11, 10, 10, 12, bd - 1);
+        // Antennae
+        pc.line(0, 4, 0, 2, bd - 1); pc.line(1, 4, 2, 2, bd - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(0, 5, e + 1); pc.setPixel(2, 5, e + 1);
+      },
+    }},
+  });
+}
+
+// 12. Green Tree Ant
+function buildGreenTreeAntSprite() {
+  const pal = makePal({ body: '#66aa44', head: '#448822', legs: '#336622', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 16, frameHeight: 12,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.15, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, h = p.groups.head.startIdx + 2;
+        const lg = p.groups.legs.startIdx + 2;
+        // Abdomen — semi-transparent green
+        pc.fillEllipse(4, 6, 3, 2, b);
+        // Waist
+        pc.setPixel(7, 6, b);
+        // Thorax
+        pc.fillEllipse(9, 6, 2, 1, b);
+        // Head
+        pc.fillCircle(13, 5, 2, h);
+        // Mandibles
+        pc.setPixel(15, 5, h - 1); pc.setPixel(15, 6, h - 1);
+        // Antennae
+        pc.line(14, 3, 15, 1, h - 1); pc.line(13, 3, 14, 1, h - 1);
+        // Legs
+        const lo = Math.round(Math.sin(t * Math.PI) * 1);
+        pc.line(8, 7, 7, 9 + lo, lg); pc.line(10, 7, 9, 9 - lo, lg);
+        pc.line(12, 7, 11, 9 + lo, lg);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(12, 4, e + 2); pc.setPixel(14, 4, e + 2);
+      },
+    }},
+  });
+}
+
+// 13. Praying Mantis
+function buildPrayingMantisSprite() {
+  const pal = makePal({ body: '#55aa33', arms: '#448822', eyes: '#ffffff', head: '#66bb44' });
+  return SpriteForge.buildSheet({
+    frameWidth: 20, frameHeight: 20,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.25, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, a = p.groups.arms.startIdx + 2;
+        const hd = p.groups.head.startIdx + 2;
+        // Long body
+        pc.fillEllipse(10, 14, 3, 4, b);
+        pc.fillRect(9, 6, 3, 6, b);
+        // Triangular head
+        pc.fillEllipse(10, 3, 3, 3, hd);
+        // Raptorial forelegs — praying position
+        const ao = Math.round(Math.sin(t * Math.PI) * 1);
+        pc.line(8, 8, 5, 4 + ao, a); pc.line(5, 4 + ao, 4, 2 + ao, a);
+        pc.line(12, 8, 15, 4 - ao, a); pc.line(15, 4 - ao, 16, 2 - ao, a);
+        // Spikes on arms
+        pc.setPixel(6, 5 + ao, a - 1); pc.setPixel(14, 5 - ao, a - 1);
+        // Walking legs
+        pc.line(8, 14, 5, 17, a); pc.line(12, 14, 15, 17, a);
+        pc.line(8, 16, 4, 19, a); pc.line(12, 16, 16, 19, a);
+        // Wings folded
+        pc.fillEllipse(10, 12, 2, 3, b + 1);
+        // Antennae
+        pc.line(8, 1, 6, 0, b - 1); pc.line(12, 1, 14, 0, b - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.fillCircle(8, 2, 1, e + 2);
+        pc.fillCircle(12, 2, 1, e + 2);
+        pc.setPixel(8, 2, e); pc.setPixel(12, 2, e);
+      },
+    }},
+  });
+}
+
+// 14. Stick Insect
+function buildStickInsectSprite() {
+  const pal = makePal({ body: '#aa9966', legs: '#998855', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 26, frameHeight: 10,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.3, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, lg = p.groups.legs.startIdx + 2;
+        // Very long thin body
+        pc.hline(2, 5, 22, b);
+        pc.hline(3, 4, 20, b);
+        // Head — small
+        pc.fillRect(23, 4, 2, 3, b);
+        // Antennae
+        pc.line(24, 3, 25, 1, b - 1); pc.line(24, 3, 24, 1, b - 1);
+        // Long thin legs — 3 pairs
+        const lo = Math.round(Math.sin(t * Math.PI) * 1);
+        pc.line(6, 6, 4, 9 + lo, lg); pc.line(6, 4, 4, 1 - lo, lg);
+        pc.line(12, 6, 10, 9 - lo, lg); pc.line(12, 4, 10, 1 + lo, lg);
+        pc.line(18, 6, 16, 9 + lo, lg); pc.line(18, 4, 16, 1 - lo, lg);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(24, 4, e + 2); pc.setPixel(24, 5, e + 2);
+      },
+    }},
+  });
+}
+
+// 15. Cicada
+function buildCicadaSprite() {
+  const pal = makePal({ body: '#558833', wing: '#bbddaa', eyes: '#cc3333', head: '#667744' });
+  return SpriteForge.buildSheet({
+    frameWidth: 18, frameHeight: 16,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.2, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, w = p.groups.wing.startIdx + 2;
+        const hd = p.groups.head.startIdx + 2;
+        // Wings — long transparent
+        pc.fillEllipse(9, 9, 7, 4, w);
+        pc.fillEllipse(9, 9, 6, 3, w + 1);
+        // Wing veins
+        pc.line(3, 9, 16, 9, w - 1);
+        pc.line(5, 7, 14, 7, w - 1);
+        pc.line(5, 11, 14, 11, w - 1);
+        // Body underneath
+        pc.fillEllipse(9, 9, 3, 5, b);
+        // Head — broad
+        pc.fillEllipse(9, 3, 4, 2, hd);
+        // Pronotum
+        pc.fillRect(6, 4, 7, 2, b);
+        // Legs
+        const lo = Math.round(Math.sin(t * Math.PI) * 0.5);
+        pc.line(6, 12, 4, 14 + lo, b - 1);
+        pc.line(9, 13, 7, 15, b - 1);
+        pc.line(12, 12, 14, 14 - lo, b - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        // Large red compound eyes
+        pc.fillCircle(6, 2, 1, e + 1);
+        pc.fillCircle(12, 2, 1, e + 1);
+      },
+    }},
+  });
+}
+
+// 16. Lerp Insect — tiny with white crystal shelter
+function buildLerpInsectSprite() {
+  const pal = makePal({ body: '#88aa44', lerp: '#ddeeff', leaf: '#55aa33', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 14, frameHeight: 12,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 2, speed: 0.3, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, l = p.groups.lerp.startIdx + 2;
+        const lf = p.groups.leaf.startIdx + 2;
+        // Gum leaf background
+        pc.fillEllipse(7, 6, 6, 4, lf);
+        pc.fillEllipse(7, 5, 5, 3, lf + 1);
+        // White crystalline lerp shelter (dome on leaf)
+        pc.fillEllipse(7, 4, 4, 3, l);
+        pc.fillEllipse(7, 3, 3, 2, l + 1); // highlight
+        // Tiny green body peeking from under lerp
+        pc.fillEllipse(7, 7, 2, 1, b);
+        pc.setPixel(7, 6, b);
+        // Tiny legs
+        pc.setPixel(5, 8, b - 1); pc.setPixel(7, 8, b - 1); pc.setPixel(9, 8, b - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(6, 6, e + 2); pc.setPixel(8, 6, e + 2);
+      },
+    }},
+  });
+}
+
+// 17. Witchetty Grub — fat cream larva
+function buildWitchettyGrubSprite() {
+  const pal = makePal({ body: '#f5e6c8', head: '#cc9966', segments: '#ddc8a0', eyes: '#222222' });
+  return SpriteForge.buildSheet({
+    frameWidth: 20, frameHeight: 10,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.25, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, h = p.groups.head.startIdx + 2;
+        const sg = p.groups.segments.startIdx + 2;
+        // Fat segmented body with wave motion
+        for (let i = 0; i < 6; i++) {
+          const sx = 3 + i * 2.5;
+          const sy = 5 + Math.sin(t * Math.PI + i * 0.5) * 0.5;
+          const r = i < 3 ? 2 + i * 0.3 : 3 - (i - 3) * 0.4;
+          pc.fillEllipse(Math.round(sx), Math.round(sy), Math.round(r), 2, b);
+          // Segment lines
+          if (i > 0) pc.vline(Math.round(sx) - 1, Math.round(sy) - 1, 3, sg);
+        }
+        // Head — darker
+        pc.fillCircle(17, 5, 2, h);
+        // Tiny mandibles
+        pc.setPixel(19, 5, h - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(17, 4, e + 1); pc.setPixel(18, 4, e + 1);
+      },
+    }},
+  });
+}
+
+// 18. Mole Cricket
+function buildMoleCricketSprite() {
+  const pal = makePal({ body: '#8b6b3f', claws: '#6b4b2f', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 18, frameHeight: 12,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.18, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, cl = p.groups.claws.startIdx + 2;
+        // Body
+        pc.fillEllipse(9, 6, 6, 3, b);
+        // Head
+        pc.fillCircle(3, 5, 2, b);
+        // Massive digging forelegs
+        const co = Math.round(Math.sin(t * Math.PI) * 1);
+        pc.fillEllipse(2, 8 + co, 2, 2, cl);
+        pc.fillEllipse(5, 8 - co, 2, 2, cl);
+        // Spade-like claws
+        pc.setPixel(0, 9 + co, cl + 1); pc.setPixel(1, 9 + co, cl + 1);
+        pc.setPixel(4, 9 - co, cl + 1); pc.setPixel(6, 9 - co, cl + 1);
+        // Back legs
+        pc.line(12, 8, 14, 10, b - 1); pc.line(14, 8, 16, 10, b - 1);
+        // Wing covers
+        pc.fillEllipse(11, 5, 4, 2, b + 1);
+        // Antennae
+        pc.line(1, 3, 0, 1, b - 1); pc.line(2, 3, 1, 1, b - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(2, 4, e + 2); pc.setPixel(4, 4, e + 2);
+      },
+    }},
+  });
+}
+
+// 19. Ant Lion Larva
+function buildAntLionSprite() {
+  const pal = makePal({ body: '#aa9966', jaws: '#663300', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 14, frameHeight: 10,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 2, speed: 0.3, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, j = p.groups.jaws.startIdx + 2;
+        // Flat spiky body
+        pc.fillEllipse(7, 5, 5, 3, b);
+        // Spiky edges
+        for (let i = 0; i < 4; i++) {
+          pc.setPixel(3 + i * 2, 2, b - 1);
+          pc.setPixel(4 + i * 2, 8, b - 1);
+        }
+        // Head
+        pc.fillCircle(12, 5, 1, b);
+        // Large sickle-shaped jaws
+        const jo = Math.round(Math.sin(t * Math.PI) * 0.5);
+        pc.line(12, 4, 13, 2 - jo, j);
+        pc.line(12, 6, 13, 8 + jo, j);
+        // Tiny legs underneath
+        pc.setPixel(4, 8, b - 1); pc.setPixel(7, 8, b - 1); pc.setPixel(10, 8, b - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(12, 4, e + 2); pc.setPixel(12, 6, e + 2);
+      },
+    }},
+  });
+}
+
+// 20. Water Strider
+function buildWaterStriderSprite() {
+  const pal = makePal({ body: '#886644', legs: '#aa9977', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 20, frameHeight: 14,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.15, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, lg = p.groups.legs.startIdx + 2;
+        // Slender body
+        pc.fillEllipse(10, 7, 4, 1, b);
+        // Head
+        pc.fillCircle(15, 7, 1, b);
+        // Very long spread legs
+        const lo = Math.round(Math.sin(t * Math.PI) * 0.5);
+        // Front pair
+        pc.line(12, 6, 16, 2, lg); pc.line(12, 8, 16, 12, lg);
+        // Middle pair — longest
+        pc.line(10, 6, 4 + lo, 1, lg); pc.line(10, 8, 4 + lo, 13, lg);
+        // Rear pair
+        pc.line(7, 6, 1 - lo, 3, lg); pc.line(7, 8, 1 - lo, 11, lg);
+        // Dimples where legs touch water
+        pc.setPixel(4 + lo, 1, lg - 1); pc.setPixel(4 + lo, 13, lg - 1);
+        pc.setPixel(1 - lo, 3, lg - 1); pc.setPixel(1 - lo, 11, lg - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(15, 6, e + 2); pc.setPixel(16, 7, e + 2);
+      },
+    }},
+  });
+}
+
+// 21. Diving Beetle
+function buildDivingBeetleSprite() {
+  const pal = makePal({ shell: '#446633', body: '#334422', legs: '#557744', bubble: '#aaddff', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 16, frameHeight: 14,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.15, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const sh = p.groups.shell.startIdx + 2, b = p.groups.body.startIdx + 2;
+        const lg = p.groups.legs.startIdx + 2, bb = p.groups.bubble.startIdx + 2;
+        // Streamlined shell
+        pc.fillEllipse(8, 8, 6, 4, sh);
+        pc.fillEllipse(7, 7, 2, 2, sh + 1);
+        // Center line
+        pc.vline(8, 4, 8, b);
+        // Head
+        pc.fillCircle(8, 3, 2, b);
+        // Swimming legs — paddle-like rear pair
+        const lo = Math.round(Math.sin(t * Math.PI) * 1);
+        pc.line(2, 8, 0, 10 + lo, lg);
+        pc.line(14, 8, 16, 10 - lo, lg);
+        // Paddle legs
+        pc.line(3, 11, 1, 13, lg); pc.fillRect(0, 12, 2, 2, lg);
+        pc.line(13, 11, 15, 13, lg); pc.fillRect(14, 12, 2, 2, lg);
+        // Air bubble under wing
+        pc.setPixel(10, 6, bb); pc.setPixel(11, 7, bb);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(7, 2, e + 2); pc.setPixel(9, 2, e + 2);
+      },
+    }},
+  });
+}
+
+// 22. Australian Emperor Dragonfly
+function buildDragonflySprite() {
+  const pal = makePal({ body: '#2266aa', wing: '#aaddff', tail: '#1155aa', eyes: '#33cc55' });
+  return SpriteForge.buildSheet({
+    frameWidth: 24, frameHeight: 12,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 4, speed: 0.08, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, w = p.groups.wing.startIdx + 2;
+        const tl = p.groups.tail.startIdx + 2;
+        // Long tail
+        pc.hline(0, 6, 10, tl);
+        pc.hline(1, 5, 8, tl);
+        // Thorax
+        pc.fillEllipse(13, 6, 3, 2, b);
+        // Head — large with huge eyes
+        pc.fillCircle(18, 5, 3, b);
+        // 4 wings
+        const wo = Math.round(Math.sin(t * Math.PI * 2) * 1);
+        pc.fillEllipse(12, 2 + wo, 5, 1, w);
+        pc.fillEllipse(12, 10 - wo, 5, 1, w);
+        pc.fillEllipse(10, 3 + wo, 4, 1, w);
+        pc.fillEllipse(10, 9 - wo, 4, 1, w);
+        // Wing veins
+        pc.hline(8, 2 + wo, 8, w - 1);
+        pc.hline(8, 10 - wo, 8, w - 1);
+        // Tail segments
+        for (let i = 0; i < 4; i++) pc.vline(2 + i * 2, 5, 3, tl - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        // Huge compound eyes
+        pc.fillCircle(16, 4, 1, e + 1);
+        pc.fillCircle(20, 4, 1, e + 1);
+        pc.setPixel(16, 4, e); pc.setPixel(20, 4, e);
+      },
+    }},
+  });
+}
+
+// 23. Bogong Moth
+function buildBogongMothSprite() {
+  const pal = makePal({ wing: '#665544', body: '#443322', mark: '#887766', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 20, frameHeight: 14,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.2, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const w = p.groups.wing.startIdx + 2, b = p.groups.body.startIdx + 2;
+        const mk = p.groups.mark.startIdx + 2;
+        const rx = 4 + Math.round(Math.sin(t * Math.PI) * 1);
+        // Wings — triangular shape
+        pc.fillEllipse(4, 6, rx, 4, w);
+        pc.fillEllipse(16, 6, rx, 4, w);
+        // Wing markings — arrow shapes
+        pc.line(3, 4, 6, 7, mk); pc.line(3, 8, 6, 7, mk);
+        pc.line(17, 4, 14, 7, mk); pc.line(17, 8, 14, 7, mk);
+        // Body — furry
+        pc.fillEllipse(10, 7, 2, 4, b);
+        pc.fillCircle(10, 3, 2, b);
+        // Feathered antennae
+        pc.line(8, 2, 6, 0, b - 1); pc.line(12, 2, 14, 0, b - 1);
+        pc.setPixel(5, 0, b - 1); pc.setPixel(7, 1, b - 1);
+        pc.setPixel(15, 0, b - 1); pc.setPixel(13, 1, b - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(9, 2, e + 2); pc.setPixel(11, 2, e + 2);
+      },
+    }},
+  });
+}
+
+// 24. Glow-worm
+function buildGlowWormSprite() {
+  const pal = makePal({ body: '#554433', glow: '#88ffcc', head: '#443322', eyes: '#ffffff' });
+  return SpriteForge.buildSheet({
+    frameWidth: 16, frameHeight: 8,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 4, speed: 0.2, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, g = p.groups.glow.startIdx + 2;
+        const h = p.groups.head.startIdx + 2;
+        // Segmented body
+        for (let i = 0; i < 5; i++) {
+          pc.fillRect(1 + i * 2, 3, 2, 3, b);
+        }
+        // Glowing tail segments
+        const gr = Math.round(Math.sin(t * Math.PI) * 0.5);
+        pc.fillRect(11, 2, 3, 4, g);
+        pc.fillRect(12, 1 - gr, 2, 5 + gr * 2, g + 1);
+        // Head
+        pc.fillCircle(1, 4, 1, h);
+        // Tiny legs
+        for (let i = 0; i < 4; i++) {
+          pc.setPixel(2 + i * 2, 6, b - 1);
+        }
+        // Silk threads
+        pc.line(13, 6, 15, 7, b - 1);
+        pc.line(14, 6, 15, 6, b - 1);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        pc.setPixel(0, 3, e + 2); pc.setPixel(1, 3, e + 2);
+      },
+    }},
+  });
+}
+
+// 25. Huntsman Spider
+function buildHuntsmanSprite() {
+  const pal = makePal({ body: '#8b6b4e', legs: '#7a5a3e', head: '#6b4b2e', eyes: '#222222' });
+  return SpriteForge.buildSheet({
+    frameWidth: 24, frameHeight: 20,
+    palette: pal, outlineMode: 'tinted',
+    animations: { idle: {
+      frames: 3, speed: 0.2, loop: true, pingpong: true,
+      draw: (pc, p, t) => {
+        const b = p.groups.body.startIdx + 2, lg = p.groups.legs.startIdx + 2;
+        const h = p.groups.head.startIdx + 2;
+        // Abdomen
+        pc.fillEllipse(12, 12, 4, 3, b);
+        // Cephalothorax
+        pc.fillEllipse(12, 7, 3, 2, h);
+        // 8 long legs — 4 pairs spread wide
+        const lo = Math.round(Math.sin(t * Math.PI) * 1);
+        // Front pair
+        pc.line(10, 6, 4, 2 + lo, lg); pc.line(4, 2 + lo, 1, 1 + lo, lg);
+        pc.line(14, 6, 20, 2 - lo, lg); pc.line(20, 2 - lo, 23, 1 - lo, lg);
+        // Second pair
+        pc.line(10, 7, 3, 5 - lo, lg); pc.line(3, 5 - lo, 0, 4 - lo, lg);
+        pc.line(14, 7, 21, 5 + lo, lg); pc.line(21, 5 + lo, 24, 4 + lo, lg);
+        // Third pair
+        pc.line(10, 9, 3, 12 + lo, lg); pc.line(3, 12 + lo, 0, 14 + lo, lg);
+        pc.line(14, 9, 21, 12 - lo, lg); pc.line(21, 12 - lo, 24, 14 - lo, lg);
+        // Rear pair
+        pc.line(10, 11, 5, 16 - lo, lg); pc.line(5, 16 - lo, 2, 18 - lo, lg);
+        pc.line(14, 11, 19, 16 + lo, lg); pc.line(19, 16 + lo, 22, 18 + lo, lg);
+        // Fangs
+        pc.setPixel(11, 5, h - 1); pc.setPixel(13, 5, h - 1);
+        // Pedipalps
+        pc.line(11, 6, 9, 4, lg); pc.line(13, 6, 15, 4, lg);
+      },
+      drawPost: (pc, p, t) => {
+        const e = p.groups.eyes.startIdx;
+        // 8 eyes in 2 rows
+        pc.setPixel(10, 6, e + 1); pc.setPixel(11, 6, e + 1);
+        pc.setPixel(13, 6, e + 1); pc.setPixel(14, 6, e + 1);
+        pc.setPixel(11, 5, e + 2); pc.setPixel(13, 5, e + 2);
+      },
+    }},
+  });
+}
+
+// ============================================================
+// BUILD ALL SPRITES
+// ============================================================
+
+const playerSprite = buildPlayerSprite();
+const insectSprites = {};
+function buildAllInsects() {
+  insectSprites['bull_ant'] = buildBullAntSprite();
+  insectSprites['earwig'] = buildEarwigSprite();
+  insectSprites['slater'] = buildSlaterSprite();
+  insectSprites['centipede'] = buildCentipedeSprite();
+  insectSprites['christmas_beetle'] = buildChristmasBeetleSprite();
+  insectSprites['blue_banded_bee'] = buildBlueBandedBeeSprite();
+  insectSprites['painted_lady'] = buildPaintedLadySprite();
+  insectSprites['common_brown'] = buildCommonBrownSprite();
+  insectSprites['emperor_gum_moth'] = buildEmperorGumMothSprite();
+  insectSprites['hoverfly'] = buildHoverflySprite();
+  insectSprites['european_wasp'] = buildEuropeanWaspSprite();
+  insectSprites['green_tree_ant'] = buildGreenTreeAntSprite();
+  insectSprites['praying_mantis'] = buildPrayingMantisSprite();
+  insectSprites['stick_insect'] = buildStickInsectSprite();
+  insectSprites['cicada'] = buildCicadaSprite();
+  insectSprites['lerp_insect'] = buildLerpInsectSprite();
+  insectSprites['witchetty_grub'] = buildWitchettyGrubSprite();
+  insectSprites['mole_cricket'] = buildMoleCricketSprite();
+  insectSprites['ant_lion'] = buildAntLionSprite();
+  insectSprites['water_strider'] = buildWaterStriderSprite();
+  insectSprites['diving_beetle'] = buildDivingBeetleSprite();
+  insectSprites['dragonfly'] = buildDragonflySprite();
+  insectSprites['bogong_moth'] = buildBogongMothSprite();
+  insectSprites['glow_worm'] = buildGlowWormSprite();
+  insectSprites['huntsman'] = buildHuntsmanSprite();
+}
+buildAllInsects();
+
+// ============================================================
+// SPECIES DATA — 25 Real Adelaide-area insects
+// ============================================================
+
+const RARITY = {
+  common:    { label: 'Common',    color: '#55cc55', points: [10, 20] },
+  uncommon:  { label: 'Uncommon',  color: '#5588ee', points: [30, 50] },
+  rare:      { label: 'Rare',      color: '#bb55dd', points: [75, 100] },
+  legendary: { label: 'Legendary', color: '#ffaa33', points: [150, 200] },
+};
+
+const SPECIES = [
+  // GROUND (rocks, logs)
+  { id: 'bull_ant', name: 'Bull Ant', scientific: 'Myrmecia', size: 22, habitat: 'ground', rarity: 'uncommon',
+    fact: 'One of the most dangerous ants in the world. Can jump and has powerful venom. Unique to Australia.',
+    behavior: 'aggressive', speed: 45 },
+  { id: 'earwig', name: 'Earwig', scientific: 'Dermaptera', size: 15, habitat: 'ground', rarity: 'common',
+    fact: 'Despite the myth, earwigs never crawl into human ears. Mothers guard their eggs -- rare for insects.',
+    behavior: 'crawl', speed: 25 },
+  { id: 'slater', name: 'Slater / Woodlouse', scientific: 'Isopoda', size: 10, habitat: 'ground', rarity: 'common',
+    fact: 'Not actually an insect -- it\'s a crustacean, related to crabs and lobsters. Breathes through gills.',
+    behavior: 'crawl', speed: 15 },
+  { id: 'centipede', name: 'Centipede', scientific: 'Chilopoda', size: 30, habitat: 'ground', rarity: 'uncommon',
+    fact: 'Has venomous claws called forcipules. Despite the name, no centipede has exactly 100 legs -- always an odd number of pairs.',
+    behavior: 'fast', speed: 60 },
+  { id: 'christmas_beetle', name: 'Christmas Beetle', scientific: 'Anoplognathus', size: 25, habitat: 'ground', rarity: 'rare',
+    fact: 'Named because they emerge around Christmas in Australia. Larvae spend 1-2 years underground feeding on grass roots.',
+    behavior: 'crawl', speed: 20 },
+
+  // FLYING (meadow, flowers)
+  { id: 'blue_banded_bee', name: 'Blue-banded Bee', scientific: 'Amegilla', size: 12, habitat: 'flying', rarity: 'uncommon',
+    fact: 'Native Australian bee that "buzz pollinates" -- vibrates flowers at a specific frequency to release pollen. Doesn\'t live in hives.',
+    behavior: 'figure8', speed: 50 },
+  { id: 'painted_lady', name: 'Painted Lady', scientific: 'Vanessa cardui', size: 50, habitat: 'flying', rarity: 'uncommon',
+    fact: 'Migrates thousands of kilometres across Australia. The same species found on every continent except South America and Antarctica.',
+    behavior: 'float', speed: 35 },
+  { id: 'common_brown', name: 'Common Brown Butterfly', scientific: 'Heteronympha merope', size: 60, habitat: 'flying', rarity: 'common',
+    fact: 'Males patrol territories and chase anything that flies through -- even birds. Caterpillars feed on native grasses.',
+    behavior: 'float', speed: 30 },
+  { id: 'emperor_gum_moth', name: 'Emperor Gum Moth', scientific: 'Opodiphthera eucalypti', size: 120, habitat: 'flying', rarity: 'legendary',
+    fact: 'One of Australia\'s largest moths. Adults have no mouth -- they live only 2 weeks, surviving on fat stored as caterpillars.',
+    behavior: 'float', speed: 20 },
+  { id: 'hoverfly', name: 'Hoverfly', scientific: 'Syrphidae', size: 12, habitat: 'flying', rarity: 'common',
+    fact: 'Completely harmless -- has no stinger. Mimics wasps and bees to avoid predators. Larvae eat up to 400 aphids each.',
+    behavior: 'hover', speed: 40 },
+  { id: 'european_wasp', name: 'European Wasp', scientific: 'Vespula germanica', size: 15, habitat: 'flying', rarity: 'uncommon',
+    fact: 'Introduced to Australia in the 1950s. Unlike bees, can sting multiple times. Attracted to meat and sweet drinks at BBQs.',
+    behavior: 'aggressive', speed: 65 },
+
+  // TREE/BARK
+  { id: 'green_tree_ant', name: 'Green Tree Ant', scientific: 'Oecophylla smaragdina', size: 8, habitat: 'tree', rarity: 'uncommon',
+    fact: 'Weaves living leaves together using silk from their own larvae. Aboriginal Australians eat them -- they taste like lime.',
+    behavior: 'fast', speed: 55 },
+  { id: 'praying_mantis', name: 'Praying Mantis', scientific: 'Orthodera ministralis', size: 60, habitat: 'tree', rarity: 'rare',
+    fact: 'Can rotate its head 180 degrees. The only insect that can look over its own shoulder. Females sometimes eat males after mating.',
+    behavior: 'still', speed: 10 },
+  { id: 'stick_insect', name: 'Stick Insect', scientific: 'Phasmatodea', size: 150, habitat: 'tree', rarity: 'rare',
+    fact: 'World\'s longest insect (Chan\'s megastick, 567mm). Can regrow lost legs. Eggs look exactly like plant seeds.',
+    behavior: 'still', speed: 8 },
+  { id: 'cicada', name: 'Cicada', scientific: 'Cicadidae', size: 40, habitat: 'tree', rarity: 'common',
+    fact: 'Loudest insect in the world -- up to 120 decibels. Nymphs live underground for up to 7 years before emerging as adults.',
+    behavior: 'hop', speed: 70 },
+  { id: 'lerp_insect', name: 'Lerp Insect', scientific: 'Psyllidae', size: 3, habitat: 'tree', rarity: 'common',
+    fact: 'Creates a tiny sugary house (lerp) on eucalyptus leaves. Important food source for honeyeaters and other birds.',
+    behavior: 'still', speed: 5 },
+
+  // DIGGING (soil)
+  { id: 'witchetty_grub', name: 'Witchetty Grub', scientific: 'Endoxyla leucomochla', size: 70, habitat: 'dig', rarity: 'rare',
+    fact: 'Traditional Aboriginal food, high in protein. Actually a moth larva (Ghost Moth). Tastes like scrambled eggs when cooked.',
+    behavior: 'crawl', speed: 10 },
+  { id: 'mole_cricket', name: 'Mole Cricket', scientific: 'Gryllotalpidae', size: 35, habitat: 'dig', rarity: 'uncommon',
+    fact: 'Has shovel-like forelegs for digging. Males sing from their burrow -- the burrow shape amplifies their call like a speaker.',
+    behavior: 'burrow', speed: 30 },
+  { id: 'ant_lion', name: 'Ant Lion Larva', scientific: 'Myrmeleontidae', size: 15, habitat: 'dig', rarity: 'rare',
+    fact: 'Builds a cone-shaped sand trap. Flicks sand at prey to make them slide down. Transforms into a delicate lacewing as an adult.',
+    behavior: 'still', speed: 5 },
+
+  // WATER
+  { id: 'water_strider', name: 'Water Strider', scientific: 'Gerridae', size: 15, habitat: 'water', rarity: 'common',
+    fact: 'Walks on water using tiny hairs on its feet that trap air. Can detect prey by sensing vibrations on the water surface.',
+    behavior: 'skate', speed: 45 },
+  { id: 'diving_beetle', name: 'Diving Beetle', scientific: 'Dytiscidae', size: 30, habitat: 'water', rarity: 'uncommon',
+    fact: 'Carries a bubble of air under its wing covers like a scuba tank. Both larvae and adults are fierce predators.',
+    behavior: 'swim', speed: 40 },
+  { id: 'dragonfly', name: 'Australian Emperor', scientific: 'Anax papuensis', size: 75, habitat: 'water', rarity: 'rare',
+    fact: 'Can fly at 60km/h. Each eye has up to 30,000 lenses. Existed before dinosaurs -- 300 million years old.',
+    behavior: 'erratic', speed: 90 },
+
+  // NIGHT
+  { id: 'bogong_moth', name: 'Bogong Moth', scientific: 'Agrotis infusa', size: 45, habitat: 'night', rarity: 'uncommon',
+    fact: 'Migrates to the Australian Alps in billions each spring. Aboriginal people gathered to feast on them -- a major food source for thousands of years.',
+    behavior: 'float', speed: 30 },
+  { id: 'glow_worm', name: 'Glow-worm', scientific: 'Arachnocampa', size: 20, habitat: 'night', rarity: 'legendary',
+    fact: 'Uses bioluminescence to attract prey into sticky threads. Not actually a worm -- it\'s a beetle or fly larva.',
+    behavior: 'glow', speed: 5 },
+  { id: 'huntsman', name: 'Huntsman Spider', scientific: 'Sparassidae', size: 120, habitat: 'night', rarity: 'rare',
+    fact: 'Not actually an insect (it\'s an arachnid) but too iconic to leave out. Harmless to humans despite terrifying size. Eats cockroaches.',
+    behavior: 'fast', speed: 80 },
+];
+
+// ============================================================
+// GAME CONFIG
+// ============================================================
+const WORLD_W = 2400;
+const WORLD_H = 2400;
+const PLAYER_SPEED = 160;
+const CATCH_RADIUS = 32;
+const GAME_TIME = 300; // 5 minutes
+const DUSK_CYCLE = 90;
+const DUSK_DURATION = 20;
+const COOLDOWN_TIME = 10;
+
+// ============================================================
+// PERSISTENT JOURNAL (localStorage)
+// ============================================================
+const SAVE_KEY = 'bugcatcher_adelaide_journal';
+let savedJournal = {};
+try { savedJournal = JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; } catch(e) {}
+function saveJournal() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(savedJournal)); } catch(e) {}
+}
+
+// ============================================================
+// GAME STATE
+// ============================================================
+let state = 'title';
+let score = 0;
+let roundCatches = 0;
+let timeLeft = GAME_TIME;
+let highScore = parseInt(localStorage.getItem('bugcatcher_high') || '0');
+let warningPlayed = false;
+
+const player = { x: WORLD_W / 2, y: WORLD_H / 2, vx: 0, vy: 0, facing: 1 };
+const bugs = [];
+const floatingTexts = [];
+const particles = [];
+
+// Camera
+const cam = { x: 0, y: 0 };
+
+// Input
+const keys = {};
+let touchTarget = null;
+let touchActive = false;
+
+// Journal UI
+let journalOpen = false;
+let journalDetail = null;
+let journalCards = [];
+let journalScroll = 0;
+
+// Cooldowns for habitat interactions
+const cooldowns = { rock: 0, tree: 0, dig: 0 };
+
+// ============================================================
+// WORLD OBJECTS
+// ============================================================
+const decorations = [];
+const rocks = [];
+const trees = [];
+const digSpots = [];
+const waterAreas = [];
+const flowers = [];
+
+function initWorld() {
+  decorations.length = 0;
+  rocks.length = 0;
+  trees.length = 0;
+  digSpots.length = 0;
+  waterAreas.length = 0;
+  flowers.length = 0;
+
+  const rng = sf2_seededRNG(42);
+
+  // Creek/pond area — bottom-right quadrant
+  waterAreas.push({ x: 1800, y: 1800, w: 400, h: 350, type: 'pond' });
+  waterAreas.push({ x: 1600, y: 1500, w: 150, h: 500, type: 'creek' });
+
+  // Rocks (8 interactive)
+  const rockPositions = [
+    [300, 400], [800, 300], [1200, 600], [500, 1100],
+    [1500, 900], [200, 1600], [1000, 1500], [700, 700],
+  ];
+  for (const [rx, ry] of rockPositions) {
+    const rock = {
+      type: 'rock', x: rx + rng() * 60 - 30, y: ry + rng() * 60 - 30,
+      w: 30 + Math.floor(rng() * 20), h: 22 + Math.floor(rng() * 14),
+      shade: Math.floor(rng() * 30) + 110,
+      flipped: false, flipTimer: 0, interactive: true,
+    };
+    rocks.push(rock);
+    decorations.push(rock);
+  }
+
+  // Extra non-interactive small rocks
+  for (let i = 0; i < 25; i++) {
+    decorations.push({
+      type: 'rock', x: rng() * WORLD_W, y: rng() * WORLD_H,
+      w: 10 + Math.floor(rng() * 12), h: 8 + Math.floor(rng() * 8),
+      shade: Math.floor(rng() * 40) + 100, interactive: false,
+    });
+  }
+
+  // Trees (6 interactive eucalyptus)
+  const treePositions = [
+    [400, 200], [900, 500], [1400, 300], [600, 1300], [1100, 1100], [300, 900],
+  ];
+  for (const [tx, ty] of treePositions) {
+    const tree = {
+      type: 'tree', x: tx + rng() * 40 - 20, y: ty + rng() * 40 - 20,
+      height: 80 + Math.floor(rng() * 40),
+      canopyR: 35 + Math.floor(rng() * 15),
+      shakeTimer: 0, interactive: true,
+      leafParticles: [],
+    };
+    trees.push(tree);
+    decorations.push(tree);
+  }
+
+  // Dig spots (5)
+  const digPositions = [
+    [600, 500], [1000, 800], [300, 1400], [1300, 1300], [800, 1800],
+  ];
+  for (const [dx, dy] of digPositions) {
+    const dig = {
+      type: 'dig', x: dx + rng() * 30 - 15, y: dy + rng() * 30 - 15,
+      w: 40, h: 30, digTimer: 0, dug: false, interactive: true,
+    };
+    digSpots.push(dig);
+    decorations.push(dig);
+  }
+
+  // Flowers
+  const flowerColors = ['#ff6688', '#ffaa33', '#ffee55', '#bb88ff', '#66ccff', '#ff88cc', '#ffffff', '#ee4444', '#cc66ff'];
+  for (let i = 0; i < 150; i++) {
+    const f = {
+      type: 'flower',
+      x: rng() * WORLD_W, y: rng() * WORLD_H,
+      color: flowerColors[Math.floor(rng() * flowerColors.length)],
+      size: 3 + Math.floor(rng() * 3),
+      petalCount: 4 + Math.floor(rng() * 4),
+    };
+    flowers.push(f);
+    decorations.push(f);
+  }
+
+  // Grass tufts
+  for (let i = 0; i < 250; i++) {
+    decorations.push({
+      type: 'grass',
+      x: rng() * WORLD_W, y: rng() * WORLD_H,
+      height: 5 + Math.floor(rng() * 7),
+      blades: 3 + Math.floor(rng() * 4),
+    });
+  }
+}
+
+// ============================================================
+// BUG SPAWNING
+// ============================================================
+
+function getSpeciesPoints(sp) {
+  const r = RARITY[sp.rarity];
+  return r.points[0] + Math.floor(Math.random() * (r.points[1] - r.points[0] + 1));
+}
+
+function spawnBugs() {
+  bugs.length = 0;
+
+  // Spawn based on habitat — meadow/flying insects always present
+  const flyingSpecies = SPECIES.filter(s => s.habitat === 'flying');
+  for (const sp of flyingSpecies) {
+    const count = sp.rarity === 'common' ? 3 : sp.rarity === 'uncommon' ? 2 : sp.rarity === 'legendary' ? 0 : 1;
+    for (let i = 0; i < count; i++) bugs.push(createBug(sp));
+  }
+
+  // Water insects near water
+  const waterSpecies = SPECIES.filter(s => s.habitat === 'water');
+  for (const sp of waterSpecies) {
+    const count = sp.rarity === 'common' ? 2 : 1;
+    for (let i = 0; i < count; i++) {
+      const b = createBug(sp);
+      const wa = waterAreas[Math.floor(Math.random() * waterAreas.length)];
+      b.x = wa.x + Math.random() * wa.w;
+      b.y = wa.y + Math.random() * wa.h;
+      b.waterArea = wa;
+      bugs.push(b);
+    }
+  }
+}
+
+function createBug(sp) {
+  return {
+    species: sp.id,
+    specData: sp,
+    x: 100 + Math.random() * (WORLD_W - 200),
+    y: 100 + Math.random() * (WORLD_H - 200),
+    vx: 0, vy: 0,
+    alive: true,
+    visible: true,
+    timer: Math.random() * 3,
+    angle: Math.random() * Math.PI * 2,
+    hopCooldown: 0,
+    fig8phase: Math.random() * Math.PI * 2,
+    waterArea: null,
+    fadeIn: 1,
+    points: getSpeciesPoints(sp),
+  };
+}
+
+function spawnFromInteraction(habitat, x, y) {
+  // Find species that match this habitat
+  const pool = SPECIES.filter(s => s.habitat === habitat);
+  if (pool.length === 0) return;
+
+  // Weighted random — commons more likely
+  const weights = pool.map(s => s.rarity === 'common' ? 5 : s.rarity === 'uncommon' ? 3 : s.rarity === 'rare' ? 1 : 0.3);
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  let picked = pool[0];
+  for (let i = 0; i < pool.length; i++) {
+    r -= weights[i];
+    if (r <= 0) { picked = pool[i]; break; }
+  }
+
+  const count = 1 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < count; i++) {
+    const b = createBug(picked);
+    b.x = x + (Math.random() - 0.5) * 60;
+    b.y = y + (Math.random() - 0.5) * 60;
+    b.fadeIn = 0;
+    bugs.push(b);
+  }
+}
+
+// ============================================================
+// GAME RESET
+// ============================================================
+function resetGame() {
+  score = 0;
+  roundCatches = 0;
+  timeLeft = GAME_TIME;
+  warningPlayed = false;
+  player.x = WORLD_W / 2;
+  player.y = WORLD_H / 2;
+  player.vx = 0;
+  player.vy = 0;
+  floatingTexts.length = 0;
+  particles.length = 0;
+  cooldowns.rock = 0;
+  cooldowns.tree = 0;
+  cooldowns.dig = 0;
+  journalOpen = false;
+  journalDetail = null;
+  initWorld();
+  spawnBugs();
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+window.addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  const k = e.key.toLowerCase();
+  if (k === 'j' && state === 'playing' && !journalOpen) {
+    journalOpen = true;
+    journalDetail = null;
+    journalScroll = 0;
+    SFX.journalOpen();
+    e.preventDefault();
+  } else if ((k === 'j' || k === 'escape') && journalOpen) {
+    if (journalDetail) { journalDetail = null; }
+    else { journalOpen = false; SFX.journalClose(); }
+    e.preventDefault();
+  } else if ((k === 'enter' || k === ' ') && state === 'title') {
+    state = 'playing';
+    resetGame();
+    SFX.select();
+    e.preventDefault();
+  } else if ((k === 'enter' || k === ' ') && state === 'gameover') {
+    state = 'title';
+    SFX.select();
+    e.preventDefault();
+  }
+});
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  handlePointerDown(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  handlePointerMove(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: false });
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  touchActive = false;
+  touchTarget = null;
+}, { passive: false });
+canvas.addEventListener('mousedown', e => handlePointerDown(e.clientX, e.clientY));
+canvas.addEventListener('mousemove', e => { if (touchActive) handlePointerMove(e.clientX, e.clientY); });
+canvas.addEventListener('mouseup', () => { touchActive = false; touchTarget = null; });
+
+function handlePointerDown(px, py) {
+  if (state === 'title') { state = 'playing'; resetGame(); SFX.select(); return; }
+  if (state === 'gameover') { state = 'title'; SFX.select(); return; }
+
+  if (journalOpen) {
+    if (journalDetail) {
+      journalDetail = null;
+      return;
+    }
+    // Check card clicks
+    for (const card of journalCards) {
+      if (px >= card.x && px <= card.x + card.w && py >= card.y && py <= card.y + card.h) {
+        journalDetail = card.species;
+        return;
+      }
+    }
+    // Close button area (bottom)
+    if (py > H - 40) { journalOpen = false; SFX.journalClose(); }
+    return;
+  }
+
+  if (state !== 'playing') return;
+
+  // Journal button — top-left
+  if (px < 80 && py < 45) {
+    journalOpen = true;
+    journalDetail = null;
+    journalScroll = 0;
+    SFX.journalOpen();
+    return;
+  }
+
+  // Check habitat interactions
+  const wx = px + cam.x;
+  const wy = py + cam.y;
+
+  // Rocks
+  if (cooldowns.rock <= 0) {
+    for (const rock of rocks) {
+      if (!rock.interactive) continue;
+      const dx = wx - rock.x, dy = wy - rock.y;
+      if (Math.abs(dx) < rock.w && Math.abs(dy) < rock.h) {
+        rock.flipped = true;
+        rock.flipTimer = 2;
+        cooldowns.rock = COOLDOWN_TIME;
+        SFX.rockFlip();
+        spawnFromInteraction('ground', rock.x, rock.y);
+        // Particles
+        for (let i = 0; i < 6; i++) {
+          particles.push({ x: rock.x, y: rock.y, vx: (Math.random() - 0.5) * 40, vy: -20 - Math.random() * 30, life: 0.5, color: '#8b7355', size: 2 });
+        }
+        touchActive = true;
+        touchTarget = { x: px, y: py };
+        return;
+      }
+    }
+  }
+
+  // Trees
+  if (cooldowns.tree <= 0) {
+    for (const tree of trees) {
+      if (!tree.interactive) continue;
+      const dx = wx - tree.x, dy = wy - (tree.y - tree.height / 2);
+      if (Math.abs(dx) < tree.canopyR + 10 && Math.abs(dy) < tree.height / 2 + 10) {
+        tree.shakeTimer = 1;
+        cooldowns.tree = COOLDOWN_TIME;
+        SFX.treeShake();
+        spawnFromInteraction('tree', tree.x, tree.y - 20);
+        // Leaf particles
+        for (let i = 0; i < 10; i++) {
+          particles.push({ x: tree.x + (Math.random() - 0.5) * tree.canopyR * 2, y: tree.y - tree.height + Math.random() * 30, vx: (Math.random() - 0.5) * 30, vy: 20 + Math.random() * 40, life: 1.5, color: ['#3a7a2a', '#55aa33', '#448822'][Math.floor(Math.random() * 3)], size: 3 });
+        }
+        touchActive = true;
+        touchTarget = { x: px, y: py };
+        return;
+      }
+    }
+  }
+
+  // Dig spots
+  if (cooldowns.dig <= 0) {
+    for (const dig of digSpots) {
+      if (!dig.interactive) continue;
+      const dx = wx - dig.x, dy = wy - dig.y;
+      if (Math.abs(dx) < dig.w && Math.abs(dy) < dig.h) {
+        dig.dug = true;
+        dig.digTimer = 3;
+        cooldowns.dig = COOLDOWN_TIME;
+        SFX.dig();
+        spawnFromInteraction('dig', dig.x, dig.y);
+        for (let i = 0; i < 8; i++) {
+          particles.push({ x: dig.x, y: dig.y, vx: (Math.random() - 0.5) * 50, vy: -30 - Math.random() * 20, life: 0.6, color: '#7a5533', size: 3 });
+        }
+        touchActive = true;
+        touchTarget = { x: px, y: py };
+        return;
+      }
+    }
+  }
+
+  touchActive = true;
+  touchTarget = { x: px, y: py };
+}
+
+function handlePointerMove(px, py) {
+  if (touchActive) touchTarget = { x: px, y: py };
+}
+
+// ============================================================
+// DUSK SYSTEM
+// ============================================================
+function getDuskFactor() {
+  const elapsed = GAME_TIME - timeLeft;
+  const cyclePos = elapsed % DUSK_CYCLE;
+  if (cyclePos >= DUSK_CYCLE - DUSK_DURATION) {
+    const duskElapsed = cyclePos - (DUSK_CYCLE - DUSK_DURATION);
+    if (duskElapsed < 4) return duskElapsed / 4;
+    if (duskElapsed > DUSK_DURATION - 4) return (DUSK_DURATION - duskElapsed) / 4;
+    return 1;
+  }
+  return 0;
+}
+
+// ============================================================
+// UPDATE
+// ============================================================
+function update(dt) {
+  if (state !== 'playing' || journalOpen) return;
+
+  // Timer
+  timeLeft -= dt;
+  if (timeLeft <= 0) {
+    timeLeft = 0;
+    state = 'gameover';
+    SFX.gameOver();
+    if (score > highScore) {
+      highScore = score;
+      localStorage.setItem('bugcatcher_high', '' + highScore);
+    }
+    submitScore('bug-catcher', score);
+    return;
+  }
+  if (timeLeft <= 30 && !warningPlayed) {
+    SFX.warning();
+    warningPlayed = true;
+  }
+
+  // Cooldowns
+  for (const k of Object.keys(cooldowns)) {
+    if (cooldowns[k] > 0) cooldowns[k] = Math.max(0, cooldowns[k] - dt);
+  }
+
+  // Rock/dig timers
+  for (const rock of rocks) {
+    if (rock.flipTimer > 0) {
+      rock.flipTimer -= dt;
+      if (rock.flipTimer <= 0) rock.flipped = false;
+    }
+  }
+  for (const dig of digSpots) {
+    if (dig.digTimer > 0) {
+      dig.digTimer -= dt;
+      if (dig.digTimer <= 0) dig.dug = false;
+    }
+  }
+  for (const tree of trees) {
+    if (tree.shakeTimer > 0) tree.shakeTimer -= dt;
+  }
+
+  // Player movement
+  let dx = 0, dy = 0;
+  if (keys['arrowleft'] || keys['a']) dx -= 1;
+  if (keys['arrowright'] || keys['d']) dx += 1;
+  if (keys['arrowup'] || keys['w']) dy -= 1;
+  if (keys['arrowdown'] || keys['s']) dy += 1;
+
+  if (touchActive && touchTarget) {
+    const wx = touchTarget.x + cam.x;
+    const wy = touchTarget.y + cam.y;
+    const tdx = wx - player.x;
+    const tdy = wy - player.y;
+    const dist = Math.sqrt(tdx * tdx + tdy * tdy);
+    if (dist > 10) { dx = tdx / dist; dy = tdy / dist; }
+  }
+
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len > 0) {
+    dx /= len; dy /= len;
+    player.x += dx * PLAYER_SPEED * dt;
+    player.y += dy * PLAYER_SPEED * dt;
+    if (dx !== 0) player.facing = dx > 0 ? 1 : -1;
+    playerSprite.animator.play('walk');
+  } else {
+    playerSprite.animator.play('idle');
+  }
+  playerSprite.animator.update(dt);
+
+  player.x = Math.max(14, Math.min(WORLD_W - 14, player.x));
+  player.y = Math.max(16, Math.min(WORLD_H - 16, player.y));
+
+  // Dusk: spawn/despawn night insects
+  const dusk = getDuskFactor();
+  if (dusk > 0.3) {
+    const nightSpecies = SPECIES.filter(s => s.habitat === 'night');
+    for (const ns of nightSpecies) {
+      const count = bugs.filter(b => b.species === ns.id && b.alive).length;
+      const max = ns.rarity === 'legendary' ? 1 : 2;
+      if (count < max && Math.random() < 0.02) {
+        const b = createBug(ns);
+        b.x = player.x + (Math.random() - 0.5) * 400;
+        b.y = player.y + (Math.random() - 0.5) * 400;
+        b.fadeIn = 0;
+        bugs.push(b);
+      }
+    }
+  }
+
+  // Despawn night insects when not dusk
+  if (dusk < 0.1) {
+    for (const b of bugs) {
+      if (b.specData.habitat === 'night' && b.alive) b.alive = false;
+    }
+  }
+
+  // Update bugs
+  for (const bug of bugs) {
+    if (!bug.alive) continue;
+
+    const sp = bug.specData;
+    bug.timer += dt;
+    if (bug.fadeIn < 1) bug.fadeIn = Math.min(1, bug.fadeIn + dt * 2);
+
+    const distToPlayer = Math.sqrt((bug.x - player.x) ** 2 + (bug.y - player.y) ** 2);
+
+    // Bug AI
+    switch (sp.behavior) {
+      case 'float':
+        bug.angle += (Math.random() - 0.5) * 2 * dt;
+        bug.vx = Math.cos(bug.angle) * sp.speed;
+        bug.vy = Math.sin(bug.angle) * sp.speed;
+        bug.vy += Math.sin(bug.timer * 2) * 10;
+        break;
+      case 'crawl':
+        if (bug.timer > 2 + Math.random() * 2) { bug.angle = Math.random() * Math.PI * 2; bug.timer = 0; }
+        bug.vx = Math.cos(bug.angle) * sp.speed;
+        bug.vy = Math.sin(bug.angle) * sp.speed;
+        break;
+      case 'fast':
+        if (distToPlayer < 100) {
+          const away = Math.atan2(bug.y - player.y, bug.x - player.x);
+          bug.vx = Math.cos(away) * sp.speed * 1.5;
+          bug.vy = Math.sin(away) * sp.speed * 1.5;
+        } else {
+          if (bug.timer > 1.5 + Math.random()) { bug.angle = Math.random() * Math.PI * 2; bug.timer = 0; }
+          bug.vx = Math.cos(bug.angle) * sp.speed;
+          bug.vy = Math.sin(bug.angle) * sp.speed;
+        }
+        break;
+      case 'figure8':
+        bug.fig8phase += dt * 1.5;
+        bug.vx = Math.cos(bug.fig8phase) * sp.speed;
+        bug.vy = Math.sin(bug.fig8phase * 2) * sp.speed * 0.5;
+        break;
+      case 'hover':
+        bug.vx += (Math.random() - 0.5) * 100 * dt;
+        bug.vy += (Math.random() - 0.5) * 100 * dt;
+        bug.vx *= 0.95; bug.vy *= 0.95;
+        break;
+      case 'aggressive':
+        // Wasps/bull ants — chase player when close
+        if (distToPlayer < 120 && distToPlayer > CATCH_RADIUS + 5) {
+          const toP = Math.atan2(player.y - bug.y, player.x - bug.x);
+          bug.vx = Math.cos(toP) * sp.speed;
+          bug.vy = Math.sin(toP) * sp.speed;
+        } else {
+          if (bug.timer > 2 + Math.random() * 2) { bug.angle = Math.random() * Math.PI * 2; bug.timer = 0; }
+          bug.vx = Math.cos(bug.angle) * sp.speed;
+          bug.vy = Math.sin(bug.angle) * sp.speed;
+        }
+        break;
+      case 'still':
+        bug.vx *= 0.9; bug.vy *= 0.9;
+        if (distToPlayer < 60) {
+          const away = Math.atan2(bug.y - player.y, bug.x - player.x);
+          bug.vx += Math.cos(away) * sp.speed * 0.5;
+          bug.vy += Math.sin(away) * sp.speed * 0.5;
+        }
+        break;
+      case 'hop':
+        bug.hopCooldown -= dt;
+        if (distToPlayer < 100 && bug.hopCooldown <= 0) {
+          const away = Math.atan2(bug.y - player.y, bug.x - player.x);
+          bug.vx = Math.cos(away) * sp.speed * 2;
+          bug.vy = Math.sin(away) * sp.speed * 2;
+          bug.hopCooldown = 1;
+        } else {
+          bug.vx *= 0.92; bug.vy *= 0.92;
+        }
+        break;
+      case 'erratic':
+        if (bug.timer > 0.3 + Math.random() * 0.4) { bug.angle = Math.random() * Math.PI * 2; bug.timer = 0; }
+        bug.vx += (Math.cos(bug.angle) * sp.speed - bug.vx) * 3 * dt;
+        bug.vy += (Math.sin(bug.angle) * sp.speed - bug.vy) * 3 * dt;
+        break;
+      case 'skate':
+        // Water strider — glide on water surface
+        bug.angle += (Math.random() - 0.5) * 3 * dt;
+        bug.vx = Math.cos(bug.angle) * sp.speed;
+        bug.vy = Math.sin(bug.angle) * sp.speed;
+        break;
+      case 'swim':
+        bug.angle += (Math.random() - 0.5) * 2 * dt;
+        bug.vx = Math.cos(bug.angle) * sp.speed;
+        bug.vy = Math.sin(bug.angle) * sp.speed;
+        break;
+      case 'burrow':
+        if (distToPlayer < 80) {
+          bug.vx *= 0.8; bug.vy *= 0.8; // tries to burrow
+        } else {
+          if (bug.timer > 2 + Math.random()) { bug.angle = Math.random() * Math.PI * 2; bug.timer = 0; }
+          bug.vx = Math.cos(bug.angle) * sp.speed;
+          bug.vy = Math.sin(bug.angle) * sp.speed;
+        }
+        break;
+      case 'glow':
+        bug.angle += (Math.random() - 0.5) * 1 * dt;
+        bug.vx = Math.cos(bug.angle) * sp.speed;
+        bug.vy = Math.sin(bug.angle) * sp.speed;
+        break;
+    }
+
+    bug.x += bug.vx * dt;
+    bug.y += bug.vy * dt;
+
+    // Water insects stay near water
+    if (bug.waterArea) {
+      const wa = bug.waterArea;
+      bug.x = Math.max(wa.x, Math.min(wa.x + wa.w, bug.x));
+      bug.y = Math.max(wa.y, Math.min(wa.y + wa.h, bug.y));
+    }
+
+    // Bounce off world edges
+    if (bug.x < 20 || bug.x > WORLD_W - 20) { bug.vx *= -1; bug.angle = Math.PI - bug.angle; bug.x = Math.max(20, Math.min(WORLD_W - 20, bug.x)); }
+    if (bug.y < 20 || bug.y > WORLD_H - 20) { bug.vy *= -1; bug.angle = -bug.angle; bug.y = Math.max(20, Math.min(WORLD_H - 20, bug.y)); }
+
+    // Update sprite
+    if (insectSprites[bug.species]) insectSprites[bug.species].animator.update(dt);
+
+    // Catch check — auto-catch within radius
+    if (distToPlayer < CATCH_RADIUS && bug.fadeIn >= 1) {
+      // European wasp — chance to sting
+      if (bug.species === 'european_wasp' && Math.random() < 0.3) {
+        timeLeft = Math.max(0, timeLeft - 3);
+        floatingTexts.push({ x: bug.x, y: bug.y - 20, text: 'STUNG! -3s', color: '#ff3333', life: 1.5 });
+        SFX.sting();
+        bug.angle += Math.PI;
+        bug.timer = 0;
+        continue;
+      }
+
+      bug.alive = false;
+      score += bug.points;
+      roundCatches++;
+
+      const rarityInfo = RARITY[sp.rarity];
+      floatingTexts.push({ x: bug.x, y: bug.y - 20, text: sp.name + ' +' + bug.points, color: rarityInfo.color, life: 1.8 });
+
+      if (sp.rarity === 'rare' || sp.rarity === 'legendary') {
+        SFX.rareCatch();
+      } else {
+        SFX['catch']();
+      }
+
+      // Persistent journal
+      if (!savedJournal[sp.id]) {
+        savedJournal[sp.id] = { discovered: true, catchCount: 0 };
+        floatingTexts.push({ x: bug.x, y: bug.y - 40, text: 'NEW SPECIES!', color: '#ffff44', life: 2.5 });
+      }
+      savedJournal[sp.id].catchCount = (savedJournal[sp.id].catchCount || 0) + 1;
+      saveJournal();
+
+      // Respawn after delay (same habitat type)
+      const hab = sp.habitat;
+      setTimeout(() => {
+        if (state !== 'playing') return;
+        const pool = SPECIES.filter(s => s.habitat === hab && s.habitat !== 'night');
+        if (pool.length === 0) return;
+        const pick = pool[Math.floor(Math.random() * pool.length)];
+        const nb = createBug(pick);
+        if (hab === 'water' && waterAreas.length > 0) {
+          const wa = waterAreas[Math.floor(Math.random() * waterAreas.length)];
+          nb.x = wa.x + Math.random() * wa.w;
+          nb.y = wa.y + Math.random() * wa.h;
+          nb.waterArea = wa;
+        }
+        bugs.push(nb);
+      }, 3000 + Math.random() * 4000);
+    }
+  }
+
+  // Remove dead bugs
+  for (let i = bugs.length - 1; i >= 0; i--) {
+    if (!bugs[i].alive) bugs.splice(i, 1);
+  }
+
+  // Floating texts
+  for (const ft of floatingTexts) { ft.y -= 25 * dt; ft.life -= dt; }
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    if (floatingTexts[i].life <= 0) floatingTexts.splice(i, 1);
+  }
+
+  // Particles
+  for (const p of particles) {
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vy += 60 * dt; // gravity
+    p.life -= dt;
+  }
+  for (let i = particles.length - 1; i >= 0; i--) {
+    if (particles[i].life <= 0) particles.splice(i, 1);
+  }
+
+  // Camera
+  cam.x = player.x - W / 2;
+  cam.y = player.y - H / 2;
+  cam.x = Math.max(0, Math.min(WORLD_W - W, cam.x));
+  cam.y = Math.max(0, Math.min(WORLD_H - H, cam.y));
+}
+
+// ============================================================
+// RENDER HELPERS
+// ============================================================
+
+function isOnScreen(x, y, margin) {
+  const sx = x - cam.x, sy = y - cam.y;
+  return sx > -margin && sx < W + margin && sy > -margin && sy < H + margin;
+}
+
+function drawBackground() {
+  // Green meadow base
+  ctx.fillStyle = '#4a8c3f';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grass texture
+  const rng = sf2_seededRNG(7);
+  const greens = ['#3f7a34', '#55a048', '#4d9440', '#3a7530'];
+  for (let i = 0; i < 500; i++) {
+    const gx = rng() * WORLD_W - cam.x;
+    const gy = rng() * WORLD_H - cam.y;
+    if (gx < -10 || gx > W + 10 || gy < -10 || gy > H + 10) { rng(); continue; }
+    ctx.fillStyle = greens[Math.floor(rng() * greens.length)];
+    ctx.fillRect(gx, gy, 3 + rng() * 5, 3 + rng() * 5);
+  }
+
+  // Water areas
+  for (const wa of waterAreas) {
+    const wx = wa.x - cam.x, wy = wa.y - cam.y;
+    if (wx > W + 10 || wx + wa.w < -10 || wy > H + 10 || wy + wa.h < -10) continue;
+
+    // Water base
+    const grad = ctx.createLinearGradient(wx, wy, wx, wy + wa.h);
+    grad.addColorStop(0, '#3388aa');
+    grad.addColorStop(0.5, '#226688');
+    grad.addColorStop(1, '#1a5577');
+    ctx.fillStyle = grad;
+    if (wa.type === 'creek') {
+      ctx.fillRect(wx, wy, wa.w, wa.h);
+    } else {
+      ctx.beginPath();
+      ctx.ellipse(wx + wa.w / 2, wy + wa.h / 2, wa.w / 2, wa.h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Water shimmer
+    ctx.fillStyle = 'rgba(150,220,255,0.15)';
+    const t = Date.now() / 1000;
+    for (let i = 0; i < 8; i++) {
+      const sx = wx + 20 + Math.sin(t + i * 1.3) * (wa.w * 0.3) + i * (wa.w / 10);
+      const sy = wy + 10 + Math.cos(t * 0.7 + i * 0.9) * (wa.h * 0.2) + i * (wa.h / 10);
+      ctx.fillRect(sx, sy, 15 + Math.sin(t + i) * 5, 2);
+    }
+
+    // Shore
+    ctx.strokeStyle = '#6b9955';
+    ctx.lineWidth = 2;
+    if (wa.type === 'creek') {
+      ctx.strokeRect(wx, wy, wa.w, wa.h);
+    } else {
+      ctx.beginPath();
+      ctx.ellipse(wx + wa.w / 2, wy + wa.h / 2, wa.w / 2, wa.h / 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawDecoration(d) {
+  const sx = d.x - cam.x, sy = d.y - cam.y;
+  if (sx < -60 || sx > W + 60 || sy < -120 || sy > H + 60) return;
+
+  if (d.type === 'flower') {
+    ctx.fillStyle = d.color;
+    for (let p = 0; p < d.petalCount; p++) {
+      const a = (p / d.petalCount) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(sx + Math.cos(a) * d.size, sy + Math.sin(a) * d.size, d.size * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#ffdd00';
+    ctx.beginPath();
+    ctx.arc(sx, sy, d.size * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (d.type === 'rock') {
+    const s = d.shade;
+    if (d.flipped) {
+      // Flipped rock — shows underside (darker)
+      ctx.fillStyle = `rgb(${s - 30},${s - 25},${s - 35})`;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, d.w / 2, d.h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Exposed soil underneath
+      ctx.fillStyle = '#6b5533';
+      ctx.beginPath();
+      ctx.ellipse(sx, sy + 3, d.w / 2 - 4, d.h / 2 - 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = `rgb(${s},${s + 5},${s - 5})`;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, d.w / 2, d.h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgb(${s + 25},${s + 30},${s + 20})`;
+      ctx.beginPath();
+      ctx.ellipse(sx - d.w * 0.15, sy - d.h * 0.15, d.w * 0.25, d.h * 0.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Interactive indicator
+      if (d.interactive && cooldowns.rock <= 0) {
+        ctx.strokeStyle = 'rgba(255,255,200,0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, d.w / 2 + 3, d.h / 2 + 3, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+  } else if (d.type === 'tree') {
+    const shakeOff = d.shakeTimer > 0 ? Math.sin(d.shakeTimer * 30) * 3 : 0;
+    // Trunk
+    ctx.fillStyle = '#6b4b2f';
+    ctx.fillRect(sx - 5 + shakeOff * 0.2, sy - d.height * 0.6, 10, d.height * 0.6);
+    ctx.fillStyle = '#5a3a1f';
+    ctx.fillRect(sx - 3 + shakeOff * 0.2, sy - d.height * 0.6, 2, d.height * 0.6);
+    // Canopy — eucalyptus drooping shape
+    const canopyY = sy - d.height;
+    ctx.fillStyle = '#3a7a2a';
+    ctx.beginPath();
+    ctx.ellipse(sx + shakeOff, canopyY + 15, d.canopyR, d.canopyR * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#448833';
+    ctx.beginPath();
+    ctx.ellipse(sx - 5 + shakeOff, canopyY + 10, d.canopyR * 0.7, d.canopyR * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#55aa33';
+    ctx.beginPath();
+    ctx.ellipse(sx + 8 + shakeOff, canopyY + 5, d.canopyR * 0.5, d.canopyR * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Drooping leaves
+    ctx.strokeStyle = '#3a7a2a';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 5; i++) {
+      const lx = sx + (i - 2) * 12 + shakeOff;
+      ctx.beginPath();
+      ctx.moveTo(lx, canopyY + d.canopyR * 0.5);
+      ctx.quadraticCurveTo(lx + (i % 2 ? 5 : -5), canopyY + d.canopyR * 0.5 + 15, lx + (i % 2 ? 3 : -3), canopyY + d.canopyR * 0.5 + 25);
+      ctx.stroke();
+    }
+    // Interactive indicator
+    if (d.interactive && cooldowns.tree <= 0) {
+      ctx.strokeStyle = 'rgba(255,255,200,0.2)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(sx, canopyY + 15, d.canopyR + 5, d.canopyR * 0.7 + 5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  } else if (d.type === 'dig') {
+    if (d.dug) {
+      // Hole in ground
+      ctx.fillStyle = '#5a3a1f';
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, d.w / 2, d.h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#4a2a0f';
+      ctx.beginPath();
+      ctx.ellipse(sx, sy + 2, d.w / 2 - 5, d.h / 2 - 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Bare soil patch
+      ctx.fillStyle = '#8b7355';
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, d.w / 2, d.h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#9b8365';
+      ctx.beginPath();
+      ctx.ellipse(sx - 5, sy - 3, d.w / 4, d.h / 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Interactive indicator
+      if (d.interactive && cooldowns.dig <= 0) {
+        ctx.strokeStyle = 'rgba(255,255,200,0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, d.w / 2 + 3, d.h / 2 + 3, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+  } else if (d.type === 'grass') {
+    ctx.strokeStyle = '#5aaa40';
+    ctx.lineWidth = 1.5;
+    for (let b = 0; b < d.blades; b++) {
+      const bx = sx + (b - d.blades / 2) * 3;
+      ctx.beginPath();
+      ctx.moveTo(bx, sy);
+      ctx.quadraticCurveTo(bx + (b % 2 ? 3 : -3), sy - d.height * 0.6, bx + (b % 2 ? 2 : -2), sy - d.height);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawBug(bug) {
+  if (!bug.alive) return;
+  const sx = bug.x - cam.x, sy = bug.y - cam.y;
+  if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) return;
+
+  const sprite = insectSprites[bug.species];
+  if (!sprite) return;
+
+  ctx.save();
+  ctx.globalAlpha = bug.fadeIn;
+  ctx.imageSmoothingEnabled = false;
+  const fw = sprite.sheet.frameWidth;
+  const fh = sprite.sheet.frameHeight;
+  const scale = 2;
+  const flipX = bug.vx < -1;
+
+  // Glow effects for glow-worm
+  if (bug.species === 'glow_worm') {
+    const glowIntensity = 0.3 + Math.sin(bug.timer * 3) * 0.2;
+    ctx.globalAlpha = glowIntensity * bug.fadeIn;
+    const gradient = ctx.createRadialGradient(sx, sy, 0, sx, sy, 25);
+    gradient.addColorStop(0, 'rgba(130, 255, 200, 0.5)');
+    gradient.addColorStop(1, 'rgba(130, 255, 200, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(sx - 25, sy - 25, 50, 50);
+    ctx.globalAlpha = bug.fadeIn;
+  }
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.beginPath();
+  ctx.ellipse(sx, sy + fh * scale * 0.4, fw * scale * 0.3, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  sprite.animator.draw(ctx, sx - fw * scale / 2, sy - fh * scale / 2, { scale, flipX });
+  ctx.imageSmoothingEnabled = true;
+  ctx.restore();
+}
+
+function drawPlayerChar() {
+  const sx = player.x - cam.x, sy = player.y - cam.y;
+  ctx.imageSmoothingEnabled = false;
+  const scale = 2;
+  const fw = 28, fh = 32;
+  playerSprite.animator.draw(ctx, sx - fw * scale / 2, sy - fh * scale / 2, { scale, flipX: player.facing < 0 });
+  ctx.imageSmoothingEnabled = true;
+}
+
+// ============================================================
+// HUD
+// ============================================================
+function drawHUD() {
+  // Journal button — top left
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(5, 5, 70, 35);
+  ctx.strokeStyle = '#8b6914';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(5, 5, 70, 35);
+  ctx.fillStyle = '#ffdd88';
+  ctx.font = 'bold 14px "Segoe UI", Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('[J]ournal', 40, 27);
+
+  // Score — top center
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 22px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('Score: ' + score, W / 2, 28);
+
+  // Catches this round
+  ctx.font = '13px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = '#ccc';
+  ctx.fillText(roundCatches + ' caught this round', W / 2, 46);
+
+  // Timer — top right
+  const minutes = Math.floor(timeLeft / 60);
+  const seconds = Math.floor(timeLeft % 60);
+  const timeStr = minutes + ':' + (seconds < 10 ? '0' : '') + seconds;
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 22px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = timeLeft <= 30 ? '#ff4444' : '#fff';
+  ctx.fillText(timeStr, W - 15, 28);
+
+  // Discovery count
+  const discovered = SPECIES.filter(sp => savedJournal[sp.id] && savedJournal[sp.id].discovered).length;
+  ctx.font = '13px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = '#aaddaa';
+  ctx.fillText(discovered + ' / ' + SPECIES.length + ' species', W - 15, 46);
+
+  // Cooldown indicators — bottom center
+  const cdTypes = [
+    { key: 'rock', label: 'Rock', icon: '#999' },
+    { key: 'tree', label: 'Tree', icon: '#5a3' },
+    { key: 'dig', label: 'Dig', icon: '#875' },
+  ];
+  const cdY = H - 40;
+  const cdStartX = W / 2 - cdTypes.length * 35;
+  for (let i = 0; i < cdTypes.length; i++) {
+    const cd = cdTypes[i];
+    const cx = cdStartX + i * 70;
+    const progress = cooldowns[cd.key] > 0 ? 1 - cooldowns[cd.key] / COOLDOWN_TIME : 1;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.arc(cx, cdY, 14, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (progress < 1) {
+      // Cooldown fill arc
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.beginPath();
+      ctx.moveTo(cx, cdY);
+      ctx.arc(cx, cdY, 14, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.fillStyle = progress >= 1 ? cd.icon : '#555';
+    ctx.font = 'bold 9px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(cd.label, cx, cdY + 3);
+  }
+
+  // Dusk indicator
+  const dusk = getDuskFactor();
+  if (dusk > 0) {
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 16px "Segoe UI", Arial, sans-serif';
+    ctx.fillStyle = `rgba(255,220,100,${dusk})`;
+    ctx.fillText('Dusk -- Night insects active!', W / 2, 68);
+  }
+
+  // Floating texts
+  for (const ft of floatingTexts) {
+    const sx = ft.x - cam.x, sy = ft.y - cam.y;
+    ctx.globalAlpha = Math.min(1, ft.life);
+    ctx.fillStyle = ft.color;
+    ctx.font = 'bold 16px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(ft.text, sx, sy);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+// JOURNAL — Deep Blue style
+// ============================================================
+
+const HABITAT_LABELS = {
+  ground: 'Under rocks & logs',
+  flying: 'Meadow & flowers',
+  tree: 'Trees & bark',
+  dig: 'Underground',
+  water: 'Creeks & ponds',
+  night: 'Dusk / Night',
+};
+const HABITAT_ICONS = {
+  ground: '\u{1FAA8}',
+  flying: '\u{1F33C}',
+  tree: '\u{1F333}',
+  dig: '\u{1F52C}',
+  water: '\u{1F4A7}',
+  night: '\u{1F319}',
+};
+
+function drawJournal() {
+  if (!journalOpen) return;
+  if (journalDetail) { drawJournalDetail(); return; }
+  journalCards = [];
+
+  ctx.fillStyle = 'rgba(0,0,0,0.82)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.font = 'bold ' + Math.min(28, W * 0.04) + 'px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#88cc55';
+  ctx.fillText('BUG JOURNAL', W / 2, 38);
+
+  const discovered = SPECIES.filter(sp => savedJournal[sp.id] && savedJournal[sp.id].discovered).length;
+  ctx.font = Math.min(14, W * 0.02) + 'px Segoe UI';
+  ctx.fillStyle = '#668';
+  ctx.fillText(discovered + ' / ' + SPECIES.length + ' discovered', W / 2, 58);
+
+  // Grid of cards
+  const cardW = Math.min(190, (W - 40) / 4);
+  const previewH = cardW * 0.4;
+  const infoH = 68;
+  const cardH = previewH + infoH;
+  const cols = Math.max(2, Math.floor((W - 20) / (cardW + 8)));
+  const startX = (W - cols * (cardW + 8) + 8) / 2;
+  let row = 0, col = 0;
+
+  for (const sp of SPECIES) {
+    const j = savedJournal[sp.id];
+    const disc = j && j.discovered;
+    const cx = startX + col * (cardW + 8);
+    const cy = 75 + row * (cardH + 8);
+    if (cy + cardH > H - 30) break;
+
+    // Card bg
+    const rarityCol = RARITY[sp.rarity].color;
+    ctx.fillStyle = disc ? 'rgba(20,30,15,0.85)' : 'rgba(12,12,18,0.5)';
+    ctx.fillRect(cx, cy, cardW, cardH);
+
+    // Rarity bar
+    ctx.fillStyle = disc ? rarityCol : 'rgba(40,40,50,0.3)';
+    ctx.fillRect(cx, cy, 3, cardH);
+
+    if (disc) {
+      // Preview area
+      ctx.fillStyle = 'rgba(10,20,10,0.5)';
+      ctx.fillRect(cx + 4, cy + 3, cardW - 7, previewH - 3);
+
+      // Draw sprite preview
+      const sprite = insectSprites[sp.id];
+      if (sprite) {
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        const fw = sprite.sheet.frameWidth;
+        const fh = sprite.sheet.frameHeight;
+        const maxDim = Math.min(previewH - 10, cardW - 20);
+        const sprScale = Math.min(maxDim / fw, maxDim / fh);
+        sprite.animator.draw(ctx, cx + cardW / 2 - fw * sprScale / 2, cy + previewH / 2 - fh * sprScale / 2, { scale: sprScale });
+        ctx.imageSmoothingEnabled = true;
+        ctx.restore();
+      }
+
+      // Name
+      ctx.font = 'bold ' + Math.min(11, cardW * 0.06) + 'px Segoe UI';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ccc';
+      ctx.fillText(sp.name, cx + 8, cy + previewH + 14);
+
+      // Size + habitat
+      ctx.font = Math.min(9, cardW * 0.05) + 'px Segoe UI';
+      ctx.fillStyle = '#778';
+      ctx.fillText(sp.size + 'mm | ' + HABITAT_LABELS[sp.habitat], cx + 8, cy + previewH + 27);
+
+      // Fact (2 lines max)
+      ctx.fillStyle = '#8899aa';
+      ctx.font = Math.min(8, cardW * 0.045) + 'px Segoe UI';
+      const words = sp.fact.split(' ');
+      let line = '', ly = cy + previewH + 40;
+      for (const word of words) {
+        const test = line + word + ' ';
+        if (ctx.measureText(test).width > cardW - 16 && line) {
+          ctx.fillText(line, cx + 8, ly);
+          line = word + ' '; ly += 11;
+          if (ly > cy + cardH - 5) break;
+        } else line = test;
+      }
+      if (ly <= cy + cardH - 5) ctx.fillText(line, cx + 8, ly);
+
+      // Catch count
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#556';
+      ctx.font = Math.min(9, cardW * 0.045) + 'px Segoe UI';
+      ctx.fillText('x' + (j.catchCount || 0), cx + cardW - 6, cy + previewH + 14);
+    } else {
+      // Undiscovered — silhouette
+      ctx.fillStyle = 'rgba(10,20,10,0.4)';
+      ctx.fillRect(cx + 4, cy + 3, cardW - 7, previewH - 3);
+      ctx.font = Math.min(30, previewH * 0.6) + 'px Segoe UI';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fillText('?', cx + cardW / 2, cy + previewH / 2 + 10);
+
+      ctx.font = Math.min(10, cardW * 0.055) + 'px Segoe UI';
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.textAlign = 'center';
+      ctx.fillText(HABITAT_LABELS[sp.habitat], cx + cardW / 2, cy + previewH + 18);
+      ctx.fillText(RARITY[sp.rarity].label, cx + cardW / 2, cy + previewH + 32);
+    }
+
+    // Clickable card
+    if (disc) journalCards.push({ x: cx, y: cy, w: cardW, h: cardH, species: sp });
+
+    col++;
+    if (col >= cols) { col = 0; row++; }
+  }
+
+  ctx.font = Math.min(14, W * 0.02) + 'px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.fillText('Tap a species for details | Press J or Esc to close', W / 2, H - 12);
+}
+
+function drawJournalDetail() {
+  if (!journalDetail) return;
+  const sp = journalDetail;
+  const j = savedJournal[sp.id] || { catchCount: 0 };
+
+  ctx.fillStyle = 'rgba(0,8,0,0.92)';
+  ctx.fillRect(0, 0, W, H);
+
+  const mx = W / 2;
+  const contentW = Math.min(500, W - 40);
+  const leftX = mx - contentW / 2;
+
+  // Preview area
+  const previewH = Math.min(160, H * 0.22);
+  ctx.fillStyle = 'rgba(20,40,20,0.6)';
+  ctx.fillRect(leftX, 30, contentW, previewH);
+
+  // Draw sprite large
+  const sprite = insectSprites[sp.id];
+  if (sprite) {
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    const fw = sprite.sheet.frameWidth;
+    const fh = sprite.sheet.frameHeight;
+    const maxDim = previewH - 20;
+    const sprScale = Math.min(maxDim / fw, maxDim / fh, 4);
+    sprite.animator.draw(ctx, mx - fw * sprScale / 2, 30 + previewH / 2 - fh * sprScale / 2, { scale: sprScale });
+    ctx.imageSmoothingEnabled = true;
+    ctx.restore();
+  }
+
+  ctx.strokeStyle = RARITY[sp.rarity].color;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(leftX, 30, contentW, previewH);
+
+  let ty = 30 + previewH + 28;
+
+  // Name
+  ctx.font = 'bold ' + Math.min(24, W * 0.04) + 'px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#aaddaa';
+  ctx.fillText(sp.name, mx, ty);
+  ty += 5;
+
+  // Scientific name
+  ctx.font = 'italic ' + Math.min(14, W * 0.022) + 'px Segoe UI';
+  ctx.fillStyle = '#779977';
+  ty += 18;
+  ctx.fillText(sp.scientific, mx, ty);
+  ty += 22;
+
+  // Info line
+  ctx.font = Math.min(13, W * 0.02) + 'px Segoe UI';
+  ctx.fillStyle = '#668866';
+  const rarityInfo = RARITY[sp.rarity];
+  ctx.fillText(sp.size + 'mm | ' + HABITAT_LABELS[sp.habitat] + ' | Caught: ' + (j.catchCount || 0), mx, ty);
+  ty += 8;
+
+  // Rarity badge
+  ty += 18;
+  ctx.fillStyle = rarityInfo.color;
+  ctx.font = 'bold ' + Math.min(14, W * 0.02) + 'px Segoe UI';
+  ctx.fillText(rarityInfo.label + ' (' + rarityInfo.points[0] + '-' + rarityInfo.points[1] + ' pts)', mx, ty);
+  ty += 28;
+
+  // Sections
+  ctx.textAlign = 'left';
+  function drawSection(title, text) {
+    ctx.font = 'bold ' + Math.min(13, W * 0.019) + 'px Segoe UI';
+    ctx.fillStyle = '#88bb88';
+    ctx.fillText(title, leftX + 10, ty);
+    ty += 18;
+    ctx.font = Math.min(12, W * 0.017) + 'px Segoe UI';
+    ctx.fillStyle = '#99bbaa';
+    const words = text.split(' ');
+    let line = '';
+    for (const word of words) {
+      const test = line + word + ' ';
+      if (ctx.measureText(test).width > contentW - 20 && line) {
+        ctx.fillText(line, leftX + 10, ty);
+        line = word + ' '; ty += 16;
+        if (ty > H - 40) return;
+      } else line = test;
+    }
+    if (line && ty < H - 40) { ctx.fillText(line, leftX + 10, ty); ty += 16; }
+    ty += 10;
+  }
+
+  drawSection('HABITAT', HABITAT_LABELS[sp.habitat]);
+  drawSection('KEY FACT', sp.fact);
+
+  ctx.font = Math.min(14, W * 0.02) + 'px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.fillText('Tap or press Esc to go back', mx, H - 12);
+}
+
+// ============================================================
+// TITLE SCREEN
+// ============================================================
+function drawTitle() {
+  ctx.fillStyle = '#2a5a2a';
+  ctx.fillRect(0, 0, W, H);
+
+  const rng = sf2_seededRNG(99);
+  ctx.fillStyle = '#3a6a3a';
+  for (let i = 0; i < 120; i++) {
+    ctx.fillRect(rng() * W, rng() * H, 4 + rng() * 8, 4 + rng() * 8);
+  }
+
+  // Wildflowers
+  const flowerCols = ['#ff6688', '#ffaa33', '#ffee55', '#bb88ff', '#66ccff', '#ff88cc', '#ee4444'];
+  for (let i = 0; i < 40; i++) {
+    const fx = rng() * W, fy = rng() * H;
+    ctx.fillStyle = flowerCols[Math.floor(rng() * flowerCols.length)];
+    for (let p = 0; p < 5; p++) {
+      const a = (p / 5) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(fx + Math.cos(a) * 5, fy + Math.sin(a) * 5, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#ffdd00';
+    ctx.beginPath();
+    ctx.arc(fx, fy, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const cx = W / 2;
+  let cy = H * 0.25;
+
+  // Title
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.font = 'bold ' + Math.min(52, W * 0.08) + 'px "Segoe UI", Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Bug Catcher', cx + 3, cy + 3);
+
+  ctx.fillStyle = '#ffee88';
+  ctx.fillText('Bug Catcher', cx, cy);
+
+  cy += 38;
+  ctx.fillStyle = '#88ddaa';
+  ctx.font = Math.min(22, W * 0.035) + 'px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('Adelaide, South Australia', cx, cy);
+
+  cy += 35;
+  ctx.fillStyle = '#ddd';
+  ctx.font = Math.min(16, W * 0.025) + 'px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('25 real insects to discover!', cx, cy);
+
+  cy += 25;
+  ctx.fillText('Turn rocks, shake trees, dig soil, explore water', cx, cy);
+
+  cy += 30;
+  // Species highlights
+  ctx.font = Math.min(13, W * 0.02) + 'px "Segoe UI", Arial, sans-serif';
+  const highlights = [
+    { name: 'Bull Ant', r: 'Uncommon' }, { name: 'Blue-banded Bee', r: 'Uncommon' },
+    { name: 'Emperor Gum Moth', r: 'Legendary' }, { name: 'Huntsman Spider', r: 'Rare' },
+    { name: 'Glow-worm', r: 'Legendary' }, { name: 'Dragonfly', r: 'Rare' },
+  ];
+  for (let i = 0; i < highlights.length; i += 2) {
+    const left = highlights[i];
+    const right = highlights[i + 1];
+    const rar = (n) => n === 'Legendary' ? '#ffaa33' : n === 'Rare' ? '#bb55dd' : '#5588ee';
+    ctx.fillStyle = rar(left.r);
+    let text = left.name + ' (' + left.r + ')';
+    if (right) text += '    ' + right.name + ' (' + right.r + ')';
+    ctx.fillText(text, cx, cy);
+    cy += 18;
+  }
+
+  cy += 15;
+  ctx.fillStyle = '#aaa';
+  ctx.font = Math.min(14, W * 0.022) + 'px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('WASD / Arrows to move | J for Journal | 5 min round', cx, cy);
+
+  // Journal progress
+  const discovered = SPECIES.filter(sp => savedJournal[sp.id] && savedJournal[sp.id].discovered).length;
+  if (discovered > 0) {
+    cy += 25;
+    ctx.fillStyle = '#88cc88';
+    ctx.fillText('Collection: ' + discovered + ' / ' + SPECIES.length + ' species discovered', cx, cy);
+  }
+
+  cy += 35;
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold ' + Math.min(22, W * 0.035) + 'px "Segoe UI", Arial, sans-serif';
+  const pulse = 0.7 + Math.sin(Date.now() / 400) * 0.3;
+  ctx.globalAlpha = pulse;
+  ctx.fillText('Press Enter / Tap to Start', cx, cy);
+  ctx.globalAlpha = 1;
+
+  if (highScore > 0) {
+    cy += 30;
+    ctx.fillStyle = '#88cc88';
+    ctx.font = '16px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('High Score: ' + highScore, cx, cy);
+  }
+}
+
+// ============================================================
+// GAME OVER
+// ============================================================
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2;
+  let cy = H * 0.2;
+
+  ctx.fillStyle = '#ff8844';
+  ctx.font = 'bold ' + Math.min(42, W * 0.06) + 'px "Segoe UI", Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText("Time's Up!", cx, cy);
+
+  cy += 45;
+  ctx.fillStyle = '#ffee88';
+  ctx.font = 'bold ' + Math.min(32, W * 0.05) + 'px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('Score: ' + score, cx, cy);
+
+  cy += 30;
+  const discovered = SPECIES.filter(sp => savedJournal[sp.id] && savedJournal[sp.id].discovered).length;
+  ctx.fillStyle = '#aaddaa';
+  ctx.font = Math.min(18, W * 0.03) + 'px "Segoe UI", Arial, sans-serif';
+  ctx.fillText(discovered + ' / ' + SPECIES.length + ' species in collection', cx, cy);
+
+  cy += 10;
+  ctx.fillStyle = '#ddd';
+  ctx.font = Math.min(14, W * 0.022) + 'px "Segoe UI", Arial, sans-serif';
+  ctx.fillText(roundCatches + ' insects caught this round', cx, cy + 20);
+  cy += 40;
+
+  if (score >= highScore && score > 0) {
+    cy += 10;
+    ctx.fillStyle = '#ffcc44';
+    ctx.font = 'bold ' + Math.min(20, W * 0.03) + 'px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('New High Score!', cx, cy);
+    cy += 10;
+  }
+
+  cy += 25;
+  ctx.fillStyle = '#aaa';
+  ctx.font = Math.min(18, W * 0.028) + 'px "Segoe UI", Arial, sans-serif';
+  const pulse = 0.7 + Math.sin(Date.now() / 400) * 0.3;
+  ctx.globalAlpha = pulse;
+  ctx.fillText('Press Enter / Tap to Continue', cx, cy);
+  ctx.globalAlpha = 1;
+}
+
+// ============================================================
+// MAIN RENDER
+// ============================================================
+function render() {
+  W = canvas.width;
+  H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  if (state === 'title') { drawTitle(); return; }
+
+  drawBackground();
+
+  // Collect drawables for y-sort
+  const drawables = [];
+  for (const d of decorations) drawables.push({ y: d.y, type: 'deco', data: d });
+  for (const b of bugs) {
+    if (b.alive) drawables.push({ y: b.y, type: 'bug', data: b });
+  }
+  drawables.push({ y: player.y, type: 'player' });
+
+  drawables.sort((a, b) => a.y - b.y);
+
+  for (const d of drawables) {
+    if (d.type === 'deco') drawDecoration(d.data);
+    else if (d.type === 'bug') drawBug(d.data);
+    else if (d.type === 'player') drawPlayerChar();
+  }
+
+  // Particles
+  for (const p of particles) {
+    ctx.globalAlpha = Math.min(1, p.life * 2);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - cam.x - p.size / 2, p.y - cam.y - p.size / 2, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+
+  // Dusk overlay
+  const dusk = getDuskFactor();
+  if (dusk > 0) {
+    ctx.fillStyle = `rgba(15, 10, 40, ${dusk * 0.5})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  drawHUD();
+
+  if (journalOpen) drawJournal();
+  if (state === 'gameover') drawGameOver();
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+let lastTime = 0;
+function loop(time) {
+  const dt = Math.min(0.05, (time - lastTime) / 1000);
+  lastTime = time;
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+initWorld();
+spawnBugs();
+requestAnimationFrame(loop);
+
+</script>
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px Segoe UI,Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px"><span id="vc-count">...</span> Catchers</div>
+<script>
+(function(){var G="bug-catcher",SU="https://ivhpqkqnfqcgrfrsvszf.supabase.co",SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM";function hdr(){return{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json"}}async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("").slice(0,32)}catch(e){return"anon-"+Math.random().toString(36).slice(2,10)}}async function run(){var h=await vh();try{await fetch(SU+"/rest/v1/game_visits",{method:"POST",headers:Object.assign(hdr(),{"Prefer":"resolution=merge-duplicates,return=minimal"}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}try{var r=await fetch(SU+"/rest/v1/game_visits?game=eq."+G+"&select=id",{headers:Object.assign(hdr(),{"Prefer":"count=exact"})});var c=r.headers.get("content-range");if(c){var n=c.split("/")[1];if(n&&n!=="*")document.getElementById("vc-count").textContent=Number(n).toLocaleString()}}catch(e){}}run()})();
+</script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+// ============================================================
+// SFX
+// ============================================================
+var SFX = (function() {
+  var ctx = null, muted = false;
+  function getCtx() { if (!ctx) try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return null; } if (ctx.state === 'suspended') ctx.resume(); return ctx; }
+  function play(fn) { if (muted) return; var c = getCtx(); if (c) fn(c); }
+  return {
+    get muted() { return muted; }, set muted(v) { muted = v; },
+    hit: function() { play(function(c) { var t=c.currentTime,o=c.createOscillator(),g=c.createGain(); o.type='sawtooth'; o.frequency.setValueAtTime(600,t); o.frequency.exponentialRampToValueAtTime(80,t+0.15); g.gain.setValueAtTime(0.1,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.15); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.15); }); },
+    abilityFire: function() { play(function(c) { var t=c.currentTime,o=c.createOscillator(),g=c.createGain(); o.type='sawtooth'; o.frequency.setValueAtTime(200,t); o.frequency.exponentialRampToValueAtTime(800,t+0.12); g.gain.setValueAtTime(0.1,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.2); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.2); }); },
+    abilityIce: function() { play(function(c) { var t=c.currentTime,o=c.createOscillator(),g=c.createGain(); o.type='sine'; o.frequency.setValueAtTime(1400,t); o.frequency.exponentialRampToValueAtTime(400,t+0.15); g.gain.setValueAtTime(0.08,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.15); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.15); }); },
+    abilityLightning: function() { play(function(c) { var t=c.currentTime; var buf=c.createBuffer(1,c.sampleRate*0.1,c.sampleRate); var d=buf.getChannelData(0); for(var i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*0.15; var n=c.createBufferSource(),ng=c.createGain(); n.buffer=buf; ng.gain.setValueAtTime(0.12,t); ng.gain.exponentialRampToValueAtTime(0.001,t+0.1); n.connect(ng); ng.connect(c.destination); n.start(t); n.stop(t+0.1); }); },
+    abilityPoison: function() { play(function(c) { var t=c.currentTime,o=c.createOscillator(),g=c.createGain(); o.type='triangle'; o.frequency.setValueAtTime(180,t); o.frequency.exponentialRampToValueAtTime(60,t+0.25); g.gain.setValueAtTime(0.08,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.25); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.25); }); },
+    abilityVoid: function() { play(function(c) { var t=c.currentTime,o=c.createOscillator(),g=c.createGain(); o.type='sine'; o.frequency.setValueAtTime(60,t); o.frequency.exponentialRampToValueAtTime(30,t+0.3); g.gain.setValueAtTime(0.12,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.3); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.3); }); },
+    kill: function() { play(function(c) { var t=c.currentTime,o=c.createOscillator(),g=c.createGain(); o.type='sawtooth'; o.frequency.setValueAtTime(80,t); o.frequency.exponentialRampToValueAtTime(30,t+0.4); g.gain.setValueAtTime(0.12,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.4); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.4); }); },
+    hurt: function() { play(function(c) { var t=c.currentTime,o=c.createOscillator(),g=c.createGain(); o.type='square'; o.frequency.setValueAtTime(500,t); o.frequency.exponentialRampToValueAtTime(150,t+0.2); g.gain.setValueAtTime(0.1,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.2); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.2); }); },
+    step: function() { play(function(c) { var t=c.currentTime; var buf=c.createBuffer(1,Math.round(c.sampleRate*0.04),c.sampleRate); var d=buf.getChannelData(0); for(var i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*0.03; var n=c.createBufferSource(),g=c.createGain(); n.buffer=buf; g.gain.setValueAtTime(0.06,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.04); n.connect(g); g.connect(c.destination); n.start(t); n.stop(t+0.04); }); },
+    stairs: function() { play(function(c) { for(var i=0;i<3;i++){var t=c.currentTime+i*0.08,o=c.createOscillator(),g=c.createGain(); o.type='sine'; o.frequency.setValueAtTime(400+i*200,t); g.gain.setValueAtTime(0.06,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.15); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.15);} }); },
+    shrine: function() { play(function(c) { for(var i=0;i<5;i++){var t=c.currentTime+i*0.07,o=c.createOscillator(),g=c.createGain(); o.type='sine'; o.frequency.setValueAtTime(600+i*150,t); g.gain.setValueAtTime(0.05,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.2); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.2);} }); },
+    heal: function() { play(function(c) { var t=c.currentTime,o=c.createOscillator(),g=c.createGain(); o.type='sine'; o.frequency.setValueAtTime(800,t); o.frequency.exponentialRampToValueAtTime(1200,t+0.2); g.gain.setValueAtTime(0.06,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.2); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.2); }); },
+    gameOver: function() { play(function(c) { for(var i=0;i<5;i++){var t=c.currentTime+i*0.15,o=c.createOscillator(),g=c.createGain(); o.type='sawtooth'; o.frequency.setValueAtTime(400-i*70,t); o.frequency.exponentialRampToValueAtTime(60,t+0.2); g.gain.setValueAtTime(0.08,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.2); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.2);} }); },
+    boss: function() { play(function(c) { var t=c.currentTime,o=c.createOscillator(),g=c.createGain(); o.type='sawtooth'; o.frequency.setValueAtTime(80,t); o.frequency.exponentialRampToValueAtTime(30,t+0.6); g.gain.setValueAtTime(0.15,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.6); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.6); }); },
+  };
+})();
+document.addEventListener('keydown', function(e) { if (e.key === 'm' || e.key === 'M') SFX.muted = !SFX.muted; });
+
+// ============================================================
+// TILES
+// ============================================================

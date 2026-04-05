@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Snip & Feed</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #D7CCC8; }
+canvas { display: block; touch-action: none; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function() {
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, S; // width, height, scale factor
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  S = Math.min(W, H) / 600;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// SOUND
+// ============================================================
+const SFX = {
+  _ctx: null,
+  _get() { if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this._ctx.state === 'suspended') this._ctx.resume(); return this._ctx; },
+  _tone(f, type, dur, vol) { try { const c = this._get(), o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(vol, c.currentTime); g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur); o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + dur); } catch(e) {} },
+  cut() { this._tone(800, 'sine', 0.08, 0.12); this._tone(600, 'sine', 0.06, 0.08); },
+  star() { this._tone(880, 'sine', 0.15, 0.1); setTimeout(() => this._tone(1100, 'sine', 0.15, 0.1), 80); },
+  chomp() { this._tone(300, 'square', 0.1, 0.1); setTimeout(() => this._tone(400, 'square', 0.08, 0.08), 60); setTimeout(() => this._tone(500, 'square', 0.06, 0.06), 120); },
+  pop() { this._tone(600, 'sine', 0.05, 0.1); this._tone(900, 'sine', 0.03, 0.06); },
+  fail() { this._tone(200, 'sawtooth', 0.3, 0.1); setTimeout(() => this._tone(150, 'sawtooth', 0.3, 0.08), 150); },
+  win() { [0,100,200,300].forEach((d,i) => setTimeout(() => this._tone(440 + i*110, 'sine', 0.2, 0.08), d)); },
+  btn() { this._tone(500, 'sine', 0.04, 0.06); },
+};
+
+// ============================================================
+// SCORE / PERSISTENCE
+// ============================================================
+const _SU = 'https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+const _SK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+
+function loadProgress() {
+  try { return JSON.parse(localStorage.getItem('snipnfeed_progress')) || {}; } catch(e) { return {}; }
+}
+function saveProgress(prog) {
+  try { localStorage.setItem('snipnfeed_progress', JSON.stringify(prog)); } catch(e) {}
+}
+
+let progress = loadProgress(); // { level1: 3, level2: 2, ... } stars per level
+
+// ============================================================
+// SPRITE DRAWING (inlined from props)
+// ============================================================
+function drawNomNom(ctx, x, y, size, excited) {
+  ctx.save();
+  ctx.translate(x, y);
+  const s = size / 48;
+  ctx.scale(s, s);
+  // Body
+  ctx.fillStyle = '#4CAF50';
+  ctx.beginPath(); ctx.ellipse(24, 30, 18, 16, 0, 0, Math.PI*2); ctx.fill();
+  // Belly highlight
+  ctx.fillStyle = '#66BB6A';
+  ctx.beginPath(); ctx.ellipse(24, 32, 12, 10, 0, 0, Math.PI*2); ctx.fill();
+  // Arms
+  ctx.fillStyle = '#4CAF50';
+  const armAngle = excited ? Math.sin(Date.now()/100)*0.3 : 0;
+  ctx.save(); ctx.translate(7, 30); ctx.rotate(-armAngle);
+  ctx.beginPath(); ctx.ellipse(0, 0, 4, 3, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  ctx.save(); ctx.translate(41, 30); ctx.rotate(armAngle);
+  ctx.beginPath(); ctx.ellipse(0, 0, 4, 3, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  // Feet
+  ctx.fillStyle = '#388E3C';
+  ctx.beginPath(); ctx.ellipse(16, 44, 5, 3, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(32, 44, 5, 3, 0, 0, Math.PI*2); ctx.fill();
+  // Head top
+  ctx.fillStyle = '#66BB6A';
+  ctx.beginPath(); ctx.ellipse(24, 16, 14, 6, 0, 0, Math.PI*2); ctx.fill();
+  // Mouth
+  const mouthOpen = excited ? 8 : 6;
+  ctx.fillStyle = '#E91E63';
+  ctx.beginPath(); ctx.ellipse(24, 34, 10, mouthOpen, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#C2185B';
+  ctx.beginPath(); ctx.ellipse(24, 35, 8, mouthOpen-2, 0, 0, Math.PI*2); ctx.fill();
+  // Tongue
+  ctx.fillStyle = '#F06292';
+  ctx.beginPath(); ctx.ellipse(24, 37, 5, 3, 0, 0, Math.PI*2); ctx.fill();
+  // Cheeks
+  ctx.fillStyle = 'rgba(233,30,99,0.3)';
+  ctx.beginPath(); ctx.ellipse(10, 27, 4, 3, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(38, 27, 4, 3, 0, 0, Math.PI*2); ctx.fill();
+  // Eyes
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.ellipse(17, 22, 6, 7, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(31, 22, 6, 7, 0, 0, Math.PI*2); ctx.fill();
+  // Pupils
+  const pupilOff = excited ? Math.sin(Date.now()/200)*2 : 0;
+  ctx.fillStyle = '#222';
+  ctx.beginPath(); ctx.arc(18+pupilOff, 23, 3, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(32+pupilOff, 23, 3, 0, Math.PI*2); ctx.fill();
+  // Eye highlights
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(16, 20, 2, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(30, 20, 2, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawCandy(ctx, x, y, size, angle) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle || 0);
+  const s = size / 32;
+  ctx.scale(s, s);
+  // Left wrapper
+  ctx.fillStyle = '#FFD54F';
+  ctx.beginPath(); ctx.ellipse(-12, 0, 5, 4, -0.3, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#FFC107';
+  ctx.beginPath(); ctx.ellipse(-15, -1, 3, 2, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-15, 1, 3, 2, 0, 0, Math.PI*2); ctx.fill();
+  // Right wrapper
+  ctx.fillStyle = '#FFD54F';
+  ctx.beginPath(); ctx.ellipse(12, 0, 5, 4, 0.3, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#FFC107';
+  ctx.beginPath(); ctx.ellipse(15, -1, 3, 2, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(15, 1, 3, 2, 0, 0, Math.PI*2); ctx.fill();
+  // Candy body
+  ctx.fillStyle = '#E53935';
+  ctx.beginPath(); ctx.ellipse(0, 0, 10, 6, 0, 0, Math.PI*2); ctx.fill();
+  // White stripes
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 2;
+  for (let i = -2; i <= 2; i++) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 10, 6, 0, 0, Math.PI*2);
+    ctx.clip();
+    ctx.beginPath();
+    ctx.moveTo(i*4 - 3, -8);
+    ctx.lineTo(i*4 + 3, 8);
+    ctx.stroke();
+    ctx.restore();
+  }
+  // Shine
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.beginPath(); ctx.ellipse(-3, -3, 3, 2, -0.5, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawStar(ctx, x, y, size, collected) {
+  ctx.save();
+  ctx.translate(x, y);
+  const s = size / 24;
+  ctx.scale(s, s);
+  const pulse = collected ? 1 : 1 + Math.sin(Date.now()/300)*0.05;
+  ctx.scale(pulse, pulse);
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const a1 = (i * 72 - 90) * Math.PI / 180;
+    const a2 = ((i * 72 + 36) - 90) * Math.PI / 180;
+    ctx.lineTo(Math.cos(a1)*10, Math.sin(a1)*10);
+    ctx.lineTo(Math.cos(a2)*4, Math.sin(a2)*4);
+  }
+  ctx.closePath();
+  if (collected) {
+    ctx.fillStyle = '#9E9E9E'; ctx.fill();
+    ctx.strokeStyle = '#616161'; ctx.lineWidth = 1; ctx.stroke();
+  } else {
+    const g = ctx.createRadialGradient(0, -2, 0, 0, 0, 10);
+    g.addColorStop(0, '#FFF9C4'); g.addColorStop(0.5, '#FFEB3B'); g.addColorStop(1, '#F9A825');
+    ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = '#FF8F00'; ctx.lineWidth = 1; ctx.stroke();
+    // Sparkle
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.beginPath(); ctx.arc(-3, -4, 2, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawAnchor(ctx, x, y, size) {
+  ctx.save();
+  ctx.translate(x, y);
+  const s = size / 16;
+  ctx.scale(s, s);
+  // Base plate
+  ctx.fillStyle = '#9E9E9E';
+  ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#BDBDBD';
+  ctx.beginPath(); ctx.arc(0, -1, 4, 0, Math.PI*2); ctx.fill();
+  // Highlight
+  ctx.fillStyle = '#E0E0E0';
+  ctx.beginPath(); ctx.arc(-1, -2, 2, 0, Math.PI*2); ctx.fill();
+  // Screw
+  ctx.fillStyle = '#616161';
+  ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#757575';
+  ctx.beginPath(); ctx.moveTo(-1, 0); ctx.lineTo(1, 0); ctx.moveTo(0, -1); ctx.lineTo(0, 1);
+  ctx.strokeStyle = '#424242'; ctx.lineWidth = 0.5; ctx.stroke();
+  ctx.restore();
+}
+
+function drawBubble(ctx, x, y, radius) {
+  ctx.save();
+  ctx.translate(x, y);
+  // Outer
+  ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(179,229,252,0.2)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(79,195,247,0.5)'; ctx.lineWidth = 2; ctx.stroke();
+  // Inner glow
+  const g = ctx.createRadialGradient(0, 0, radius*0.3, 0, 0, radius);
+  g.addColorStop(0, 'rgba(255,255,255,0.1)');
+  g.addColorStop(1, 'rgba(179,229,252,0.15)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(0, 0, radius-2, 0, Math.PI*2); ctx.fill();
+  // Rainbow sheen
+  ctx.strokeStyle = 'rgba(206,147,216,0.4)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, radius*0.75, Math.PI*0.8, Math.PI*1.3); ctx.stroke();
+  // Shine
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.beginPath(); ctx.ellipse(-radius*0.3, -radius*0.35, radius*0.2, radius*0.15, -0.5, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawBellows(ctx, x, y, size, dir) {
+  ctx.save();
+  ctx.translate(x, y);
+  const s = size / 32;
+  ctx.scale(s * (dir < 0 ? -1 : 1), s);
+  // Wooden body
+  ctx.fillStyle = '#8D6E63';
+  ctx.fillRect(-9, -10, 18, 20);
+  ctx.fillStyle = '#A1887F';
+  for (let i = 0; i < 4; i++) ctx.fillRect(-8, -9 + i*5, 16, 2);
+  // Metal nozzle
+  ctx.fillStyle = '#9E9E9E';
+  ctx.fillRect(9, -4, 8, 8);
+  ctx.fillStyle = '#BDBDBD';
+  ctx.fillRect(9, -3, 8, 2);
+  // Grill
+  ctx.fillStyle = '#BDBDBD';
+  ctx.fillRect(-6, -7, 12, 14);
+  ctx.fillStyle = '#757575';
+  for (let i = 0; i < 5; i++) { ctx.fillRect(-5, -6 + i*3, 10, 1); }
+  // Air gusts
+  ctx.strokeStyle = 'rgba(179,229,252,0.6)';
+  ctx.lineWidth = 1.5;
+  const t = Date.now() / 200;
+  for (let i = 0; i < 3; i++) {
+    const ox = 18 + i*5 + Math.sin(t+i)*2;
+    ctx.beginPath(); ctx.moveTo(ox, -2+i); ctx.lineTo(ox+4, -2+i); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ============================================================
+// VERLET ROPE PHYSICS
+// ============================================================
+class Point {
+  constructor(x, y, pinned) {
+    this.x = x; this.y = y;
+    this.ox = x; this.oy = y;
+    this.pinned = pinned || false;
+    this.mass = 1;
+  }
+  update(dt, gravity) {
+    if (this.pinned) return;
+    const vx = (this.x - this.ox) * 0.99;
+    const vy = (this.y - this.oy) * 0.99;
+    this.ox = this.x; this.oy = this.y;
+    this.x += vx + this.ax * dt * dt;
+    this.y += vy + (gravity + (this.ay || 0)) * dt * dt;
+    this.ax = 0; this.ay = 0;
+  }
+}
+
+class Constraint {
+  constructor(p1, p2, dist) {
+    this.p1 = p1; this.p2 = p2;
+    this.dist = dist;
+    this.active = true;
+  }
+  solve() {
+    if (!this.active) return;
+    const dx = this.p2.x - this.p1.x;
+    const dy = this.p2.y - this.p1.y;
+    const d = Math.sqrt(dx*dx + dy*dy) || 0.001;
+    const diff = (this.dist - d) / d * 0.5;
+    const ox = dx * diff, oy = dy * diff;
+    if (!this.p1.pinned) { this.p1.x -= ox; this.p1.y -= oy; }
+    if (!this.p2.pinned) { this.p2.x += ox; this.p2.y += oy; }
+  }
+}
+
+class Rope {
+  constructor(ax, ay, bx, by, segs) {
+    this.points = [];
+    this.constraints = [];
+    this.cut = false;
+    this.cutEffects = [];
+    const n = segs || 8;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      this.points.push(new Point(ax + (bx-ax)*t, ay + (by-ay)*t, i === 0));
+    }
+    const segLen = Math.sqrt((bx-ax)**2 + (by-ay)**2) / n;
+    for (let i = 0; i < n; i++) {
+      this.constraints.push(new Constraint(this.points[i], this.points[i+1], segLen));
+    }
+    this.anchorX = ax; this.anchorY = ay;
+  }
+  getEnd() { return this.points[this.points.length-1]; }
+  tryCut(x1, y1, x2, y2) {
+    if (this.cut) return false;
+    for (let i = 0; i < this.constraints.length; i++) {
+      const c = this.constraints[i];
+      if (!c.active) continue;
+      if (segIntersect(x1, y1, x2, y2, c.p1.x, c.p1.y, c.p2.x, c.p2.y)) {
+        // Cut here — deactivate this and all remaining constraints
+        for (let j = i; j < this.constraints.length; j++) {
+          this.constraints[j].active = false;
+        }
+        this.cut = true;
+        this.cutEffects.push({ x: (c.p1.x+c.p2.x)/2, y: (c.p1.y+c.p2.y)/2, t: 1 });
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+function segIntersect(ax, ay, bx, by, cx, cy, dx, dy) {
+  const d = (bx-ax)*(dy-cy) - (by-ay)*(dx-cx);
+  if (Math.abs(d) < 0.001) return false;
+  const t = ((cx-ax)*(dy-cy) - (cy-ay)*(dx-cx)) / d;
+  const u = ((cx-ax)*(by-ay) - (cy-ay)*(bx-ax)) / d;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+}
+
+// ============================================================
+// LEVEL DATA
+// ============================================================
+// Positions are fractions of play area (0-1)
+// Each level: { ropes: [{ax,ay,bx,by}], candy: {x,y}, nom: {x,y}, stars: [{x,y}], bubbles: [{x,y,r}], bellows: [{x,y,dir}] }
+const LEVELS = [
+  // World 1: Cardboard Box — Levels 1-10
+  // L1: Single rope, direct drop
+  { ropes: [{ax:0.5,ay:0.1,bx:0.5,by:0.35}], candy:{x:0.5,y:0.35}, nom:{x:0.5,y:0.85}, stars:[{x:0.5,y:0.55}] },
+  // L2: Single rope, offset nom
+  { ropes: [{ax:0.5,ay:0.1,bx:0.5,by:0.3}], candy:{x:0.5,y:0.3}, nom:{x:0.4,y:0.85}, stars:[{x:0.45,y:0.5},{x:0.42,y:0.7}] },
+  // L3: Single rope, star off to the side
+  { ropes: [{ax:0.3,ay:0.08,bx:0.3,by:0.35}], candy:{x:0.3,y:0.35}, nom:{x:0.5,y:0.85}, stars:[{x:0.3,y:0.55},{x:0.4,y:0.7},{x:0.5,y:0.55}] },
+  // L4: Two ropes, cut order matters
+  { ropes: [{ax:0.3,ay:0.1,bx:0.45,by:0.3},{ax:0.7,ay:0.1,bx:0.55,by:0.3}], candy:{x:0.5,y:0.3}, nom:{x:0.5,y:0.85}, stars:[{x:0.5,y:0.5},{x:0.5,y:0.65}] },
+  // L5: Two ropes, swing needed
+  { ropes: [{ax:0.3,ay:0.08,bx:0.4,by:0.25},{ax:0.5,ay:0.08,bx:0.45,by:0.25}], candy:{x:0.42,y:0.25}, nom:{x:0.7,y:0.85}, stars:[{x:0.5,y:0.45},{x:0.6,y:0.6}] },
+  // L6: Two ropes, stars on a curve
+  { ropes: [{ax:0.2,ay:0.1,bx:0.4,by:0.3},{ax:0.8,ay:0.1,bx:0.6,by:0.3}], candy:{x:0.5,y:0.3}, nom:{x:0.3,y:0.85}, stars:[{x:0.4,y:0.45},{x:0.35,y:0.6},{x:0.3,y:0.75}] },
+  // L7: Three ropes
+  { ropes: [{ax:0.2,ay:0.05,bx:0.4,by:0.25},{ax:0.5,ay:0.05,bx:0.5,by:0.25},{ax:0.8,ay:0.05,bx:0.6,by:0.25}], candy:{x:0.5,y:0.25}, nom:{x:0.5,y:0.85}, stars:[{x:0.35,y:0.4},{x:0.5,y:0.55},{x:0.65,y:0.4}] },
+  // L8: Three ropes, nom offset
+  { ropes: [{ax:0.3,ay:0.05,bx:0.5,by:0.2},{ax:0.6,ay:0.08,bx:0.55,by:0.2},{ax:0.7,ay:0.05,bx:0.6,by:0.2}], candy:{x:0.55,y:0.2}, nom:{x:0.25,y:0.85}, stars:[{x:0.45,y:0.35},{x:0.35,y:0.55},{x:0.28,y:0.7}] },
+  // L9: Two ropes, tricky swing
+  { ropes: [{ax:0.7,ay:0.05,bx:0.6,by:0.3},{ax:0.7,ay:0.35,bx:0.6,by:0.3}], candy:{x:0.6,y:0.3}, nom:{x:0.3,y:0.85}, stars:[{x:0.55,y:0.5},{x:0.45,y:0.6},{x:0.35,y:0.72}] },
+  // L10: Three ropes, complex
+  { ropes: [{ax:0.15,ay:0.1,bx:0.35,by:0.2},{ax:0.5,ay:0.05,bx:0.45,by:0.2},{ax:0.85,ay:0.1,bx:0.55,by:0.2}], candy:{x:0.45,y:0.2}, nom:{x:0.6,y:0.85}, stars:[{x:0.5,y:0.4},{x:0.55,y:0.55},{x:0.58,y:0.72}] },
+
+  // World 2: Toy Shelf — Levels 11-20
+  // L11: Introduce bubble
+  { ropes: [{ax:0.5,ay:0.08,bx:0.5,by:0.25}], candy:{x:0.5,y:0.25}, nom:{x:0.5,y:0.85}, stars:[{x:0.5,y:0.15},{x:0.5,y:0.5}], bubbles:[{x:0.5,y:0.55,r:0.06}] },
+  // L12: Bubble lifts candy to star
+  { ropes: [{ax:0.3,ay:0.1,bx:0.4,by:0.35}], candy:{x:0.4,y:0.35}, nom:{x:0.6,y:0.85}, stars:[{x:0.4,y:0.15},{x:0.5,y:0.5},{x:0.6,y:0.7}], bubbles:[{x:0.4,y:0.5,r:0.06}] },
+  // L13: Two ropes + bubble
+  { ropes: [{ax:0.3,ay:0.1,bx:0.45,by:0.3},{ax:0.7,ay:0.1,bx:0.55,by:0.3}], candy:{x:0.5,y:0.3}, nom:{x:0.3,y:0.85}, stars:[{x:0.5,y:0.15},{x:0.4,y:0.55},{x:0.35,y:0.7}], bubbles:[{x:0.45,y:0.45,r:0.06}] },
+  // L14: Introduce bellows
+  { ropes: [{ax:0.3,ay:0.1,bx:0.3,by:0.3}], candy:{x:0.3,y:0.3}, nom:{x:0.7,y:0.85}, stars:[{x:0.45,y:0.5},{x:0.6,y:0.6},{x:0.68,y:0.72}], bellows:[{x:0.08,y:0.5,dir:1}] },
+  // L15: Bellows + stars
+  { ropes: [{ax:0.5,ay:0.08,bx:0.5,by:0.3},{ax:0.7,ay:0.15,bx:0.6,by:0.3}], candy:{x:0.55,y:0.3}, nom:{x:0.2,y:0.85}, stars:[{x:0.4,y:0.45},{x:0.3,y:0.6},{x:0.22,y:0.72}], bellows:[{x:0.92,y:0.55,dir:-1}] },
+  // L16: Bellows + bubble combo
+  { ropes: [{ax:0.5,ay:0.1,bx:0.5,by:0.3}], candy:{x:0.5,y:0.3}, nom:{x:0.7,y:0.85}, stars:[{x:0.5,y:0.15},{x:0.6,y:0.5},{x:0.7,y:0.65}], bubbles:[{x:0.5,y:0.45,r:0.06}], bellows:[{x:0.08,y:0.25,dir:1}] },
+  // L17: Complex multi-step
+  { ropes: [{ax:0.2,ay:0.08,bx:0.35,by:0.25},{ax:0.8,ay:0.08,bx:0.65,by:0.25}], candy:{x:0.5,y:0.25}, nom:{x:0.2,y:0.85}, stars:[{x:0.6,y:0.4},{x:0.4,y:0.55},{x:0.25,y:0.7}], bubbles:[{x:0.6,y:0.55,r:0.06}], bellows:[{x:0.92,y:0.4,dir:-1}] },
+  // L18: Three ropes + bubble + bellows
+  { ropes: [{ax:0.2,ay:0.05,bx:0.4,by:0.2},{ax:0.5,ay:0.05,bx:0.5,by:0.2},{ax:0.8,ay:0.05,bx:0.6,by:0.2}], candy:{x:0.5,y:0.2}, nom:{x:0.75,y:0.85}, stars:[{x:0.3,y:0.35},{x:0.5,y:0.5},{x:0.7,y:0.65}], bubbles:[{x:0.35,y:0.5,r:0.06}], bellows:[{x:0.08,y:0.6,dir:1}] },
+  // L19: Tricky two-bubble
+  { ropes: [{ax:0.5,ay:0.05,bx:0.5,by:0.25}], candy:{x:0.5,y:0.25}, nom:{x:0.7,y:0.85}, stars:[{x:0.5,y:0.12},{x:0.3,y:0.5},{x:0.7,y:0.65}], bubbles:[{x:0.5,y:0.4,r:0.06},{x:0.3,y:0.6,r:0.05}], bellows:[{x:0.08,y:0.55,dir:1}] },
+  // L20: Grand finale
+  { ropes: [{ax:0.15,ay:0.08,bx:0.35,by:0.2},{ax:0.5,ay:0.05,bx:0.5,by:0.2},{ax:0.85,ay:0.08,bx:0.65,by:0.2}], candy:{x:0.5,y:0.2}, nom:{x:0.5,y:0.85}, stars:[{x:0.3,y:0.35},{x:0.7,y:0.35},{x:0.5,y:0.65}], bubbles:[{x:0.3,y:0.5,r:0.06},{x:0.7,y:0.5,r:0.06}], bellows:[{x:0.08,y:0.35,dir:1},{x:0.92,y:0.35,dir:-1}] },
+];
+
+// ============================================================
+// GAME STATE
+// ============================================================
+let state = 'title'; // title, select, play, win, lose
+let currentLevel = 0;
+let ropes = [];
+let candy = null;
+let nomNom = null;
+let stars = [];
+let bubbles = [];
+let bellowsList = [];
+let starsCollected = 0;
+let swipePath = [];
+let isSwiping = false;
+let levelTimer = 0;
+let particles = [];
+let nomExcited = false;
+let candyInBubble = null; // reference to bubble if candy is inside one
+let levelResult = 0; // stars earned this level
+let titlePulse = 0;
+
+// ============================================================
+// LEVEL SETUP
+// ============================================================
+function setupLevel(idx) {
+  const lv = LEVELS[idx];
+  const pw = W * 0.85, ph = H * 0.8;
+  const ox = W * 0.075, oy = H * 0.05;
+
+  function lx(v) { return ox + v * pw; }
+  function ly(v) { return oy + v * ph; }
+
+  ropes = lv.ropes.map(r => new Rope(lx(r.ax), ly(r.ay), lx(r.bx), ly(r.by), 10));
+
+  // Connect candy to rope ends
+  candy = { x: lx(lv.candy.x), y: ly(lv.candy.y), vx: 0, vy: 0, angle: 0, av: 0, radius: 16*S, alive: true };
+
+  // Attach candy to all rope endpoints
+  ropes.forEach(r => {
+    const end = r.getEnd();
+    end.x = candy.x; end.y = candy.y;
+  });
+
+  nomNom = { x: lx(lv.nom.x), y: ly(lv.nom.y), size: 56 * S };
+  stars = lv.stars.map(s => ({ x: lx(s.x), y: ly(s.y), collected: false, size: 28*S }));
+  bubbles = (lv.bubbles || []).map(b => ({ x: lx(b.x), y: ly(b.y), r: b.r * Math.min(pw,ph), active: true }));
+  bellowsList = (lv.bellows || []).map(b => ({ x: lx(b.x), y: ly(b.y), dir: b.dir, size: 40*S }));
+  starsCollected = 0;
+  candyInBubble = null;
+  swipePath = [];
+  isSwiping = false;
+  levelTimer = 0;
+  particles = [];
+  nomExcited = false;
+  state = 'play';
+}
+
+// ============================================================
+// PHYSICS UPDATE
+// ============================================================
+const GRAVITY = 1200;
+const DT = 1/60;
+const SUBSTEPS = 5;
+
+function updatePhysics() {
+  if (state !== 'play' || !candy.alive) return;
+  levelTimer += DT;
+
+  const subDt = DT / SUBSTEPS;
+
+  // Find which ropes are still attached to candy
+  const attachedRopes = ropes.filter(r => !r.cut);
+
+  for (let sub = 0; sub < SUBSTEPS; sub++) {
+    // Apply gravity to all rope points
+    ropes.forEach(r => {
+      r.points.forEach(p => {
+        if (!p.pinned) {
+          p.ax = 0;
+          p.ay = 0;
+        }
+      });
+    });
+
+    // Bellows force on candy
+    if (candyInBubble === null) {
+      bellowsList.forEach(b => {
+        const bw = b.size * 3;
+        const bh = b.size * 0.8;
+        const bx = b.dir > 0 ? b.x : b.x - bw;
+        const by = b.y - bh/2;
+        if (candy.x > bx && candy.x < bx + bw && candy.y > by && candy.y < by + bh) {
+          // Apply wind force to candy via rope ends
+          const force = 600 * b.dir;
+          attachedRopes.forEach(r => {
+            const end = r.getEnd();
+            end.ax = (end.ax||0) + force;
+          });
+          if (attachedRopes.length === 0) {
+            candy.vx += force * subDt;
+          }
+        }
+      });
+    }
+
+    // Update rope points
+    ropes.forEach(r => {
+      r.points.forEach(p => p.update(subDt, GRAVITY));
+    });
+
+    // Solve constraints
+    for (let iter = 0; iter < 3; iter++) {
+      ropes.forEach(r => {
+        r.constraints.forEach(c => c.solve());
+      });
+    }
+
+    // Sync candy to attached rope ends
+    if (attachedRopes.length > 0) {
+      let cx = 0, cy = 0;
+      attachedRopes.forEach(r => {
+        const end = r.getEnd();
+        cx += end.x; cy += end.y;
+      });
+      candy.x = cx / attachedRopes.length;
+      candy.y = cy / attachedRopes.length;
+      // Sync all attached ends to same position
+      attachedRopes.forEach(r => {
+        const end = r.getEnd();
+        end.x = candy.x; end.y = candy.y;
+      });
+      candy.vx = 0; candy.vy = 0;
+    } else {
+      // Free-falling candy
+      if (candyInBubble) {
+        // Float upward in bubble
+        candy.vy -= GRAVITY * subDt * 1.5; // overcome gravity + float up
+        candy.vy *= 0.98;
+        candy.vx *= 0.98;
+        // Bellows on bubble
+        bellowsList.forEach(b => {
+          const bw = b.size * 3;
+          const bh = b.size * 0.8;
+          const bx = b.dir > 0 ? b.x : b.x - bw;
+          const by = b.y - bh/2;
+          if (candy.x > bx && candy.x < bx + bw && candy.y > by && candy.y < by + bh) {
+            candy.vx += 400 * b.dir * subDt;
+          }
+        });
+        candy.x += candy.vx * subDt;
+        candy.y += candy.vy * subDt;
+        candyInBubble.x = candy.x;
+        candyInBubble.y = candy.y;
+      } else {
+        candy.vy += GRAVITY * subDt;
+        candy.x += candy.vx * subDt;
+        candy.y += candy.vy * subDt;
+      }
+    }
+  }
+
+  candy.angle += candy.av * DT;
+  if (attachedRopes.length === 0 && !candyInBubble) {
+    candy.av += (candy.vx > 0 ? 1 : -1) * DT * 2;
+  }
+
+  // Check bubble collision
+  if (!candyInBubble && attachedRopes.length === 0) {
+    for (const b of bubbles) {
+      if (!b.active) continue;
+      const dx = candy.x - b.x, dy = candy.y - b.y;
+      if (Math.sqrt(dx*dx+dy*dy) < b.r) {
+        candyInBubble = b;
+        candy.vy = Math.min(candy.vy, -50); // start floating
+        SFX.pop();
+        break;
+      }
+    }
+  }
+
+  // Check star collection
+  stars.forEach(s => {
+    if (s.collected) return;
+    const dx = candy.x - s.x, dy = candy.y - s.y;
+    if (Math.sqrt(dx*dx+dy*dy) < s.size*0.8) {
+      s.collected = true;
+      starsCollected++;
+      SFX.star();
+      spawnParticles(s.x, s.y, '#FFEB3B', 8);
+    }
+  });
+
+  // Check if candy reaches Nom-Nom
+  const ndx = candy.x - nomNom.x, ndy = candy.y - nomNom.y;
+  const nomDist = Math.sqrt(ndx*ndx + ndy*ndy);
+  nomExcited = nomDist < nomNom.size * 2;
+
+  if (nomDist < nomNom.size * 0.6) {
+    // Success!
+    candy.alive = false;
+    levelResult = 1 + starsCollected;
+    SFX.chomp();
+    setTimeout(() => { SFX.win(); }, 300);
+    spawnParticles(nomNom.x, nomNom.y - nomNom.size*0.3, '#4CAF50', 15);
+    // Save progress
+    const key = 'level' + (currentLevel+1);
+    if (!progress[key] || progress[key] < levelResult) {
+      progress[key] = levelResult;
+      saveProgress(progress);
+    }
+    setTimeout(() => { state = 'win'; }, 800);
+  }
+
+  // Check if candy fell off screen
+  if (candy.y > H + 50 || candy.x < -50 || candy.x > W + 50 || candy.y < -200) {
+    candy.alive = false;
+    SFX.fail();
+    setTimeout(() => { state = 'lose'; }, 600);
+  }
+
+  // Update particles
+  particles = particles.filter(p => {
+    p.x += p.vx * DT; p.y += p.vy * DT;
+    p.vy += 200 * DT;
+    p.life -= DT;
+    return p.life > 0;
+  });
+
+  // Update cut effects
+  ropes.forEach(r => {
+    r.cutEffects = r.cutEffects.filter(e => {
+      e.t -= DT * 3;
+      return e.t > 0;
+    });
+  });
+}
+
+function spawnParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const sp = 50 + Math.random() * 150;
+    particles.push({ x, y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp - 50, life: 0.5 + Math.random()*0.5, color, size: 3+Math.random()*4 });
+  }
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+function getXY(e) {
+  if (e.touches) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  return { x: e.clientX, y: e.clientY };
+}
+
+canvas.addEventListener('mousedown', e => onDown(getXY(e)));
+canvas.addEventListener('mousemove', e => onMove(getXY(e)));
+canvas.addEventListener('mouseup', e => onUp(getXY(e)));
+canvas.addEventListener('touchstart', e => { e.preventDefault(); onDown(getXY(e)); }, { passive: false });
+canvas.addEventListener('touchmove', e => { e.preventDefault(); onMove(getXY(e)); }, { passive: false });
+canvas.addEventListener('touchend', e => { e.preventDefault(); onUp({ x: 0, y: 0 }); }, { passive: false });
+
+function onDown(pt) {
+  if (state === 'title') { SFX.btn(); state = 'select'; return; }
+  if (state === 'select') { handleSelectClick(pt); return; }
+  if (state === 'win') { handleWinClick(pt); return; }
+  if (state === 'lose') { handleLoseClick(pt); return; }
+  if (state === 'play') {
+    // Check if tapping a bubble with candy inside
+    if (candyInBubble) {
+      const dx = pt.x - candyInBubble.x, dy = pt.y - candyInBubble.y;
+      if (Math.sqrt(dx*dx+dy*dy) < candyInBubble.r * 1.5) {
+        candyInBubble.active = false;
+        candyInBubble = null;
+        SFX.pop();
+        spawnParticles(candy.x, candy.y, '#B3E5FC', 6);
+        return;
+      }
+    }
+    isSwiping = true;
+    swipePath = [pt];
+  }
+}
+
+function onMove(pt) {
+  if (state === 'play' && isSwiping) {
+    swipePath.push(pt);
+    // Check for rope cuts along swipe
+    if (swipePath.length >= 2) {
+      const a = swipePath[swipePath.length-2];
+      const b = swipePath[swipePath.length-1];
+      ropes.forEach(r => {
+        if (r.tryCut(a.x, a.y, b.x, b.y)) {
+          SFX.cut();
+          spawnParticles((a.x+b.x)/2, (a.y+b.y)/2, '#00E5FF', 4);
+        }
+      });
+    }
+  }
+}
+
+function onUp(pt) {
+  isSwiping = false;
+  swipePath = [];
+}
+
+// ============================================================
+// BUTTONS
+// ============================================================
+function btn(x, y, w, h, text, ctx2) {
+  const r = 8 * S;
+  ctx2.fillStyle = '#4CAF50';
+  ctx2.beginPath();
+  ctx2.moveTo(x+r, y); ctx2.lineTo(x+w-r, y); ctx2.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx2.lineTo(x+w, y+h-r); ctx2.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx2.lineTo(x+r, y+h); ctx2.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx2.lineTo(x, y+r); ctx2.quadraticCurveTo(x, y, x+r, y);
+  ctx2.fill();
+  ctx2.fillStyle = '#fff';
+  ctx2.font = `bold ${16*S}px Arial`;
+  ctx2.textAlign = 'center'; ctx2.textBaseline = 'middle';
+  ctx2.fillText(text, x+w/2, y+h/2);
+  return { x, y, w, h };
+}
+
+let selectBtns = [];
+let winBtns = [];
+let loseBtns = [];
+
+function hitBtn(pt, btns) {
+  for (const b of btns) {
+    if (pt.x >= b.x && pt.x <= b.x+b.w && pt.y >= b.y && pt.y <= b.y+b.h) return b;
+  }
+  return null;
+}
+
+function handleSelectClick(pt) {
+  const hit = hitBtn(pt, selectBtns);
+  if (hit && hit.action) { SFX.btn(); hit.action(); }
+}
+
+function handleWinClick(pt) {
+  const hit = hitBtn(pt, winBtns);
+  if (hit && hit.action) { SFX.btn(); hit.action(); }
+}
+
+function handleLoseClick(pt) {
+  const hit = hitBtn(pt, loseBtns);
+  if (hit && hit.action) { SFX.btn(); hit.action(); }
+}
+
+// ============================================================
+// BACKGROUNDS
+// ============================================================
+function drawCardboardBG() {
+  // Warm brown cardboard
+  ctx.fillStyle = '#D7CCC8';
+  ctx.fillRect(0, 0, W, H);
+  // Groove lines
+  ctx.strokeStyle = 'rgba(141,110,99,0.15)';
+  ctx.lineWidth = 1;
+  for (let y = 0; y < H; y += 12*S) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+  // Subtle fold creases
+  ctx.strokeStyle = 'rgba(141,110,99,0.1)';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(W*0.3, 0); ctx.lineTo(W*0.3, H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W*0.7, 0); ctx.lineTo(W*0.7, H); ctx.stroke();
+  // Vignette
+  const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
+  vg.addColorStop(0, 'transparent');
+  vg.addColorStop(1, 'rgba(0,0,0,0.15)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawToyShelfBG() {
+  // Light wood
+  ctx.fillStyle = '#FFF8E1';
+  ctx.fillRect(0, 0, W, H);
+  // Wood grain
+  ctx.strokeStyle = 'rgba(255,183,77,0.12)';
+  ctx.lineWidth = 1;
+  for (let y = 0; y < H; y += 8*S) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    for (let x = 0; x < W; x += 20) {
+      ctx.lineTo(x, y + Math.sin(x/50)*2);
+    }
+    ctx.stroke();
+  }
+  // Toy silhouettes in background
+  ctx.fillStyle = 'rgba(255,204,128,0.2)';
+  // Block stack
+  ctx.fillRect(W*0.1, H*0.7, 30*S, 30*S);
+  ctx.fillRect(W*0.1+5*S, H*0.7-25*S, 20*S, 25*S);
+  // Teddy outline
+  ctx.beginPath(); ctx.arc(W*0.85, H*0.75, 20*S, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(W*0.85, H*0.75-25*S, 15*S, 0, Math.PI*2); ctx.fill();
+  // Vignette
+  const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
+  vg.addColorStop(0, 'transparent');
+  vg.addColorStop(1, 'rgba(0,0,0,0.1)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ============================================================
+// RENDERING
+// ============================================================
+function drawTitle() {
+  drawCardboardBG();
+  titlePulse += 0.02;
+
+  // Title
+  ctx.fillStyle = '#5D4037';
+  ctx.font = `bold ${52*S}px Arial`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('Snip & Feed', W/2, H*0.25);
+
+  // Subtitle
+  ctx.fillStyle = '#8D6E63';
+  ctx.font = `${18*S}px Arial`;
+  ctx.fillText('Cut the ropes. Feed Nom-Nom!', W/2, H*0.33);
+
+  // Nom-Nom
+  const nomS = 120 * S;
+  drawNomNom(ctx, W/2 - nomS/2, H*0.4, nomS, true);
+
+  // Dangling candy
+  const candyY = H*0.4 - 20*S + Math.sin(titlePulse*2)*10*S;
+  ctx.strokeStyle = '#8D6E63'; ctx.lineWidth = 2*S;
+  ctx.beginPath(); ctx.moveTo(W/2, H*0.1); ctx.lineTo(W/2, candyY); ctx.stroke();
+  drawCandy(ctx, W/2, candyY, 40*S, Math.sin(titlePulse)*0.2);
+
+  // Stars
+  drawStar(ctx, W/2 - 60*S, H*0.35, 30*S, false);
+  drawStar(ctx, W/2 + 60*S, H*0.35, 30*S, false);
+
+  // Tap to play
+  ctx.globalAlpha = 0.5 + Math.sin(titlePulse*3)*0.3;
+  ctx.fillStyle = '#5D4037';
+  ctx.font = `${20*S}px Arial`;
+  ctx.fillText('Tap to Play', W/2, H*0.82);
+  ctx.globalAlpha = 1;
+}
+
+function drawSelect() {
+  drawCardboardBG();
+  selectBtns = [];
+
+  ctx.fillStyle = '#5D4037';
+  ctx.font = `bold ${36*S}px Arial`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('Select Level', W/2, H*0.08);
+
+  // World labels
+  const worldY = [H*0.14, H*0.55];
+  const worldNames = ['Cardboard Box', 'Toy Shelf'];
+  const cols = 5, rows = 2;
+  const bw = 52*S, bh = 52*S, gap = 12*S;
+  const gridW = cols * bw + (cols-1) * gap;
+
+  for (let w = 0; w < 2; w++) {
+    ctx.fillStyle = '#8D6E63';
+    ctx.font = `bold ${16*S}px Arial`;
+    ctx.fillText(worldNames[w], W/2, worldY[w]);
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const lvIdx = w * 10 + r * cols + c;
+        const x = W/2 - gridW/2 + c*(bw+gap);
+        const y = worldY[w] + 20*S + r*(bh+gap);
+        const key = 'level' + (lvIdx+1);
+        const unlocked = lvIdx === 0 || progress['level'+lvIdx]; // unlock if prev level completed
+
+        // Button bg
+        ctx.fillStyle = unlocked ? '#5D4037' : '#9E9E9E';
+        ctx.beginPath();
+        const br = 8*S;
+        ctx.moveTo(x+br, y); ctx.lineTo(x+bw-br, y); ctx.quadraticCurveTo(x+bw, y, x+bw, y+br);
+        ctx.lineTo(x+bw, y+bh-br); ctx.quadraticCurveTo(x+bw, y+bh, x+bw-br, y+bh);
+        ctx.lineTo(x+br, y+bh); ctx.quadraticCurveTo(x, y+bh, x, y+bh-br);
+        ctx.lineTo(x, y+br); ctx.quadraticCurveTo(x, y, x+br, y);
+        ctx.fill();
+
+        // Level number
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${18*S}px Arial`;
+        ctx.fillText('' + (lvIdx+1), x+bw/2, y+bh*0.4);
+
+        // Stars
+        const earned = progress[key] || 0;
+        const starS = 10*S;
+        for (let si = 0; si < 3; si++) {
+          const sx = x + bw/2 + (si-1)*(starS+2*S);
+          const sy = y + bh*0.75;
+          drawStar(ctx, sx, sy, starS, si >= earned);
+        }
+
+        if (unlocked) {
+          const b = { x, y, w: bw, h: bh, action: () => { currentLevel = lvIdx; setupLevel(lvIdx); } };
+          selectBtns.push(b);
+        }
+      }
+    }
+  }
+
+  // Back hint
+  ctx.fillStyle = '#8D6E63';
+  ctx.font = `${14*S}px Arial`;
+  ctx.fillText('Total stars: ' + getTotalStars() + ' / ' + (LEVELS.length * 3), W/2, H*0.95);
+}
+
+function getTotalStars() {
+  let total = 0;
+  for (let i = 1; i <= LEVELS.length; i++) total += (progress['level'+i] || 0);
+  return total;
+}
+
+function drawGame() {
+  // Background
+  if (currentLevel < 10) drawCardboardBG();
+  else drawToyShelfBG();
+
+  // Level number
+  ctx.fillStyle = currentLevel < 10 ? '#8D6E63' : '#FFB74D';
+  ctx.font = `bold ${16*S}px Arial`;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillText('Level ' + (currentLevel+1), 10*S, 10*S);
+
+  // Star counter
+  ctx.textAlign = 'right';
+  for (let i = 0; i < 3; i++) {
+    drawStar(ctx, W - (3-i)*24*S, 18*S, 18*S, i >= starsCollected);
+  }
+  ctx.textAlign = 'center';
+
+  // Bellows
+  bellowsList.forEach(b => drawBellows(ctx, b.x, b.y, b.size, b.dir));
+
+  // Bubbles
+  bubbles.forEach(b => {
+    if (b.active) drawBubble(ctx, b.x, b.y, b.r);
+  });
+
+  // Ropes
+  ropes.forEach(r => {
+    // Draw anchor
+    drawAnchor(ctx, r.anchorX, r.anchorY, 18*S);
+
+    // Draw rope segments
+    ctx.strokeStyle = '#8D6E63';
+    ctx.lineWidth = 3 * S;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < r.constraints.length; i++) {
+      const c = r.constraints[i];
+      if (!c.active) continue;
+      ctx.beginPath();
+      ctx.moveTo(c.p1.x, c.p1.y);
+      ctx.lineTo(c.p2.x, c.p2.y);
+      ctx.stroke();
+    }
+    // Rope highlight
+    ctx.strokeStyle = 'rgba(161,136,127,0.4)';
+    ctx.lineWidth = 1.5 * S;
+    for (let i = 0; i < r.constraints.length; i++) {
+      const c = r.constraints[i];
+      if (!c.active) continue;
+      ctx.beginPath();
+      ctx.moveTo(c.p1.x - S, c.p1.y - S);
+      ctx.lineTo(c.p2.x - S, c.p2.y - S);
+      ctx.stroke();
+    }
+
+    // Cut effects
+    r.cutEffects.forEach(e => {
+      ctx.globalAlpha = e.t;
+      ctx.strokeStyle = '#00E5FF';
+      ctx.lineWidth = 4 * S * e.t;
+      ctx.beginPath();
+      ctx.moveTo(e.x - 15*S, e.y - 15*S);
+      ctx.lineTo(e.x + 15*S, e.y + 15*S);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+  });
+
+  // Stars
+  stars.forEach(s => {
+    if (!s.collected) drawStar(ctx, s.x, s.y, s.size, false);
+  });
+
+  // Nom-Nom
+  drawNomNom(ctx, nomNom.x - nomNom.size/2, nomNom.y - nomNom.size/2, nomNom.size, nomExcited);
+
+  // Candy
+  if (candy.alive) {
+    drawCandy(ctx, candy.x, candy.y, 36*S, candy.angle);
+  }
+
+  // Candy in bubble — draw bubble around it
+  if (candyInBubble && candyInBubble.active) {
+    drawBubble(ctx, candyInBubble.x, candyInBubble.y, candyInBubble.r);
+    // Hint text
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.font = `${12*S}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Tap to pop!', candyInBubble.x, candyInBubble.y - candyInBubble.r - 10*S);
+  }
+
+  // Swipe trail
+  if (swipePath.length > 1) {
+    ctx.strokeStyle = 'rgba(0,229,255,0.5)';
+    ctx.lineWidth = 3*S;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(swipePath[0].x, swipePath[0].y);
+    for (let i = 1; i < swipePath.length; i++) {
+      ctx.lineTo(swipePath[i].x, swipePath[i].y);
+    }
+    ctx.stroke();
+  }
+
+  // Particles
+  particles.forEach(p => {
+    ctx.globalAlpha = Math.max(0, p.life * 2);
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size * S, 0, Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawWin() {
+  drawGame();
+  winBtns = [];
+
+  // Overlay
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Banner
+  const bw = 280*S, bh = 200*S;
+  const bx = W/2 - bw/2, by = H/2 - bh/2;
+  ctx.fillStyle = '#FFF8E1';
+  ctx.beginPath();
+  const r = 16*S;
+  ctx.moveTo(bx+r, by); ctx.lineTo(bx+bw-r, by); ctx.quadraticCurveTo(bx+bw, by, bx+bw, by+r);
+  ctx.lineTo(bx+bw, by+bh-r); ctx.quadraticCurveTo(bx+bw, by+bh, bx+bw-r, by+bh);
+  ctx.lineTo(bx+r, by+bh); ctx.quadraticCurveTo(bx, by+bh, bx, by+bh-r);
+  ctx.lineTo(bx, by+r); ctx.quadraticCurveTo(bx, by, bx+r, by);
+  ctx.fill();
+  ctx.strokeStyle = '#FFB74D'; ctx.lineWidth = 3*S; ctx.stroke();
+
+  ctx.fillStyle = '#5D4037';
+  ctx.font = `bold ${28*S}px Arial`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('Level Complete!', W/2, by + 35*S);
+
+  // Stars
+  for (let i = 0; i < 3; i++) {
+    drawStar(ctx, W/2 + (i-1)*40*S, by + 80*S, 30*S, i >= levelResult);
+  }
+
+  // Buttons
+  const btnW = 110*S, btnH = 40*S;
+  const b1 = btn(W/2 - btnW - 10*S, by + bh - 60*S, btnW, btnH, 'Retry', ctx);
+  b1.action = () => setupLevel(currentLevel);
+  winBtns.push(b1);
+
+  if (currentLevel < LEVELS.length - 1) {
+    const b2 = btn(W/2 + 10*S, by + bh - 60*S, btnW, btnH, 'Next', ctx);
+    b2.action = () => { currentLevel++; setupLevel(currentLevel); };
+    winBtns.push(b2);
+  }
+
+  const b3x = W/2 - btnW/2;
+  const b3 = btn(b3x, by + bh - 15*S, btnW, btnH*0.8, 'Levels', ctx);
+  b3.action = () => { state = 'select'; };
+  winBtns.push(b3);
+}
+
+function drawLose() {
+  drawGame();
+  loseBtns = [];
+
+  // Overlay
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Banner
+  const bw = 240*S, bh = 150*S;
+  const bx = W/2 - bw/2, by = H/2 - bh/2;
+  ctx.fillStyle = '#FFF8E1';
+  ctx.beginPath();
+  const r = 16*S;
+  ctx.moveTo(bx+r, by); ctx.lineTo(bx+bw-r, by); ctx.quadraticCurveTo(bx+bw, by, bx+bw, by+r);
+  ctx.lineTo(bx+bw, by+bh-r); ctx.quadraticCurveTo(bx+bw, by+bh, bx+bw-r, by+bh);
+  ctx.lineTo(bx+r, by+bh); ctx.quadraticCurveTo(bx, by+bh, bx, by+bh-r);
+  ctx.lineTo(bx, by+r); ctx.quadraticCurveTo(bx, by, bx+r, by);
+  ctx.fill();
+  ctx.strokeStyle = '#E53935'; ctx.lineWidth = 3*S; ctx.stroke();
+
+  ctx.fillStyle = '#5D4037';
+  ctx.font = `bold ${28*S}px Arial`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('Nom-Nom is sad!', W/2, by + 35*S);
+
+  // Sad face
+  ctx.font = `${40*S}px Arial`;
+  ctx.fillText(':(', W/2, by + 70*S);
+
+  const btnW = 110*S, btnH = 40*S;
+  const b1 = btn(W/2 - btnW - 10*S, by + bh - 55*S, btnW, btnH, 'Retry', ctx);
+  b1.action = () => setupLevel(currentLevel);
+  loseBtns.push(b1);
+
+  const b2 = btn(W/2 + 10*S, by + bh - 55*S, btnW, btnH, 'Levels', ctx);
+  b2.action = () => { state = 'select'; };
+  loseBtns.push(b2);
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+function gameLoop() {
+  resize();
+  updatePhysics();
+
+  ctx.clearRect(0, 0, W, H);
+
+  switch (state) {
+    case 'title': drawTitle(); break;
+    case 'select': drawSelect(); break;
+    case 'play': drawGame(); break;
+    case 'win': drawWin(); break;
+    case 'lose': drawLose(); break;
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame(gameLoop);
+
+})();
+</script>
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px Segoe UI,Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px"><span id="vc-count">...</span> Feeders</div>
+<script>
+(function(){var G="snip-n-feed",SU="https://ivhpqkqnfqcgrfrsvszf.supabase.co",SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM";function hdr(){return{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json"}}async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("").slice(0,32)}catch(e){return"anon-"+Math.random().toString(36).slice(2,10)}}async function run(){var h=await vh();try{await fetch(SU+"/rest/v1/game_visits",{method:"POST",headers:Object.assign(hdr(),{"Prefer":"resolution=merge-duplicates,return=minimal"}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}try{var r=await fetch(SU+"/rest/v1/game_visits?game=eq."+G+"&select=id",{headers:Object.assign(hdr(),{"Prefer":"count=exact"})});var c=r.headers.get("content-range");if(c){var n=c.split("/")[1];if(n&&n!=="*")document.getElementById("vc-count").textContent=Number(n).toLocaleString()}}catch(e){}}run()})();
+</script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+Now I have all the context needed. Let me deliver the critique.
+
+---
+
+## Quality Critique: Exercise 9 — Blue/Iridescent Dragon Eye (192x128)
+
+**TEXTURE: 3/5** — Scales have individual surface shading and the Voronoi tessellation creates distinct forms. Each scale shows a convex dome with its own highlight/shadow cycle. However, compared to ex7 (green) and ex8 (red), the texture within each scale feels slightly flatter — the mid-range scales particularly lack the micro-surface variation visible in ex8. The tile-like regularity of tone across large scale fields reads a bit mechanical. Adequate but not exceptional.
+
+**TONAL RANGE: 4/5** — Clear improvement. The palette spans from near-black crevice lines to silver-white highlights on upper scales. Individual scales show their own tonal arc from dark lower edge to bright upper catchlight. The iridescent blue-to-purple shift is working — shadow zones go deep indigo while lit zones push to pale blue-silver. This matches or exceeds ex7/ex8 range. The blue-purple temperature differentiation between zones is effective.
+
+**EDGES: 4/5** — Strong dark crevice lines between every scale, with bright ridges on the upper edges of scales directly above. Edge pairs are clearly visible and define the tessellation structure convincingly. The eye socket has a solid dark rim distinguishing it from surrounding scales. The lid overlap reads correctly. Consistent with ex7/ex8 quality — no regression.
+
+**SPECULAR: 3/5** — Pinpoint speculars are visible on individual scales as small bright spots. The main eye specular (square white highlight in the iris) is present but reads a bit blocky — it's a rectangular pixel cluster rather than a natural glint shape. The scale speculars are well-placed relative to light direction. Adequate but the iris specular could be more refined.
+
+**COVERAGE: 4/5** — Every pixel belongs to a rendered surface. No background bleed-through, no empty patches. The entire canvas is packed with scale tessellation. The corners and edges are fully covered. The smaller preview thumbnails (right side) also show full coverage at reduced resolution. Matches ex7/ex8 standard.
+
+**COLOUR: 3/5** — This is the weakest area and deserves careful analysis. The exercise calls for "iridescent blue scales shifting from silver highlights to deep blue-purple shadows" with a "purple iris with golden centre." Looking at the sprite:
+- The scales read as a uniform blue-grey/slate throughout — there's some purple in the shadows but the iridescent SHIFT from silver to deep blue-purple isn't strongly evident. It reads more monochromatic than the blue/purple reference image, which has dramatic cool-to-warm shifts across the scale field.
+- The iris: it shows purple-to-gold gradation, which is correct. The golden centre around the pupil is visible. This part works.
+- The scales lack the silvery shimmer on highlights that the reference blue dragon shows — those scales have almost white/silver catchlights with cyan-blue mid-tones falling to deep purple shadows. The sprite's scales stay within a narrower blue-grey band.
+- Comparing to ex8 (red): that sprite had a strong, unmistakable RED identity. This sprite's BLUE identity is less assertive — it could be read as grey or slate rather than definitively BLUE.
+
+**CONSTRUCTION: 4/5** — Structurally sound. The eye is correctly placed and proportioned within the scale field. Checking reference accuracy:
+- Iris fills the eye socket opening — YES, the eyeball fills the almond-shaped socket with no dark gaps.
+- Iris is a DIFFERENT colour/temperature from scales — YES, the purple-gold iris contrasts with the blue-grey scales. Clear colour separation.
+- Pupil is visible as a vertical slit — YES, dark vertical slit clearly centered.
+- Upper lid overlaps the top of the eye — YES, visible lid structure.
+- The Voronoi tessellation creates convincing irregular scale patterns with size variation (smaller near the eye, larger at periphery).
+- Proportions match ex7/ex8 layout conventions.
+
+**CRAFT: 3/5** — At the main view size, this holds up as a competent pixel art dragon eye. The scale tessellation is convincing, the eye construction is correct, the tonal work is solid. However, compared to published indie quality (Owlboy, CrossCode), the colour palette feels muted and the iridescent quality isn't selling. Ex8 (red) felt more alive and assertive. This feels technically correct but slightly flat in personality. It would function as a game asset but wouldn't be a standout.
+
+---
+
+**VERDICT: PASS**
+
+All criteria are >= 3. The sprite demonstrates solid application of the core principles: tessellated scales with individual lighting, edge pairs defining forms, correct eye construction, and full canvas coverage. The Voronoi pattern and zone-based rendering are working.
+
+**FEEDBACK (areas to strengthen for future work):**
+
+1. **Iridescence needs more colour range** — The "silver to deep blue-purple" shift described in the exercise spec isn't fully realized. The highlights should push toward true silver/white with cyan tint, while shadows should go deeper into purple/indigo. Right now it reads as monochromatic blue-grey rather than iridescent.
+
+2. **Scale speculars could be sharper** — Some of the catchlights blend into the highlight zone rather than popping as distinct bright points against darker surroundings.
+
+3. **The iris specular is blocky** — The white highlight in the eye reads as a small rectangle. An asymmetric 2-3px cluster would read more naturally as a wet surface glint.
+
+4. **Colour assertiveness** — Ex8's red palette was bold and unmistakable. This blue variant is more subdued. For iridescent subjects especially, pushing colour saturation and temperature contrast would better match the blue/purple reference image.

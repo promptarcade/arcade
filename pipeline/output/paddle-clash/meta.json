@@ -1,0 +1,40 @@
+{
+  "request": "pong - two paddles and a bouncing ball",
+  "spec": {
+    "title": "Paddle Clash",
+    "genre": "Arcade",
+    "coreLoop": [
+      "ball-physics",
+      "paddle-control",
+      "score-competition"
+    ],
+    "controls": {
+      "keyboard": [
+        "arrow keys",
+        "W/S"
+      ],
+      "touch": [
+        "swipe",
+        "drag"
+      ]
+    },
+    "theme": "Classic arcade tennis",
+    "visualStyle": "Minimalist retro"
+  },
+  "benchmarks": {
+    "avgEntityCount": 5,
+    "commonMechanics": [
+      "paddle-control",
+      "ball-physics"
+    ],
+    "avgSessionLength": 960,
+    "recommendedDifficulty": "stepped",
+    "corroboratedProducts": 4
+  },
+  "entityCount": 7,
+  "spriteCount": 7,
+  "mechanicCount": 3,
+  "cost": 1.7855732000000002,
+  "elapsed": "665.1",
+  "timestamp": "2026-03-23T11:46:23.728Z"
+}

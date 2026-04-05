@@ -1,0 +1,39 @@
+{
+  "request": "pong - two paddles and a bouncing ball",
+  "spec": {
+    "title": "Pong",
+    "genre": "Arcade Sports",
+    "coreLoop": [
+      "ball-physics",
+      "paddle-control"
+    ],
+    "controls": {
+      "keyboard": [
+        "arrow keys",
+        "spacebar"
+      ],
+      "touch": [
+        "swipe",
+        "tap"
+      ]
+    },
+    "theme": "Classic arcade competition",
+    "visualStyle": "Minimalist geometric"
+  },
+  "benchmarks": {
+    "avgEntityCount": 6,
+    "commonMechanics": [
+      "ball-physics",
+      "paddle-control"
+    ],
+    "avgSessionLength": 900,
+    "recommendedDifficulty": "stepped",
+    "corroboratedProducts": 4
+  },
+  "entityCount": 6,
+  "spriteCount": 6,
+  "mechanicCount": 2,
+  "cost": 1.6642469000000002,
+  "elapsed": "693.1",
+  "timestamp": "2026-03-23T11:17:45.892Z"
+}

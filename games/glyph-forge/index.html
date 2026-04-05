@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Glyph Forge</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1e; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden; }
+canvas { display: block; touch-action: none; image-rendering: pixelated; }
+#touch-controls {
+  display: none; position: fixed; bottom: 10px; left: 0; right: 0;
+  justify-content: space-around; align-items: flex-end; padding: 0 20px; pointer-events: none; z-index: 100;
+}
+@media (pointer: coarse) { #touch-controls { display: flex; } }
+.tc-btn {
+  background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 8px; color: #fff; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  user-select: none; display: flex; align-items: center; justify-content: center; pointer-events: auto;
+}
+.tc-btn:active { background: rgba(255,255,255,0.35); }
+.dpad { display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: auto; }
+.dpad-mid { display: flex; gap: 4px; }
+.dpad .tc-btn { width: 52px; height: 52px; font-size: 20px; }
+.action-btns { display: flex; gap: 6px; pointer-events: auto; flex-wrap: wrap; max-width: 180px; }
+.action-btns .tc-btn { height: 44px; padding: 4px 10px; font-size: 11px; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="touch-controls">
+  <div class="dpad">
+    <button class="tc-btn" data-key="ArrowUp">&#9650;</button>
+    <div class="dpad-mid">
+      <button class="tc-btn" data-key="ArrowLeft">&#9664;</button>
+      <button class="tc-btn" data-key="ArrowDown">&#9660;</button>
+      <button class="tc-btn" data-key="ArrowRight">&#9654;</button>
+    </div>
+  </div>
+  <div class="action-btns">
+    <button class="tc-btn" data-key=" " style="width:80px">DROP</button>
+    <button class="tc-btn" data-key="ArrowUp" style="width:80px">ROTATE</button>
+  </div>
+</div>
+<script>
+// ============================================================
+// GLYPH FORGE — Mystical rune puzzle game
+// ============================================================
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// --- Responsive sizing ---
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// --- Constants ---
+const COLS = 8, ROWS = 12;
+const ELEMENTS = ['fire', 'water', 'earth', 'air'];
+const STROKE_TYPES = ['arc', 'line', 'angle', 'cross', 'dot'];
+const ELEMENT_COLORS = {
+  fire:  { core: '#ffcc88', mid: '#ff8844', glow: '#ff6b35', dark: '#cc4411' },
+  water: { core: '#aaddff', mid: '#55aaee', glow: '#3388cc', dark: '#1155aa' },
+  earth: { core: '#bbee99', mid: '#88cc66', glow: '#66aa44', dark: '#337722' },
+  air:   { core: '#eeccff', mid: '#ccaaff', glow: '#aa88dd', dark: '#7744aa' },
+};
+
+// --- Game state ---
+let state = 'title'; // title, playing, paused, gameover
+let grid = []; // ROWS x COLS, each cell: null or { stroke, element, age, cracking, crackAge }
+let score = 0;
+let highScore = parseInt(localStorage.getItem('glyphforge-hi') || '0');
+let chainElement = null;
+let chainCount = 0;
+let crackPercent = 0;
+let dropInterval = 4000;
+let lastDropTime = 0;
+let gameTime = 0;
+let currentPiece = null;
+let nextPiece = null;
+let completedGlyphs = []; // animation queue
+let fusionBursts = []; // animation queue
+let particles = [];
+let titlePulse = 0;
+
+// Piece: { cells: [{col, row}], stroke, element, col, row }
+function randomPiece() {
+  const shapes = [
+    [{c:0,r:0},{c:1,r:0}],                           // horizontal 2
+    [{c:0,r:0},{c:0,r:1}],                           // vertical 2
+    [{c:0,r:0},{c:1,r:0},{c:0,r:1}],                 // L
+    [{c:0,r:0},{c:1,r:0},{c:1,r:1}],                 // reverse L
+    [{c:0,r:0},{c:1,r:0},{c:2,r:0}],                 // horizontal 3
+    [{c:0,r:0},{c:0,r:1},{c:0,r:2}],                 // vertical 3
+    [{c:0,r:0},{c:1,r:0},{c:0,r:1},{c:1,r:1}],       // square
+  ];
+  const shape = shapes[Math.floor(Math.random() * shapes.length)];
+  const stroke = STROKE_TYPES[Math.floor(Math.random() * 5)];
+  const element = ELEMENTS[Math.floor(Math.random() * 4)];
+  const maxC = Math.max(...shape.map(s => s.c));
+  const col = Math.floor(Math.random() * (COLS - maxC));
+  return { cells: shape, stroke, element, col, row: 0 };
+}
+
+function initGame() {
+  grid = [];
+  for (let r = 0; r < ROWS; r++) {
+    grid[r] = [];
+    for (let c = 0; c < COLS; c++) grid[r][c] = null;
+  }
+  score = 0;
+  chainElement = null;
+  chainCount = 0;
+  crackPercent = 0;
+  dropInterval = 4000;
+  lastDropTime = performance.now();
+  gameTime = 0;
+  completedGlyphs = [];
+  fusionBursts = [];
+  particles = [];
+  currentPiece = randomPiece();
+  nextPiece = randomPiece();
+  state = 'playing';
+}
+
+// --- Piece movement ---
+function canPlace(piece, colOff, rowOff) {
+  for (const cell of piece.cells) {
+    const c = piece.col + cell.c + colOff;
+    const r = piece.row + cell.r + rowOff;
+    if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return false;
+    if (grid[r][c] !== null) return false;
+  }
+  return true;
+}
+
+function rotatePiece(piece) {
+  // Rotate cells 90° clockwise around bounding box center
+  const maxC = Math.max(...piece.cells.map(s => s.c));
+  const maxR = Math.max(...piece.cells.map(s => s.r));
+  const newCells = piece.cells.map(s => ({ c: maxR - s.r, r: s.c }));
+  const testPiece = { ...piece, cells: newCells };
+  // Check if rotation fits, try nudging
+  for (let nudge = 0; nudge <= 2; nudge++) {
+    for (const dir of [0, -1, 1]) {
+      if (canPlace(testPiece, dir * nudge, 0)) {
+        piece.cells = newCells;
+        piece.col += dir * nudge;
+        return;
+      }
+    }
+  }
+}
+
+function lockPiece(piece) {
+  for (const cell of piece.cells) {
+    const c = piece.col + cell.c;
+    const r = piece.row + cell.r;
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS) {
+      grid[r][c] = { stroke: piece.stroke, element: piece.element, age: 0, cracking: false, crackAge: 0 };
+    }
+  }
+  playSound('place');
+  checkGlyphs();
+  // Spawn next piece
+  currentPiece = nextPiece;
+  nextPiece = randomPiece();
+  if (!canPlace(currentPiece, 0, 0)) {
+    state = 'gameover';
+    if (score > highScore) {
+      highScore = score;
+      localStorage.setItem('glyphforge-hi', highScore);
+    }
+    submitScore(score);
+    playSound('shatter');
+  }
+}
+
+function hardDrop() {
+  while (canPlace(currentPiece, 0, 1)) currentPiece.row++;
+  lockPiece(currentPiece);
+}
+
+// --- Glyph checking ---
+function checkGlyphs() {
+  let found = true;
+  while (found) {
+    found = false;
+    for (let r = 0; r < ROWS - 1; r++) {
+      for (let c = 0; c < COLS - 1; c++) {
+        // Check 2x2 area
+        const cells = [grid[r][c], grid[r][c+1], grid[r+1][c], grid[r+1][c+1]];
+        if (cells.some(x => x === null)) continue;
+        // Need at least 3 different stroke types OR all 4 filled (relaxed for fun)
+        const strokes = new Set(cells.map(x => x.stroke));
+        if (strokes.size >= 3) {
+          // Glyph completed!
+          found = true;
+          const elem = cells[0].element; // use top-left element
+          // Score
+          let pts = 100;
+          if (chainElement === elem) {
+            chainCount++;
+            pts *= chainCount;
+          } else {
+            // Fusion burst if chain was active
+            if (chainCount >= 2) {
+              triggerFusionBurst(c, r);
+            }
+            chainElement = elem;
+            chainCount = 1;
+          }
+          // Speed bonus
+          const avgAge = cells.reduce((s, x) => s + x.age, 0) / 4;
+          if (avgAge < 3000) pts += 50;
+          score += pts;
+          // Clear cells
+          grid[r][c] = null; grid[r][c+1] = null;
+          grid[r+1][c] = null; grid[r+1][c+1] = null;
+          // Repair cracks in 3x3 radius
+          for (let dr = -1; dr <= 2; dr++) {
+            for (let dc = -1; dc <= 2; dc++) {
+              const rr = r + dr, cc = c + dc;
+              if (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS && grid[rr][cc]) {
+                grid[rr][cc].cracking = false;
+                grid[rr][cc].crackAge = 0;
+              }
+            }
+          }
+          // Visual effect
+          completedGlyphs.push({ col: c, row: r, element: elem, time: 0 });
+          spawnGlyphParticles(c, r, elem);
+          playSound('complete');
+          // Gravity — cells above fall down
+          applyGravity();
+        }
+      }
+    }
+  }
+}
+
+function applyGravity() {
+  for (let c = 0; c < COLS; c++) {
+    let writeRow = ROWS - 1;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (grid[r][c] !== null) {
+        if (writeRow !== r) {
+          grid[writeRow][c] = grid[r][c];
+          grid[r][c] = null;
+        }
+        writeRow--;
+      }
+    }
+  }
+}
+
+function triggerFusionBurst(col, row) {
+  let cleared = 0;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (grid[r][c] && grid[r][c].cracking) {
+        grid[r][c].cracking = false;
+        grid[r][c].crackAge = 0;
+        cleared++;
+      }
+    }
+  }
+  score += cleared * 50;
+  if (cleared > 0) {
+    fusionBursts.push({ col, row, time: 0 });
+    playSound('fusion');
+  }
+}
+
+// --- Update ---
+function update(dt) {
+  if (state !== 'playing') return;
+  gameTime += dt;
+
+  // Difficulty ramp
+  const elapsed = gameTime / 1000;
+  dropInterval = Math.max(1500, 4000 - Math.floor(elapsed / 30) * 100);
+
+  // Auto drop
+  const now = performance.now();
+  if (now - lastDropTime > dropInterval) {
+    if (canPlace(currentPiece, 0, 1)) {
+      currentPiece.row++;
+    } else {
+      lockPiece(currentPiece);
+    }
+    lastDropTime = now;
+  }
+
+  // Age cells, handle cracking
+  let cracked = 0, total = 0;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (grid[r][c]) {
+        total++;
+        grid[r][c].age += dt;
+        // Start cracking after 8 seconds
+        if (grid[r][c].age > 8000 && !grid[r][c].cracking) {
+          grid[r][c].cracking = true;
+          grid[r][c].crackAge = 0;
+        }
+        if (grid[r][c].cracking) {
+          grid[r][c].crackAge += dt;
+          cracked++;
+          // Spread cracks to neighbours every 3 seconds
+          if (grid[r][c].crackAge > 3000) {
+            grid[r][c].crackAge = 0;
+            const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+            const dir = dirs[Math.floor(Math.random() * 4)];
+            const nr = r + dir[0], nc = c + dir[1];
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && grid[nr][nc] && !grid[nr][nc].cracking) {
+              grid[nr][nc].cracking = true;
+              grid[nr][nc].crackAge = 0;
+            }
+          }
+        }
+      }
+    }
+  }
+  crackPercent = total > 0 ? (cracked / (COLS * ROWS)) * 100 : 0;
+  if (crackPercent >= 60) {
+    state = 'gameover';
+    if (score > highScore) {
+      highScore = score;
+      localStorage.setItem('glyphforge-hi', highScore);
+    }
+    submitScore(score);
+    playSound('shatter');
+  }
+
+  // Update effects
+  completedGlyphs.forEach(g => g.time += dt);
+  completedGlyphs = completedGlyphs.filter(g => g.time < 800);
+  fusionBursts.forEach(f => f.time += dt);
+  fusionBursts = fusionBursts.filter(f => f.time < 600);
+
+  // Update particles
+  particles.forEach(p => {
+    p.x += p.vx * dt / 1000;
+    p.y += p.vy * dt / 1000;
+    p.life -= dt;
+    p.vy += 60 * dt / 1000; // gravity
+  });
+  particles = particles.filter(p => p.life > 0);
+}
+
+function spawnGlyphParticles(col, row, element) {
+  const colors = ELEMENT_COLORS[element];
+  const layout = getLayout();
+  const cx = layout.gridX + (col + 1) * layout.cellSize;
+  const cy = layout.gridY + (row + 1) * layout.cellSize;
+  for (let i = 0; i < 16; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 40 + Math.random() * 80;
+    particles.push({
+      x: cx, y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 30,
+      life: 500 + Math.random() * 500,
+      maxLife: 1000,
+      color: [colors.core, colors.mid, colors.glow][Math.floor(Math.random() * 3)],
+      size: 2 + Math.random() * 3,
+    });
+  }
+}
+
+// --- Layout ---
+function getLayout() {
+  const w = window.innerWidth, h = window.innerHeight;
+  const maxCellW = Math.floor((w * 0.55) / COLS);
+  const maxCellH = Math.floor((h * 0.85) / ROWS);
+  const cellSize = Math.min(maxCellW, maxCellH, 52);
+  const gridW = cellSize * COLS;
+  const gridH = cellSize * ROWS;
+  const gridX = Math.floor((w - gridW) / 2) - Math.floor(w * 0.08);
+  const gridY = Math.floor((h - gridH) / 2);
+  const sideX = gridX + gridW + 20;
+  return { cellSize, gridW, gridH, gridX, gridY, sideX, w, h };
+}
+
+// --- Drawing ---
+function drawStone(x, y, w, h) {
+  // Stone background with grain texture
+  const grad = ctx.createLinearGradient(x, y, x + w, y + h);
+  grad.addColorStop(0, '#3a3a42');
+  grad.addColorStop(0.5, '#454550');
+  grad.addColorStop(1, '#333340');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x, y, w, h);
+  // Grain
+  ctx.fillStyle = 'rgba(255,255,255,0.03)';
+  for (let gy = 0; gy < h; gy += 4) {
+    for (let gx = 0; gx < w; gx += 4) {
+      if (Math.sin(gx * 7.3 + gy * 11.7) > 0.3) {
+        ctx.fillRect(x + gx, y + gy, 2, 2);
+      }
+    }
+  }
+}
+
+function drawRuneStroke(cx, cy, size, stroke, element, alpha) {
+  const colors = ELEMENT_COLORS[element];
+  const s = size * 0.4;
+  ctx.globalAlpha = alpha || 1;
+
+  // Glow
+  const glowGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.6);
+  glowGrad.addColorStop(0, colors.glow + '40');
+  glowGrad.addColorStop(1, 'transparent');
+  ctx.fillStyle = glowGrad;
+  ctx.fillRect(cx - size * 0.6, cy - size * 0.6, size * 1.2, size * 1.2);
+
+  ctx.lineWidth = Math.max(2, size * 0.08);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // Outer glow stroke
+  ctx.strokeStyle = colors.glow;
+  ctx.lineWidth = Math.max(3, size * 0.12);
+  ctx.globalAlpha = (alpha || 1) * 0.5;
+  drawStrokeShape(cx, cy, s, stroke);
+  ctx.stroke();
+
+  // Core stroke
+  ctx.strokeStyle = colors.core;
+  ctx.lineWidth = Math.max(2, size * 0.06);
+  ctx.globalAlpha = alpha || 1;
+  drawStrokeShape(cx, cy, s, stroke);
+  ctx.stroke();
+
+  ctx.globalAlpha = 1;
+}
+
+function drawStrokeShape(cx, cy, s, stroke) {
+  ctx.beginPath();
+  switch (stroke) {
+    case 'arc':
+      ctx.arc(cx - s * 0.3, cy + s * 0.3, s * 0.8, -Math.PI * 0.4, -Math.PI * 0.05);
+      break;
+    case 'line':
+      ctx.moveTo(cx - s * 0.7, cy + s * 0.7);
+      ctx.lineTo(cx + s * 0.7, cy - s * 0.7);
+      break;
+    case 'angle':
+      ctx.moveTo(cx - s * 0.5, cy - s * 0.6);
+      ctx.lineTo(cx - s * 0.5, cy + s * 0.5);
+      ctx.lineTo(cx + s * 0.6, cy + s * 0.5);
+      break;
+    case 'cross':
+      ctx.moveTo(cx, cy - s * 0.6);
+      ctx.lineTo(cx, cy + s * 0.6);
+      ctx.moveTo(cx - s * 0.6, cy);
+      ctx.lineTo(cx + s * 0.6, cy);
+      break;
+    case 'dot':
+      ctx.arc(cx, cy, s * 0.2, 0, Math.PI * 2);
+      ctx.moveTo(cx, cy - s * 0.5);
+      ctx.lineTo(cx, cy - s * 0.2);
+      ctx.moveTo(cx + s * 0.4, cy + s * 0.3);
+      ctx.lineTo(cx + s * 0.2, cy + s * 0.15);
+      ctx.moveTo(cx - s * 0.4, cy + s * 0.3);
+      ctx.lineTo(cx - s * 0.2, cy + s * 0.15);
+      break;
+  }
+}
+
+function drawCracks(x, y, size, age) {
+  const intensity = Math.min(1, age / 5000);
+  ctx.strokeStyle = `rgba(17,17,21,${0.6 + intensity * 0.4})`;
+  ctx.lineWidth = 1 + intensity;
+  ctx.beginPath();
+  // Deterministic crack pattern based on position
+  const seed = x * 7 + y * 13;
+  let cx = x + size * 0.3, cy = y + size * 0.2;
+  ctx.moveTo(cx, cy);
+  for (let i = 0; i < 5 + intensity * 5; i++) {
+    const a = ((Math.sin(seed + i * 3.7) + 1) * 0.5) * Math.PI * 2;
+    cx += Math.cos(a) * size * 0.12;
+    cy += Math.sin(a) * size * 0.12;
+    cx = Math.max(x + 2, Math.min(x + size - 2, cx));
+    cy = Math.max(y + 2, Math.min(y + size - 2, cy));
+    ctx.lineTo(cx, cy);
+  }
+  ctx.stroke();
+  // Red underglow in cracks
+  if (intensity > 0.3) {
+    ctx.fillStyle = `rgba(255,68,34,${(intensity - 0.3) * 0.3})`;
+    ctx.fillRect(x + 2, y + 2, size - 4, size - 4);
+  }
+}
+
+function drawGrid(layout) {
+  const { cellSize, gridW, gridH, gridX, gridY } = layout;
+
+  // Tablet border
+  const borderW = 8;
+  ctx.fillStyle = '#1a1a22';
+  ctx.fillRect(gridX - borderW, gridY - borderW, gridW + borderW * 2, gridH + borderW * 2);
+  // Border bevel
+  ctx.fillStyle = '#2a2a35';
+  ctx.fillRect(gridX - borderW, gridY - borderW, gridW + borderW * 2, 3);
+  ctx.fillRect(gridX - borderW, gridY - borderW, 3, gridH + borderW * 2);
+  ctx.fillStyle = '#111118';
+  ctx.fillRect(gridX - borderW, gridY + gridH + borderW - 3, gridW + borderW * 2, 3);
+  ctx.fillRect(gridX + gridW + borderW - 3, gridY - borderW, 3, gridH + borderW * 2);
+
+  // Corner rune accents
+  const corners = [[gridX - 4, gridY - 4], [gridX + gridW, gridY - 4], [gridX - 4, gridY + gridH], [gridX + gridW, gridY + gridH]];
+  ctx.fillStyle = '#aa884440';
+  corners.forEach(([cx, cy]) => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Stone background
+  drawStone(gridX, gridY, gridW, gridH);
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(100,100,120,0.15)';
+  ctx.lineWidth = 0.5;
+  for (let r = 0; r <= ROWS; r++) {
+    ctx.beginPath();
+    ctx.moveTo(gridX, gridY + r * cellSize);
+    ctx.lineTo(gridX + gridW, gridY + r * cellSize);
+    ctx.stroke();
+  }
+  for (let c = 0; c <= COLS; c++) {
+    ctx.beginPath();
+    ctx.moveTo(gridX + c * cellSize, gridY);
+    ctx.lineTo(gridX + c * cellSize, gridY + gridH);
+    ctx.stroke();
+  }
+
+  // Draw placed cells
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (!grid[r][c]) continue;
+      const cell = grid[r][c];
+      const cx = gridX + c * cellSize + cellSize / 2;
+      const cy = gridY + r * cellSize + cellSize / 2;
+      drawRuneStroke(cx, cy, cellSize, cell.stroke, cell.element, cell.cracking ? 0.5 : 1);
+      if (cell.cracking) {
+        drawCracks(gridX + c * cellSize, gridY + r * cellSize, cellSize, cell.crackAge);
+      }
+    }
+  }
+
+  // Draw current piece (ghost + actual)
+  if (currentPiece && state === 'playing') {
+    // Ghost
+    let ghostRow = currentPiece.row;
+    const ghostPiece = { ...currentPiece, row: ghostRow };
+    while (canPlace(ghostPiece, 0, 1)) ghostPiece.row++;
+    if (ghostPiece.row !== currentPiece.row) {
+      for (const cell of currentPiece.cells) {
+        const gc = currentPiece.col + cell.c;
+        const gr = ghostPiece.row + cell.r;
+        const cx = gridX + gc * cellSize + cellSize / 2;
+        const cy = gridY + gr * cellSize + cellSize / 2;
+        ctx.fillStyle = ELEMENT_COLORS[currentPiece.element].glow + '20';
+        ctx.fillRect(gridX + gc * cellSize + 1, gridY + gr * cellSize + 1, cellSize - 2, cellSize - 2);
+      }
+    }
+    // Actual piece
+    for (const cell of currentPiece.cells) {
+      const pc = currentPiece.col + cell.c;
+      const pr = currentPiece.row + cell.r;
+      if (pr >= 0) {
+        const cx = gridX + pc * cellSize + cellSize / 2;
+        const cy = gridY + pr * cellSize + cellSize / 2;
+        // Subtle cell highlight
+        ctx.fillStyle = ELEMENT_COLORS[currentPiece.element].dark + '30';
+        ctx.fillRect(gridX + pc * cellSize + 1, gridY + pr * cellSize + 1, cellSize - 2, cellSize - 2);
+        drawRuneStroke(cx, cy, cellSize, currentPiece.stroke, currentPiece.element, 1);
+      }
+    }
+  }
+
+  // Completed glyph animations
+  for (const g of completedGlyphs) {
+    const t = g.time / 800;
+    const alpha = 1 - t;
+    const scale = 1 + t * 0.5;
+    const cx = gridX + (g.col + 1) * cellSize;
+    const cy = gridY + (g.row + 1) * cellSize;
+    const colors = ELEMENT_COLORS[g.element];
+    ctx.globalAlpha = alpha * 0.6;
+    const r = cellSize * scale;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, colors.core);
+    grad.addColorStop(0.5, colors.glow + '80');
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // Fusion burst animations
+  for (const f of fusionBursts) {
+    const t = f.time / 600;
+    const alpha = 1 - t;
+    const cx = gridX + (f.col + 1) * cellSize;
+    const cy = gridY + (f.row + 1) * cellSize;
+    const r = cellSize * 2 * t + cellSize;
+    ctx.globalAlpha = alpha * 0.4;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(0.3, '#ffdd88');
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // Particles
+  for (const p of particles) {
+    const alpha = Math.max(0, p.life / p.maxLife);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawUI(layout) {
+  const { cellSize, sideX, gridY, gridH, w, h } = layout;
+  const panelW = Math.min(160, w - sideX - 10);
+  if (panelW < 60) return; // too narrow
+
+  // Title
+  ctx.fillStyle = '#ccccdd';
+  ctx.font = 'bold 18px "Segoe UI", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('GLYPH FORGE', sideX, gridY + 20);
+
+  // Score
+  ctx.fillStyle = '#aaaacc';
+  ctx.font = '13px "Segoe UI", sans-serif';
+  ctx.fillText('SCORE', sideX, gridY + 50);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 22px "Segoe UI", sans-serif';
+  ctx.fillText(score.toLocaleString(), sideX, gridY + 75);
+
+  // High score
+  ctx.fillStyle = '#7777aa';
+  ctx.font = '11px "Segoe UI", sans-serif';
+  ctx.fillText('BEST: ' + highScore.toLocaleString(), sideX, gridY + 92);
+
+  // Next piece
+  ctx.fillStyle = '#8888aa';
+  ctx.font = '12px "Segoe UI", sans-serif';
+  ctx.fillText('NEXT', sideX, gridY + 120);
+  if (nextPiece) {
+    const previewSize = 28;
+    const previewX = sideX + 10;
+    const previewY = gridY + 130;
+    // Preview background
+    ctx.fillStyle = '#1a1a25';
+    ctx.fillRect(previewX - 5, previewY - 5, previewSize * 4 + 10, previewSize * 3 + 10);
+    for (const cell of nextPiece.cells) {
+      const px = previewX + cell.c * previewSize + previewSize / 2;
+      const py = previewY + cell.r * previewSize + previewSize / 2;
+      drawRuneStroke(px, py, previewSize, nextPiece.stroke, nextPiece.element, 0.8);
+    }
+  }
+
+  // Chain info
+  const chainY = gridY + 240;
+  ctx.fillStyle = '#8888aa';
+  ctx.font = '12px "Segoe UI", sans-serif';
+  ctx.fillText('CHAIN', sideX, chainY);
+  if (chainElement && chainCount > 0) {
+    const colors = ELEMENT_COLORS[chainElement];
+    ctx.fillStyle = colors.mid;
+    ctx.font = 'bold 20px "Segoe UI", sans-serif';
+    ctx.fillText('×' + chainCount, sideX, chainY + 24);
+    // Element indicator
+    ctx.fillStyle = colors.glow;
+    ctx.font = '12px "Segoe UI", sans-serif';
+    ctx.fillText(chainElement.toUpperCase(), sideX + 45, chainY + 24);
+  } else {
+    ctx.fillStyle = '#555566';
+    ctx.font = '14px "Segoe UI", sans-serif';
+    ctx.fillText('—', sideX, chainY + 24);
+  }
+
+  // Crack meter
+  const meterY = chainY + 50;
+  ctx.fillStyle = '#8888aa';
+  ctx.font = '12px "Segoe UI", sans-serif';
+  ctx.fillText('CRACKS', sideX, meterY);
+  ctx.fillStyle = crackPercent > 40 ? '#ff4422' : '#aaaacc';
+  ctx.font = 'bold 14px "Segoe UI", sans-serif';
+  ctx.fillText(Math.floor(crackPercent) + '%', sideX, meterY + 18);
+  // Meter bar
+  const barW = panelW - 10;
+  const barH = 8;
+  const barX = sideX;
+  const barY = meterY + 24;
+  ctx.fillStyle = '#222233';
+  ctx.fillRect(barX, barY, barW, barH);
+  const fillW = barW * (crackPercent / 60);
+  const barColor = crackPercent > 40 ? '#ff4422' : crackPercent > 20 ? '#ffaa44' : '#55aaee';
+  ctx.fillStyle = barColor;
+  ctx.fillRect(barX, barY, fillW, barH);
+
+  // Speed indicator
+  const speedY = meterY + 50;
+  ctx.fillStyle = '#666688';
+  ctx.font = '11px "Segoe UI", sans-serif';
+  ctx.fillText('DROP: ' + (dropInterval / 1000).toFixed(1) + 's', sideX, speedY);
+
+  // Controls hint
+  ctx.fillStyle = '#444466';
+  ctx.font = '10px "Segoe UI", sans-serif';
+  const hintY = gridY + gridH - 60;
+  ctx.fillText('← → Move', sideX, hintY);
+  ctx.fillText('↑ Rotate', sideX, hintY + 14);
+  ctx.fillText('↓ Soft drop', sideX, hintY + 28);
+  ctx.fillText('SPACE Hard drop', sideX, hintY + 42);
+  ctx.fillText('P Pause', sideX, hintY + 56);
+}
+
+function drawTitle() {
+  const w = window.innerWidth, h = window.innerHeight;
+  titlePulse += 0.02;
+
+  // Background
+  ctx.fillStyle = '#0a0a1e';
+  ctx.fillRect(0, 0, w, h);
+
+  // Ambient glow
+  const glowR = 200 + Math.sin(titlePulse) * 30;
+  const grad = ctx.createRadialGradient(w / 2, h * 0.35, 0, w / 2, h * 0.35, glowR);
+  grad.addColorStop(0, 'rgba(85,170,238,0.15)');
+  grad.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Title
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ccddff';
+  ctx.font = 'bold 48px "Segoe UI", sans-serif';
+  ctx.fillText('GLYPH FORGE', w / 2, h * 0.3);
+
+  // Subtitle
+  ctx.fillStyle = '#7788bb';
+  ctx.font = '16px "Segoe UI", sans-serif';
+  ctx.fillText('Inscribe the runes before the tablet shatters', w / 2, h * 0.38);
+
+  // Decorative rune symbols
+  const symbols = ['arc', 'line', 'angle', 'cross', 'dot'];
+  const elems = ['fire', 'water', 'earth', 'air', 'water'];
+  for (let i = 0; i < 5; i++) {
+    const sx = w * 0.2 + i * (w * 0.6 / 4);
+    const sy = h * 0.48;
+    const pulse = Math.sin(titlePulse + i * 1.2) * 0.15 + 0.85;
+    drawRuneStroke(sx, sy, 40, symbols[i], elems[i], pulse);
+  }
+
+  // Start prompt
+  const blink = Math.sin(titlePulse * 3) > 0 ? 1 : 0.4;
+  ctx.globalAlpha = blink;
+  ctx.fillStyle = '#aabbdd';
+  ctx.font = '18px "Segoe UI", sans-serif';
+  ctx.fillText('Press SPACE or tap to start', w / 2, h * 0.65);
+  ctx.globalAlpha = 1;
+
+  // High score
+  if (highScore > 0) {
+    ctx.fillStyle = '#556688';
+    ctx.font = '14px "Segoe UI", sans-serif';
+    ctx.fillText('Best: ' + highScore.toLocaleString(), w / 2, h * 0.72);
+  }
+}
+
+function drawGameOver() {
+  const w = window.innerWidth, h = window.innerHeight;
+  // Dim overlay
+  ctx.fillStyle = 'rgba(10,10,30,0.7)';
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.textAlign = 'center';
+
+  // Shattered text
+  ctx.fillStyle = '#ff6644';
+  ctx.font = 'bold 36px "Segoe UI", sans-serif';
+  ctx.fillText('TABLET SHATTERED', w / 2, h * 0.35);
+
+  ctx.fillStyle = '#ccccdd';
+  ctx.font = '20px "Segoe UI", sans-serif';
+  ctx.fillText('Score: ' + score.toLocaleString(), w / 2, h * 0.45);
+
+  if (score >= highScore && score > 0) {
+    ctx.fillStyle = '#ffcc44';
+    ctx.font = 'bold 16px "Segoe UI", sans-serif';
+    ctx.fillText('NEW BEST!', w / 2, h * 0.52);
+  }
+
+  const blink = Math.sin(performance.now() / 300) > 0 ? 1 : 0.4;
+  ctx.globalAlpha = blink;
+  ctx.fillStyle = '#8899bb';
+  ctx.font = '16px "Segoe UI", sans-serif';
+  ctx.fillText('Press SPACE or tap to play again', w / 2, h * 0.62);
+  ctx.globalAlpha = 1;
+}
+
+function drawPaused() {
+  const w = window.innerWidth, h = window.innerHeight;
+  ctx.fillStyle = 'rgba(10,10,30,0.6)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ccddff';
+  ctx.font = 'bold 28px "Segoe UI", sans-serif';
+  ctx.fillText('PAUSED', w / 2, h / 2);
+  ctx.fillStyle = '#8899bb';
+  ctx.font = '14px "Segoe UI", sans-serif';
+  ctx.fillText('Press P to resume', w / 2, h / 2 + 30);
+}
+
+// --- Main loop ---
+let lastTime = performance.now();
+function gameLoop(now) {
+  const dt = Math.min(now - lastTime, 100);
+  lastTime = now;
+
+  const w = window.innerWidth, h = window.innerHeight;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#0a0a1e';
+  ctx.fillRect(0, 0, w, h);
+
+  if (state === 'title') {
+    drawTitle();
+  } else {
+    const layout = getLayout();
+    update(dt);
+    drawGrid(layout);
+    drawUI(layout);
+    if (state === 'paused') drawPaused();
+    if (state === 'gameover') drawGameOver();
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+
+// --- Input ---
+function handleKey(key) {
+  if (state === 'title') {
+    if (key === ' ' || key === 'Enter') initGame();
+    return;
+  }
+  if (state === 'gameover') {
+    if (key === ' ' || key === 'Enter') { state = 'title'; }
+    return;
+  }
+  if (state === 'paused') {
+    if (key === 'p' || key === 'P') state = 'playing';
+    return;
+  }
+  if (state !== 'playing') return;
+
+  switch (key) {
+    case 'ArrowLeft':
+      if (canPlace(currentPiece, -1, 0)) { currentPiece.col--; playSound('move'); }
+      break;
+    case 'ArrowRight':
+      if (canPlace(currentPiece, 1, 0)) { currentPiece.col++; playSound('move'); }
+      break;
+    case 'ArrowUp':
+      rotatePiece(currentPiece);
+      playSound('rotate');
+      break;
+    case 'ArrowDown':
+      if (canPlace(currentPiece, 0, 1)) { currentPiece.row++; lastDropTime = performance.now(); }
+      break;
+    case ' ':
+      hardDrop();
+      break;
+    case 'p': case 'P':
+      state = 'paused';
+      break;
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
+  handleKey(e.key);
+});
+
+// Touch controls
+document.querySelectorAll('.tc-btn').forEach(btn => {
+  btn.addEventListener('touchstart', e => {
+    e.preventDefault();
+    handleKey(btn.dataset.key);
+  });
+});
+
+// Tap to start on mobile
+canvas.addEventListener('touchstart', e => {
+  if (state === 'title' || state === 'gameover') {
+    e.preventDefault();
+    if (state === 'title') initGame();
+    else state = 'title';
+  }
+});
+
+// --- Sound (Web Audio) ---
+let audioCtx = null;
+function getAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playTone(freq, dur, type, vol, decay) {
+  try {
+    const ac = getAudio();
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol || 0.1, ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + (decay || dur));
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.start();
+    osc.stop(ac.currentTime + dur);
+  } catch(e) {}
+}
+
+function playSound(name) {
+  switch (name) {
+    case 'place':
+      playTone(120, 0.1, 'triangle', 0.08, 0.1);
+      break;
+    case 'move':
+      playTone(400, 0.05, 'sine', 0.04, 0.05);
+      break;
+    case 'rotate':
+      playTone(600, 0.05, 'sine', 0.05, 0.05);
+      break;
+    case 'complete':
+      playTone(523, 0.15, 'sine', 0.12, 0.15);
+      setTimeout(() => playTone(659, 0.15, 'sine', 0.1, 0.15), 80);
+      setTimeout(() => playTone(784, 0.2, 'sine', 0.1, 0.2), 160);
+      break;
+    case 'fusion':
+      playTone(200, 0.3, 'sawtooth', 0.08, 0.3);
+      playTone(150, 0.4, 'sine', 0.1, 0.4);
+      break;
+    case 'shatter':
+      playTone(80, 0.5, 'sawtooth', 0.12, 0.5);
+      playTone(60, 0.6, 'triangle', 0.1, 0.6);
+      break;
+  }
+}
+
+// --- Score submission ---
+async function submitScore(finalScore) {
+  try {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(navigator.userAgent + (localStorage.getItem('player-id') || ''));
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    const arr = Array.from(new Uint8Array(hash));
+    const hex = arr.map(b => b.toString(16).padStart(2, '0')).join('');
+    const pid = localStorage.getItem('player-id') || (crypto.randomUUID ? crypto.randomUUID() : hex.slice(0,36));
+    localStorage.setItem('player-id', pid);
+    await fetch('https://ivhpqkqnfqcgrfrsvszf.supabase.co/rest/v1/scores', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM',
+        'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM',
+      },
+      body: JSON.stringify({ game: 'glyph-forge', score: finalScore, player_hash: hex.slice(0,16) }),
+    });
+  } catch(e) {}
+}
+</script>
+</body>
+</html>

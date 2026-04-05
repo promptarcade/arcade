@@ -1,0 +1,35 @@
+● You are running the Ralph sprite training loop. Your goal is to learn TRANSFERABLE drawing techniques by building up to a
+  complete dragon eye, with quality judged by a separate critic agent.
+                                                                                                                                   ## Setup
+  - Working directory: C:\AI\Claude                                                                                                - Read ralph-training/CLAUDE.md for full instructions
+  - Read ralph-training/PRD.md for the exercise list
+  - Read ralph-training/progress.txt for ALL accumulated lessons from previous iterations (CRITICAL — do not skip)
+  - Read engine/sprites/qa-knowledge.json for 43+ verified drawing principles
+  - Read the memory file C:/Users/U/.claude/projects/C--AI-Claude/memory/reference_art_code_patterns.md for proven copy-paste
+  code templates (drawPost setup, sphere/cylinder normals, tone helper, tight packing, S-curve contrast, dual palette)
+  - Study (don't copy) tools/props/training/p5-6-scales.js for how scales were rendered previously
+  - Read ALL THREE dragon eye reference images before drawing anything:
+    - 360_F_654888806_uMYd2cIeIpUQ6wQYp6NMCsqAlRgucxQy.jpg (red)
+    - 360_F_1722554073_b8yysuYgbMaudi1rcIyzzHmDK1Oq5WUy.jpg (green)
+    - 360_F_1215749253_3LjW7zoQi2mcQqg0Rd3riLIYnHqtWzhx.jpg (blue/purple iridescent)
+
+  ## Flow
+  1. Find the first unchecked exercise in ralph-training/PRD.md
+  2. Write a draw script in ralph-training/props/ from scratch
+  3. Render via: node tools/sprite-lab.js static <script> --name ralph-<name> --style hd --no-verify
+  4. Read back the rendered PNG
+  5. Run the critic: bash ralph-training/critic.sh <png-path> '<description>' 2>&1 | tee ralph-training/last-critic.txt
+  6. If critic says FAIL: read the specific feedback, fix the script, re-render, re-run critic. Max 5 attempts.
+  7. Only check off the exercise if the critic says PASS
+  8. Append TRANSFERABLE lessons to ralph-training/progress.txt (framed for any subject, not just dragon eyes)
+  9. Add new principles to engine/sprites/qa-knowledge.json (verify JSON validity after editing)
+  10. Git commit ONLY ralph-training/ files, qa-knowledge.json, and engine/sprites/verify/static-ralph-*.png
+
+  ## Critical reminders
+  - ALL drawing code goes in drawPost with outlineMode:'none' — the engine's auto-shading overwrites draw()
+  - Use the tone(group, 0-1) helper for palette mapping
+  - Apply S-curve contrast: v * v * (3 - 2 * v)
+  - Bump-perturb normals BEFORE computing NdotL to break banding
+  - The critic is a separate Claude session that reads the references and qa-knowledge — it is deliberately harsh. Do not argue
+  with it, fix what it identifies.
+  - progress.txt contains unfixed gaps from previous attempts — address those FIRST

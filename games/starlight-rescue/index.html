@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Starlight Rescue</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: linear-gradient(180deg, #0a0a2e 0%, #1a1040 50%, #0d0d28 100%);
+  color: #e8e0d0;
+  font-family: Georgia, 'Times New Roman', serif;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Twinkling stars background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(1px 1px at 10% 20%, rgba(255,255,200,0.4), transparent),
+              radial-gradient(1px 1px at 30% 10%, rgba(255,255,200,0.3), transparent),
+              radial-gradient(1px 1px at 50% 30%, rgba(255,255,200,0.2), transparent),
+              radial-gradient(1px 1px at 70% 15%, rgba(255,255,200,0.4), transparent),
+              radial-gradient(1px 1px at 90% 25%, rgba(255,255,200,0.3), transparent),
+              radial-gradient(1px 1px at 15% 45%, rgba(255,255,200,0.2), transparent),
+              radial-gradient(1px 1px at 85% 50%, rgba(255,255,200,0.3), transparent),
+              radial-gradient(1px 1px at 40% 60%, rgba(255,255,200,0.2), transparent);
+  pointer-events: none;
+  z-index: 0;
+  animation: twinkle 4s ease-in-out infinite alternate;
+}
+@keyframes twinkle { 0% { opacity: 0.5; } 100% { opacity: 1; } }
+
+/* Star bar */
+#star-bar {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  z-index: 1;
+  flex-shrink: 0;
+}
+.star {
+  font-size: 24px;
+  transition: all 0.5s;
+  filter: grayscale(1) brightness(0.3);
+}
+.star.found {
+  filter: none;
+  animation: starPop 0.5s ease;
+  text-shadow: 0 0 10px #ffcc44;
+}
+@keyframes starPop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.8); }
+  100% { transform: scale(1); }
+}
+
+/* Story area */
+#story {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 20px 12px;
+  z-index: 1;
+  scroll-behavior: smooth;
+}
+.msg {
+  margin-bottom: 14px;
+  line-height: 1.6;
+  font-size: 17px;
+  animation: fadeIn 0.4s ease;
+}
+@keyframes fadeIn { 0% { opacity: 0; transform: translateY(8px); } 100% { opacity: 1; transform: translateY(0); } }
+.msg.room-title { color: #ccaaff; font-weight: bold; font-size: 19px; }
+.msg.action { color: #aabbcc; font-style: italic; }
+.msg.funny { color: #ffcc88; }
+.msg.celebrate { color: #ffdd66; font-weight: bold; text-shadow: 0 0 8px rgba(255,200,50,0.4); }
+.msg.animal { color: #aaddaa; }
+.msg.hint { color: #99aacc; }
+
+/* Status bar */
+#status {
+  display: flex;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(20,15,40,0.8);
+  border-top: 1px solid rgba(100,80,140,0.3);
+  font-size: 13px;
+  color: #998caa;
+  flex-wrap: wrap;
+  z-index: 1;
+  flex-shrink: 0;
+}
+#status span { white-space: nowrap; }
+.inv-label { color: #bbaadd; }
+.animal-label { color: #aaddaa; }
+
+/* Button area */
+#buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px 20px;
+  min-height: 70px;
+  background: rgba(10,10,30,0.9);
+  border-top: 1px solid rgba(100,80,140,0.3);
+  z-index: 1;
+  flex-shrink: 0;
+}
+.btn {
+  padding: 10px 18px;
+  border: 1px solid rgba(140,120,180,0.4);
+  border-radius: 20px;
+  background: rgba(40,30,70,0.8);
+  color: #ddccee;
+  font-family: Georgia, serif;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+  animation: btnIn 0.25s ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+@keyframes btnIn {
+  0% { opacity: 0; transform: scale(0.8) translateY(10px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.btn:hover, .btn:active {
+  background: rgba(80,60,130,0.8);
+  border-color: rgba(180,150,220,0.6);
+  transform: scale(1.05);
+}
+.btn.silly {
+  font-style: italic;
+  border-color: rgba(180,160,100,0.3);
+  color: #ccbb99;
+}
+.btn.silly:hover { border-color: rgba(220,200,120,0.5); }
+
+/* Flash effect for star restoration */
+.flash {
+  position: fixed; inset: 0;
+  background: radial-gradient(circle, rgba(255,220,100,0.4), transparent 70%);
+  pointer-events: none;
+  z-index: 10;
+  animation: flashAnim 1s ease forwards;
+}
+@keyframes flashAnim { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Mute */
+#mute {
+  position: fixed; top: 8px; right: 8px;
+  background: rgba(0,0,0,0.3); border: none;
+  color: #889; font-size: 18px; padding: 6px 10px;
+  border-radius: 6px; cursor: pointer; z-index: 5;
+}
+</style>
+</head>
+<body>
+
+<div id="star-bar"></div>
+<div id="story"></div>
+<div id="status"></div>
+<div id="buttons"></div>
+<button id="mute" onclick="SFX.muted=!SFX.muted;this.textContent=SFX.muted?'X':'&#9835;'">&#9835;</button>
+
+<script>
+'use strict';
+
+// ============================================================
+// SUPABASE
+// ============================================================
+var _SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+var _SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(g,s){var n=prompt('Stars collected: '+s+'! Enter name (max 5 chars):');if(!n)return;n=n.trim().slice(0,5);if(!n)return;try{await fetch(_SU+'/rest/v1/high_scores',{method:'POST',headers:{'apikey':_SK,'Authorization':'Bearer '+_SK,'Content-Type':'application/json'},body:JSON.stringify({game:g,initials:n,score:s})})}catch(e){}}
+
+// ============================================================
+// SFX
+// ============================================================
+var SFX = (function() {
+  var actx = null, muted = false;
+  function getCtx() {
+    if (!actx) try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return null; }
+    if (actx.state === 'suspended') actx.resume(); return actx;
+  }
+  function play(fn) { if (muted) return; var c = getCtx(); if (c) fn(c); }
+  function osc(c,t,f,f2,d,v) {
+    var o=c.createOscillator(),g=c.createGain();o.type=t;o.frequency.setValueAtTime(f,c.currentTime);
+    if(f2)o.frequency.linearRampToValueAtTime(f2,c.currentTime+d);
+    g.gain.setValueAtTime(v||0.06,c.currentTime);g.gain.linearRampToValueAtTime(0,c.currentTime+d);
+    o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+d);
+  }
+  return {
+    get muted(){return muted;}, set muted(v){muted=v;},
+    click()  { play(function(c){osc(c,'sine',600,800,0.06,0.04);}); },
+    action() { play(function(c){osc(c,'sine',400,600,0.1,0.04);}); },
+    funny()  { play(function(c){osc(c,'triangle',300,200,0.15,0.04);osc(c,'triangle',250,350,0.1,0.03);}); },
+    rescue() { play(function(c){for(var i=0;i<3;i++)setTimeout(function(i){return function(){osc(c,'sine',500+i*150,600+i*150,0.12,0.05);};}(i),i*100);}); },
+    star()   { play(function(c){for(var i=0;i<4;i++)setTimeout(function(i){return function(){osc(c,'sine',600+i*200,700+i*200,0.15,0.06);};}(i),i*120);}); },
+    step()   { play(function(c){osc(c,'sine',200,250,0.05,0.02);}); },
+  };
+})();
+
+// ============================================================
+// GAME STATE
+// ============================================================
+var G = {
+  room: 'cottage',
+  inventory: [],
+  stars: 0,
+  animals: [],         // rescued animal names
+  following: [],       // animals currently following you
+  flags: {},           // puzzle progress flags
+};
+
+// ============================================================
+// ROOMS
+// ============================================================
+var ROOMS = {
+  // === ZONE 1: MOONLIT MEADOW ===
+  cottage: {
+    title: 'Your Cottage',
+    desc: function() { return "Your cosy little cottage glows with warm candlelight. A patchwork quilt covers your bed, and star charts paper every wall. Your starkeeper's lantern sits on the table by the door, its light flickering gently."; },
+    exits: { south: 'meadow' },
+    items: function() { return G.inventory.indexOf('lantern') < 0 ? ['lantern'] : []; },
+    onLook: { lantern: "A beautiful brass lantern etched with tiny stars. It never runs out of light \u2014 a gift from the Head Starkeeper on your first day.", table: "A sturdy oak table covered in star charts and crumbs from this morning's toast.", bed: "Your cosy bed with its patchwork quilt. Not now though \u2014 the stars need you!", quilt: "Your grandmother made it. Each patch is a different colour of the sunset.", blanket: function() { if (G.inventory.indexOf('blanket') < 0 && !G.flags.blanketTaken) return "A soft woolly blanket folded at the foot of your bed. It looks very warm and snuggly."; return "The bed looks bare without the blanket. But someone needs it more than you."; } },
+    extraItems: function() { return !G.flags.blanketTaken ? ['blanket'] : []; },
+  },
+  meadow: {
+    title: 'Flower Meadow',
+    desc: function() {
+      var s = "Wildflowers stretch in every direction \u2014 moonpetals, starblossoms, and dreaming daisies. A babbling brook runs east toward the old bridge.";
+      if (G.animals.indexOf('bunny') < 0) s += " A small bush near the brook is trembling slightly.";
+      else s += " The meadow feels friendlier now that you've helped the bunny.";
+      return s;
+    },
+    exits: { north: 'cottage', east: 'bridge', west: 'pond', south: 'gate' },
+    onLook: { bush: function() { if (G.animals.indexOf('bunny') < 0) return "The bush is shaking. Something small and furry is hiding inside, whimpering softly."; return "Just an ordinary bush now. The bunny is safe."; }, flowers: "Moonpetals glow faintly silver. Starblossoms are deep purple with golden centres. Dreaming daisies close their petals when you look directly at them, the little show-offs.", brook: "The brook babbles cheerfully, catching glints of moonlight. It flows east toward the bridge." },
+    onUse: { lantern: function(target) { if (target === 'bush' && G.animals.indexOf('bunny') < 0) { G.animals.push('bunny'); G.following.push('bunny'); SFX.rescue(); return { cls: 'animal', text: "You hold the lantern close to the bush. Warm golden light spills over the trembling leaves. A tiny nose pokes out\u2026 then two big dark eyes\u2026 then a small brown bunny hops cautiously into the light. She sniffs your hand, decides you're safe, and nestles against your ankle.\n\nThe bunny is following you now!" }; } return null; } },
+  },
+  bridge: {
+    title: 'Old Stone Bridge',
+    desc: function() {
+      var s = "A mossy stone bridge arches over the brook. Ivy climbs the sides, and the water gurgles below.";
+      if (!G.flags.bridgeFragment) s += " Something glimmers faintly under the bridge, tangled in the ivy.";
+      return s;
+    },
+    exits: { west: 'meadow' },
+    onLook: { bridge: function() { if (!G.flags.bridgeFragment) return "Looking closer at the bridge, you spot a faint golden glow caught in the ivy underneath. A star fragment!"; return "Just a nice old bridge. The ivy rustles peacefully."; }, ivy: function() { if (!G.flags.bridgeFragment) return "The ivy is thick and old. Something golden is tangled in it \u2014 a star fragment!"; return "Ordinary ivy. Pretty, in a clingy sort of way."; }, water: "The brook rushes over smooth stones. A fish flashes silver for a moment, then is gone." },
+    items: function() { return !G.flags.bridgeFragment ? ['star fragment'] : []; },
+    onTake: { 'star fragment': function() { G.flags.bridgeFragment = true; G.stars++; SFX.star(); return { cls: 'celebrate', text: "You reach down and untangle the star fragment from the ivy. It pulses with warm golden light in your hand, like a tiny heartbeat. One down, seven to go!" }; } },
+  },
+  pond: {
+    title: 'Willow Pond',
+    desc: function() {
+      var s = "A weeping willow trails its fingers in a perfectly still pond. Moonlight paints silver ripples on the surface.";
+      if (G.animals.indexOf('frog') < 0) s += " A small green frog sits on a lily pad that's drifted to the very centre of the pond, looking deeply unimpressed.";
+      else s += " The lily pads drift peacefully. The frog splashes happily nearby.";
+      return s;
+    },
+    exits: { east: 'meadow' },
+    onLook: { frog: function() { if (G.animals.indexOf('frog') < 0) return "The frog is sitting on a lily pad in the middle of the pond, arms crossed (do frogs have arms? This one seems to). It croaks: \"Don't just stand there gawping. The pad drifted. I can't exactly paddle, can I?\""; return "The frog is doing backstroke. Showing off, honestly."; }, pond: "The water is dark and still, reflecting the sky. You can't see the bottom. It looks cold.", willow: "The willow tree sways gently. Its trailing branches look like long green fingers dipping into the water.", 'lily pad': function() { if (G.animals.indexOf('frog') < 0) return "The lily pad is stuck in the middle. If only you had something long to push it back to shore\u2026"; return "Just a lily pad. Doing lily pad things."; } },
+    onUse: { stick: function() { if (G.animals.indexOf('frog') < 0) { G.animals.push('frog'); G.following.push('frog'); SFX.rescue(); return { cls: 'animal', text: "You stretch the stick out across the water and give the lily pad a good push. It glides back to the bank.\n\nThe frog hops off with as much dignity as it can muster. \"Took you long enough,\" it croaks, then adds quietly, \"\u2026thank you.\"\n\nThe frog is following you now! (At a respectful distance.)" }; } return null; } },
+  },
+  gate: {
+    title: 'Meadow Gate',
+    desc: function() {
+      if (G.flags.gateOpen) return "The wooden gate stands open, revealing a dark path into the Whispering Woods beyond. Vines with tiny star-shaped flowers frame the entrance.";
+      return "A tall wooden gate blocks the path south into the Whispering Woods. Three flower-shaped holes are set into the gate \u2014 purple, gold, and silver, in that order. It looks like some kind of lock.";
+    },
+    exits: function() { var e = { north: 'meadow' }; if (G.flags.gateOpen) e.south = 'forestEntrance'; return e; },
+    onLook: { gate: function() { if (G.flags.gateOpen) return "The gate is open. The path leads south into the dark woods."; return "Three flower-shaped slots: purple on the left, gold in the middle, silver on the right. You'd need to find the right flowers to unlock it."; }, flowers: function() { if (G.flags.gateOpen) return "Star-shaped flowers wind around the open gate. They smell like midnight."; return "The gate has three slots shaped like flowers. The frog said something about a pattern seen from the water\u2026 Purple, gold, silver. Maybe if you use the right flowers?"; } },
+    onUse: { flowers: function() { if (!G.flags.gateOpen && G.animals.indexOf('frog') >= 0) { G.flags.gateOpen = true; SFX.action(); return { cls: 'celebrate', text: "Remembering what the frog told you about the pattern seen from the water, you pick three wildflowers \u2014 a purple moonpetal, a golden starblossom, and a silver dreaming daisy \u2014 and press them into the slots.\n\nThe gate shudders, glows, and swings open with a satisfying CLICK.\n\nThe path to the Whispering Woods is open!" }; } if (!G.flags.gateOpen) return { cls: 'hint', text: "You try pushing flowers into the slots randomly. The gate gives a disapproving shudder. Maybe someone who's seen the gate from another angle would know the right pattern\u2026" }; return null; } },
+  },
+
+  // === ZONE 2: WHISPERING WOODS ===
+  forestEntrance: {
+    title: 'Forest Entrance',
+    desc: function() { return "Tall trees press close on every side, their branches blocking most of the moonlight. Faintly glowing mushrooms dot the forest floor like tiny lanterns. The trees seem to whisper to each other when the wind blows."; },
+    exits: { north: 'gate', east: 'hollowOak', south: 'toadstoolRing', west: 'thicket' },
+    onLook: { mushrooms: "The mushrooms glow a soft blue-green. They pulse slowly, like breathing. Don't eat them though \u2014 probably.", trees: "The trees are ancient oaks and beeches. Their bark is rough and covered in moss. If you listen carefully, you can almost make out words in the rustling\u2026 \"deeper\u2026 go deeper\u2026\"", whispers: "The trees are whispering: \"The ring\u2026 light the ring\u2026 the starlight remembers\u2026\"" },
+    items: function() { return G.inventory.indexOf('stick') < 0 ? ['stick'] : []; },
+    onLook2: { stick: "A sturdy forked stick, about as long as your arm. Could be useful for reaching things." },
+  },
+  hollowOak: {
+    title: 'Hollow Oak',
+    desc: function() {
+      var s = "An enormous oak tree stands here, so old its trunk has hollowed out into a room-sized cavity. ";
+      if (G.animals.indexOf('owl') < 0) s += "Two large golden eyes blink at you from a branch inside. An owl. It looks at you suspiciously and says nothing.";
+      else s += "The owl perches on a branch, looking wise and occasionally hooting advice nobody asked for.";
+      return s;
+    },
+    exits: { west: 'forestEntrance' },
+    onLook: { owl: function() { if (G.animals.indexOf('owl') < 0) return "The owl is large and grey with enormous golden eyes. It turns its head almost completely around (show-off) and stares at you. It seems to want something shiny before it'll trust you."; return "The owl hoots: \"The echo chamber holds a secret. The word you need is 'starlight'. Tell no one I told you. Especially that frog.\""; }, oak: "The inside of the tree smells like old books and feathers. Owl pellets litter the floor. Cosy, in a nature-y sort of way." },
+    onUse: { 'crystal shard': function() { if (G.animals.indexOf('owl') < 0) { G.animals.push('owl'); G.following.push('owl'); SFX.rescue(); return { cls: 'animal', text: "You hold out the crystal shard. It catches a moonbeam and scatters rainbow light across the hollow tree.\n\nThe owl's eyes go wide. \"Oooh,\" it breathes, which is the most un-owl-like thing you've ever heard. It takes the shard gently in one talon and places it in a small hollow in the tree where it glows like a tiny window.\n\n\"You're alright,\" the owl says gruffly. \"I suppose I could help. Where are we going?\"\n\nThe owl is with you now!" }; } return null; } },
+  },
+  toadstoolRing: {
+    title: 'Toadstool Ring',
+    desc: function() {
+      var s = "A perfect circle of red-and-white toadstools grows in a clearing. ";
+      if (!G.flags.toadstoolFragment) s += "The air inside the ring feels different \u2014 thicker, warmer, like the memory of sunlight.";
+      else s += "The ring glows faintly where you restored the star fragment.";
+      return s;
+    },
+    exits: { north: 'forestEntrance' },
+    onLook: { toadstools: "Twelve perfect toadstools in a perfect circle. A fairy ring. The old stories say magical things happen here if you bring the right light\u2026", ring: "The circle is about three paces across. The grass inside is greener than the grass outside. The air shimmers." },
+    onUse: { lantern: function() { if (!G.flags.toadstoolFragment) { G.flags.toadstoolFragment = true; G.stars++; SFX.star(); return { cls: 'celebrate', text: "You step into the fairy ring and hold up your lantern. The toadstools begin to glow \u2014 first red, then gold, then brilliant white. The air sings.\n\nA star fragment materialises in the centre of the ring, spinning slowly. You reach out and it settles into your hand like it was always meant to be there.\n\nThe fairy ring dims to a gentle glow. Two stars found!" }; } return null; } },
+  },
+  thicket: {
+    title: 'Tangled Thicket',
+    desc: function() {
+      var s = "Dense brambles and thorny bushes block the path east. ";
+      if (G.flags.thicketOpen) s += "A narrow gap has been opened through the brambles \u2014 bunny-sized, but you can squeeze through.";
+      else if (G.following.indexOf('bunny') >= 0) s += "Your bunny sniffs at the base of the brambles, where there's a tiny gap\u2026";
+      else s += "There's no way through. The thorns look vicious.";
+      return s;
+    },
+    exits: function() { var e = { east: 'forestEntrance' }; if (G.flags.thicketOpen) e.west = 'mossyClearing'; return e; },
+    onUse: { bunny: function() { if (!G.flags.thicketOpen && G.following.indexOf('bunny') >= 0) { G.flags.thicketOpen = true; SFX.action(); return { cls: 'animal', text: "Your bunny wiggles her nose, then darts into the tiny gap at the base of the brambles. You hear rustling, some determined squeaking, and then \u2014 click! \u2014 something unlatches on the other side.\n\nThe brambles swing open like a gate. The bunny hops back through, looking extremely pleased with herself.\n\nThe path west is open!" }; } if (!G.flags.thicketOpen) return { cls: 'hint', text: "The brambles are too thick to push through. A small animal could probably squeeze through that tiny gap at the bottom though\u2026" }; return null; } },
+    onLook: { brambles: "Thick, thorny, and determined. There's a tiny gap at the very base, barely big enough for a rabbit.", thorns: "Sharp. Very sharp. You're not going through those with bare hands." },
+  },
+  mossyClearing: {
+    title: 'Mossy Clearing',
+    desc: function() {
+      var s = "A soft carpet of moss covers everything in this quiet clearing. A fallen log lies across one side, covered in tiny ferns.";
+      if (G.animals.indexOf('hedgehog') < 0) s += " A small hedgehog is curled up in a ball by the log, shivering miserably.";
+      else s += " The clearing feels warm and peaceful.";
+      return s;
+    },
+    exits: { east: 'thicket', south: 'caveMouth' },
+    onLook: { hedgehog: function() { if (G.animals.indexOf('hedgehog') < 0) return "The hedgehog is tiny and prickly and shaking with cold. Its little nose pokes out from between its spines. It eyes you warily but is too cold to run away."; return "The hedgehog is snug in the blanket, looking like a tiny spiky burrito. \"The mountain path,\" it says. \"I know a shortcut. Follow me when you're ready.\""; }, moss: "The moss is thick and springy, like nature's carpet. Your feet sink in a little with each step.", log: "The fallen log is ancient and covered in bracket fungi. It smells like rain and old forests." },
+    onUse: { blanket: function() { if (G.animals.indexOf('hedgehog') < 0 && G.inventory.indexOf('blanket') >= 0) { G.animals.push('hedgehog'); G.following.push('hedgehog'); var idx = G.inventory.indexOf('blanket'); G.inventory.splice(idx, 1); SFX.rescue(); return { cls: 'animal', text: "You drape the woolly blanket gently over the shivering hedgehog. It unfurls just enough to peek at you with one bright eye.\n\n\"Oh,\" it says in a tiny gruff voice. \"That's\u2026 actually really nice.\"\n\nIt wraps itself up like a little burrito and trundles over to you.\n\n\"I know these mountains,\" it says. \"I can show you a shortcut. Don't tell anyone I was cold. Hedgehogs don't get cold. That's not a thing.\"\n\nThe hedgehog is with you now! (Wrapped in a blanket.)" }; } return null; } },
+  },
+
+  // === ZONE 3: CRYSTAL CAVES ===
+  caveMouth: {
+    title: 'Cave Mouth',
+    desc: function() { return "A dark opening in the hillside leads underground. Cool air drifts out, carrying the faint sound of dripping water. Crystals glint in the rock around the entrance."; },
+    exits: { north: 'mossyClearing', south: 'crystalHall' },
+    onLook: { crystals: "Small crystals embedded in the rock. They catch the lantern light beautifully, scattering tiny rainbows.", cave: "The cave mouth is wide enough to walk through comfortably. The walls are smooth, worn by centuries of water.", entrance: "Stalactites hang from the entrance like stone icicles." },
+    items: function() { return G.inventory.indexOf('crystal shard') < 0 && !G.flags.crystalTaken ? ['crystal shard'] : []; },
+    onLook2: { 'crystal shard': "A piece of crystal that's broken loose from the cave wall. It's about the size of your thumb and catches light beautifully. An owl might like something this shiny\u2026" },
+    onTake: { 'crystal shard': function() { G.flags.crystalTaken = true; return { cls: 'action', text: "You prise the crystal shard from the rock. It's cool and smooth and scatters tiny rainbows when you hold it up. Very shiny." }; } },
+  },
+  crystalHall: {
+    title: 'Crystal Hall',
+    desc: function() {
+      var s = "An enormous cavern opens up before you. Crystal pillars stretch from floor to ceiling, each one catching and multiplying your lantern light into a thousand colours.";
+      if (!G.flags.crystalFragment) s += " One pillar in the centre has a star fragment trapped inside it, glowing deep within the crystal like a golden heart.";
+      else s += " The shattered crystal pillar sparkles with fragments.";
+      return s;
+    },
+    exits: { north: 'caveMouth', east: 'underground', west: 'echoChamber' },
+    onLook: { pillar: function() { if (!G.flags.crystalFragment) return "The star fragment is sealed inside solid crystal. You can see it glowing but can't reach it. The crystal is too hard to break with your hands. Maybe something could crack it\u2026 water?"; return "The pillar has a neat crack through it where the frog shattered it. Crystal shards litter the floor."; }, crystals: "Every colour of the rainbow dances across the walls. It's like being inside a kaleidoscope." },
+    onUse: { frog: function() { if (!G.flags.crystalFragment && G.following.indexOf('frog') >= 0) { G.flags.crystalFragment = true; G.stars++; SFX.star(); return { cls: 'celebrate', text: "The frog eyes the crystal pillar, inflates its throat pouch to an alarming size, and \u2014 SPPPTTT! \u2014 fires a jet of water with the precision of a tiny fire hose.\n\nThe crystal cracks. Then splinters. Then shatters outward in a shower of glittering fragments.\n\nThe star fragment floats free, spinning in the air. You catch it gently.\n\n\"Don't mention it,\" says the frog. \"Actually, do mention it. Tell everyone. I was brilliant.\"\n\nAnother star fragment found!" }; } return null; } },
+  },
+  underground: {
+    title: 'Underground Stream',
+    desc: function() {
+      var s = "An underground stream flows through this narrow cavern, its water clear as glass over smooth stones.";
+      if (G.animals.indexOf('fish') < 0) s += " A small pool has been cut off from the main stream by fallen rocks. A tiny silver fish is trapped inside, swimming in worried circles.";
+      else s += " The stream flows freely. A flash of silver shows where the fish is playing in the current.";
+      return s;
+    },
+    exits: { west: 'crystalHall' },
+    onLook: { fish: function() { if (G.animals.indexOf('fish') < 0) return "The fish is small and silver with big worried eyes. The pool is getting shallower as the water slowly seeps away. It needs to get back to the main stream."; return "The fish leaps joyfully and splashes back into the stream. It's doing fish parkour."; }, pool: function() { if (G.animals.indexOf('fish') < 0) return "Fallen rocks have blocked the pool off from the stream. If you could move one of the bigger rocks, the water would flow again\u2026"; return "The pool has reconnected with the stream. Water flows freely."; }, rocks: "Heavy rocks, but one of them looks like it could be levered out of position with something long and sturdy." },
+    onUse: { stick: function() { if (G.animals.indexOf('fish') < 0) { G.animals.push('fish'); SFX.rescue(); return { cls: 'animal', text: "You wedge the stick under the largest rock and push with all your weight. The rock shifts\u2026 groans\u2026 and rolls aside!\n\nWater rushes through the gap, reconnecting the pool to the stream. The fish shoots through like a tiny silver rocket, does three victory laps, and leaps out of the water to splash you.\n\nYou're going to take that as a thank you.\n\nThe fish is free! (It can't exactly follow you, but it's grateful.)" }; } return null; } },
+  },
+  echoChamber: {
+    title: 'Echo Chamber',
+    desc: function() {
+      var s = "A dome-shaped cavern where every sound repeats three times. Your footsteps echo like a tiny army marching.";
+      if (!G.flags.echoSolved) s += " The far wall looks different from the rest \u2014 smoother, almost like a door. There's an inscription: \"Speak what you seek.\"";
+      else s += " The hidden passage in the far wall stands open.";
+      return s;
+    },
+    exits: function() { var e = { east: 'crystalHall' }; if (G.flags.echoSolved) e.south = 'glowingGrotto'; return e; },
+    onLook: { inscription: "\"Speak what you seek.\" The letters shimmer. It's waiting for a specific word.", wall: function() { if (!G.flags.echoSolved) return "The wall is unnaturally smooth. It's definitely a hidden door. If only you knew the right word to say\u2026"; return "The door stands open. Your echo says \"well done\u2026 well done\u2026 well done.\""; } },
+    onUse: { say: function(word) { if (!G.flags.echoSolved && word === 'starlight') { G.flags.echoSolved = true; SFX.action(); return { cls: 'celebrate', text: "\"Starlight!\" you call out.\n\n\"Starlight\u2026 starlight\u2026 starlight\u2026\" the echoes repeat, each softer than the last.\n\nThe smooth wall shimmers, cracks appear in the shape of a doorway, and the stone slides silently aside.\n\nA passage leads south to the Glowing Grotto!" }; } if (!G.flags.echoSolved) return { text: "\"" + word + "!\" you shout. The echo repeats it three times. The wall does nothing. That's not the right word." }; return null; } },
+  },
+  glowingGrotto: {
+    title: 'Glowing Grotto',
+    desc: function() {
+      var s = "The deepest cavern is covered in bioluminescent moss that paints everything in soft blue-green light. It's beautiful and strange, like being underwater.";
+      if (!G.flags.grottoFragment1) s += " Two star fragments float here \u2014 one nearby, one across a wide gap in the floor.";
+      else if (!G.flags.grottoFragment2) s += " One star fragment still floats across the gap.";
+      else s += " The grotto glows warmly where the fragments were.";
+      return s;
+    },
+    exits: { north: 'echoChamber' },
+    items: function() { return !G.flags.grottoFragment1 ? ['star fragment'] : []; },
+    onTake: { 'star fragment': function() { G.flags.grottoFragment1 = true; G.stars++; SFX.star(); return { cls: 'celebrate', text: "You pluck the star fragment from the air. It hums softly in your hand." }; } },
+    onLook: { gap: function() { if (!G.flags.grottoFragment2) return "The gap is too wide to jump. The star fragment floats tantalisingly on the other side, just out of reach."; return "Just a gap in the floor now. Moss is growing over the edges."; }, moss: "The bioluminescent moss glows without heat. It feels velvety soft." },
+    onUse: { owl: function() { if (!G.flags.grottoFragment2 && G.following.indexOf('owl') >= 0) { G.flags.grottoFragment2 = true; G.stars++; SFX.star(); return { cls: 'celebrate', text: "The owl spreads its wings and glides silently across the gap. It scoops up the star fragment in its talons, turns gracefully, and drops it into your waiting hands.\n\n\"Child's play,\" the owl says, preening.\n\nAnother star fragment!" }; } return null; } },
+  },
+
+  // === ZONE 4: STARFALL SUMMIT ===
+  mountainPath: {
+    title: 'Mountain Path',
+    desc: function() {
+      return "A winding path leads upward through rocks and heather. The wind picks up as you climb. The view behind you is stunning \u2014 the meadow, the woods, the hills, all spread out under a dark, starless sky.";
+    },
+    exits: function() {
+      var e = { south: 'mossyClearing' };
+      if (G.following.indexOf('hedgehog') >= 0) e.north = 'cloudTerrace';
+      else e.north = 'mountainPath'; // loops back if no shortcut
+      return e;
+    },
+    onLook: { path: function() { if (G.following.indexOf('hedgehog') >= 0) return "The hedgehog tugs at your sleeve (gently, avoiding the prickly bits) and points to a barely visible track through the rocks. \"Shortcut,\" it grunts. \"Less wind. More dignity.\""; return "The path winds upward endlessly. You feel like you're going in circles. You might need a guide who knows these mountains\u2026"; }, view: "The world stretches out below. You can see your cottage, the meadow, the dark line of the woods. Without stars, everything looks lonely.", heather: "Purple heather clings to the rocks. Hardy little flowers." },
+  },
+  cloudTerrace: {
+    title: 'Cloud Terrace',
+    desc: function() {
+      var s = "You're above the treeline now. Clouds drift past at eye level, soft and cold and damp.";
+      if (G.animals.indexOf('kitten') < 0) s += " A tiny ginger kitten is stuck on a rocky ledge just below the path, mewing pitifully.";
+      else s += " The kitten rides on your shoulder, purring.";
+      return s;
+    },
+    exits: { south: 'mountainPath', north: 'starPool' },
+    onLook: { kitten: function() { if (G.animals.indexOf('kitten') < 0) return "The kitten is tiny and ginger with enormous green eyes. It's on a ledge about an arm's length below the path. It's not hurt, just scared. Every time it tries to climb up, it slides back. It mews at you desperately."; return "The kitten is curled on your shoulder, purring like a tiny engine. It has claimed you."; }, clouds: "The clouds are close enough to touch. You poke one. It's cold and wet. What were you expecting?", ledge: "The ledge is narrow and crumbly. You can't climb down safely." },
+    onUse: { bunny: function() { if (G.animals.indexOf('kitten') < 0 && G.following.indexOf('bunny') >= 0) { G.animals.push('kitten'); G.following.push('kitten'); SFX.rescue(); return { cls: 'animal', text: "Your bunny hops to the edge of the path and peers down at the kitten. She wiggles her nose. The kitten stares.\n\nSlowly, the bunny hops down to a lower rock, then another, creating a little staircase of courage. The kitten watches, fascinated, and begins to follow \u2014 one wobbly paw at a time.\n\nHop. Paw. Hop. Paw.\n\nThe kitten scrambles up the last bit and immediately headbutts your ankle, purring furiously. Then it climbs up your leg and settles on your shoulder like it owns you.\n\nThe kitten is with you now! (On your shoulder. Forever, apparently.)" }; } if (G.animals.indexOf('kitten') < 0) return { cls: 'hint', text: "The kitten is too scared to climb up on its own. Maybe a smaller, calmer animal could show it the way\u2026" }; return null; } },
+  },
+  starPool: {
+    title: 'Star Pool',
+    desc: function() {
+      var s = "A perfectly still pool of dark water sits in a hollow of rock. Its surface reflects the sky so perfectly that looking into it feels like looking down into space.";
+      if (G.stars >= 8 && !G.flags.allRestored) s += " You have all eight star fragments. The pool seems to be waiting.";
+      else if (G.flags.allRestored) s += " Eight golden lights shine in the pool, their reflections stretching up into the sky above.";
+      else s += " It feels like this is where the stars belong.";
+      return s;
+    },
+    exits: { south: 'cloudTerrace', north: 'summit' },
+    onLook: { pool: function() { if (G.flags.allRestored) return "Eight stars glow in the pool, their light reflected upward into the sky. The night is no longer dark."; return "The water is perfectly still and impossibly dark. When you hold a star fragment near it, the pool seems to pull toward it, like a magnet."; } },
+    onUse: { 'star fragment': function() { if (G.stars >= 8 && !G.flags.allRestored) { G.flags.allRestored = true; SFX.star(); setTimeout(function() { SFX.star(); }, 500); setTimeout(function() { SFX.star(); }, 1000); return { cls: 'celebrate', text: "One by one, you place the star fragments on the surface of the pool. Each one sinks slowly, trailing golden light, and settles into position.\n\nOne\u2026 two\u2026 three\u2026 four\u2026\n\nFive\u2026 six\u2026 seven\u2026\n\nEight.\n\nThe pool erupts with light. Golden beams shoot upward into the sky like pillars of fire. The darkness peels away. Stars blink on across the entire sky, one by one, then in clusters, then in great sweeping rivers of light.\n\nThe Milky Way blazes overhead. The meadow glows. The woods shimmer. The mountains are painted in silver.\n\nThe stars are back.\n\nYou did it, Luna. You saved them all." }; } if (G.stars < 8) return { cls: 'hint', text: "You hold a fragment over the pool. It pulls gently toward the water\u2026 but the pool doesn't feel ready. You need all eight fragments before you can restore them. You have " + G.stars + " so far." }; return null; } },
+  },
+  summit: {
+    title: 'Summit',
+    desc: function() {
+      var s = "The very top of the mountain. Wind howls around you. You can see everything from here.";
+      if (!G.flags.summitFragment) s += " A single star fragment glows at the very peak \u2014 perched on a spike of rock too high and too sharp to climb.";
+      else s += " The peak is bare and beautiful.";
+      if (G.flags.allRestored) s += "\n\nA path of light leads north to somewhere that wasn't there before\u2026";
+      return s;
+    },
+    exits: function() { var e = { south: 'starPool' }; if (G.flags.allRestored) e.north = 'skyGarden'; return e; },
+    onLook: { peak: function() { if (!G.flags.summitFragment) return "The star fragment sits on the very tip of a needle-sharp rock spire. No human could climb it. But something with wings\u2026"; return "Just a sharp rock. Impressive view though."; }, view: function() { if (G.flags.allRestored) return "The world is beautiful. Stars blaze overhead. The meadow glows golden, the woods are dappled with moonlight, and your cottage is a tiny warm speck in the distance. You can see a path of light leading north\u2026"; return "The dark world stretches out below. Without stars, it looks sad and empty. You need to fix this."; } },
+    onUse: { owl: function() { if (!G.flags.summitFragment && G.following.indexOf('owl') >= 0) { G.flags.summitFragment = true; G.stars++; SFX.star(); return { cls: 'celebrate', text: "The owl launches from your shoulder without being asked. It spirals upward around the rock spire, higher and higher, until it reaches the glowing fragment at the very top.\n\nIt plucks the star from the stone and swoops back down, dropping it neatly into your hands.\n\n\"The last one,\" it says softly. \"You should go to the Star Pool.\"\n\nAll eight star fragments found!" }; } return null; } },
+  },
+  skyGarden: {
+    title: 'The Sky Garden',
+    desc: function() { return "A garden that shouldn't exist blooms at the top of the world. Flowers made of starlight sway in a warm breeze. The grass is soft and silver. The sky above is ablaze with stars.\n\nAll your friends are here. The bunny nibbles star-clover. The frog lounges in a tiny celestial pond. The owl perches on a moonbeam (somehow). The hedgehog is snug in its blanket, watching fireflies. The kitten chases a shooting star. Even the fish leaps from a stream that flows through the air.\n\nYou sit down among them. The stars shine. The world is bright again.\n\nYou did it, Luna. Starkeeper."; },
+    exits: {},
+  },
+};
+
+// ============================================================
+// SILLY OPTIONS — context-free, mixed into menus
+// ============================================================
+var SILLY_ACTIONS = [
+  { text: 'Do a little dance', response: "You do a little dance. The wildflowers seem impressed. A beetle gives you a 7 out of 10." },
+  { text: 'Ponder the universe', response: "You ponder the universe. It doesn't ponder back. Typical." },
+  { text: 'Try to look cool', response: "You lean against nothing and almost fall over. Smooth." },
+  { text: 'Sneeze dramatically', response: "You sneeze so hard a butterfly startles. You feel powerful. The moment passes." },
+  { text: 'Spin around three times', response: "You spin around three times. The world wobbles. Worth it? Debatable." },
+  { text: 'Strike a heroic pose', response: "You pose heroically. A gust of wind blows your hair back. There's nobody around to see it, but YOU know." },
+  { text: 'Talk to the moon', response: "\"Hey, moon,\" you say. The moon stares. Moons are terrible conversationalists." },
+  { text: 'Make a wish', response: "You close your eyes and wish really hard. Nothing visible happens. But deep down, something stirs. Probably hunger." },
+  { text: 'Hum a little tune', response: "You hum a tune. The crickets join in. For a moment, it's a tiny concert. Then everyone forgets the melody." },
+  { text: 'Check for monsters', response: "You look behind a rock. No monsters. Just a beetle. It waves. (Do beetles wave? This one does.)" },
+];
+var SILLY_GO = [
+  { text: 'Into the ground', response: "You try to go underground by sheer willpower. The ground is uncooperative." },
+  { text: 'Straight up', response: "You try to go straight up. Gravity disagrees. You land in exactly the same spot." },
+  { text: 'In circles', response: "You walk in a circle. You end up exactly where you started. What did you expect?" },
+  { text: 'Backwards with eyes closed', response: "You walk backwards with your eyes closed and immediately step on something squishy. It was a mushroom. Probably." },
+];
+var SILLY_USE = [
+  { text: 'As a hat', response: "You put it on your head. It falls off. You are not good at hats." },
+  { text: 'As a musical instrument', response: "You try to play it like a tiny violin. It makes no sound. Devastating review." },
+  { text: 'Your dazzling smile', response: "You smile at the situation. Nothing changes. But you feel 3% more confident." },
+];
+
+// ============================================================
+// UI FUNCTIONS
+// ============================================================
+var storyEl = document.getElementById('story');
+var buttonsEl = document.getElementById('buttons');
+var statusEl = document.getElementById('status');
+var starBarEl = document.getElementById('star-bar');
+
+function addMessage(text, cls) {
+  var div = document.createElement('div');
+  div.className = 'msg' + (cls ? ' ' + cls : '');
+  div.textContent = text;
+  storyEl.appendChild(div);
+  storyEl.scrollTop = storyEl.scrollHeight;
+}
+
+function clearButtons() { buttonsEl.innerHTML = ''; }
+
+function addButton(text, callback, silly) {
+  var btn = document.createElement('button');
+  btn.className = 'btn' + (silly ? ' silly' : '');
+  btn.textContent = text;
+  btn.addEventListener('click', function(e) {
+    e.preventDefault();
+    callback();
+  });
+  buttonsEl.appendChild(btn);
+}
+
+function updateStatus() {
+  var parts = [];
+  if (G.inventory.length > 0) parts.push('<span class="inv-label">Carrying:</span> ' + G.inventory.join(', '));
+  if (G.animals.length > 0) parts.push('<span class="animal-label">Friends:</span> ' + G.animals.join(', '));
+  statusEl.innerHTML = parts.join(' &nbsp;|&nbsp; ');
+}
+
+function updateStarBar() {
+  var html = '';
+  for (var i = 0; i < 8; i++) {
+    html += '<span class="star' + (i < G.stars ? ' found' : '') + '">\u2605</span>';
+  }
+  starBarEl.innerHTML = html;
+}
+
+function flash() {
+  var div = document.createElement('div');
+  div.className = 'flash';
+  document.body.appendChild(div);
+  setTimeout(function() { div.remove(); }, 1100);
+}
+
+// ============================================================
+// GAME ENGINE
+// ============================================================
+function getRoom() { return ROOMS[G.room]; }
+
+function getExits() {
+  var room = getRoom();
+  return typeof room.exits === 'function' ? room.exits() : room.exits;
+}
+
+function getRoomItems() {
+  var room = getRoom();
+  var items = room.items ? room.items() : [];
+  if (room.extraItems) items = items.concat(room.extraItems());
+  return items;
+}
+
+function enterRoom(roomId) {
+  G.room = roomId;
+  var room = getRoom();
+  SFX.step();
+  addMessage(room.title, 'room-title');
+  addMessage(room.desc(), '');
+  updateStatus();
+  updateStarBar();
+  save();
+  // Sky Garden = game complete
+  if (roomId === 'skyGarden') {
+    flash();
+    var score = G.stars * 100 + G.animals.length * 50;
+    clearButtons();
+    addButton('Submit Score (' + score + ')', function() {
+      submitScore('starlight-rescue', score);
+      showMainMenu();
+    });
+    addButton('Just enjoy the view', function() { showMainMenu(); });
+    return;
+  }
+  showMainMenu();
+}
+
+function showMainMenu() {
+  clearButtons();
+  var room = getRoom();
+  var exits = getExits();
+
+  addButton('Look around', function() { showLookMenu(); });
+
+  var exitKeys = Object.keys(exits);
+  if (exitKeys.length > 0) {
+    addButton('Go', function() { showGoMenu(exits); });
+  }
+
+  var roomItems = getRoomItems();
+  if (roomItems.length > 0) {
+    addButton('Take', function() { showTakeMenu(roomItems); });
+  }
+
+  if (G.inventory.length > 0 || G.following.length > 0) {
+    addButton('Use', function() { showUseMenu(); });
+  }
+
+  // Talk — if there are animals to talk to
+  var talkTargets = getTalkTargets();
+  if (talkTargets.length > 0) {
+    addButton('Talk', function() { showTalkMenu(talkTargets); });
+  }
+
+  // Echo chamber special — "Say" button
+  if (G.room === 'echoChamber' && !G.flags.echoSolved) {
+    addButton('Say something', function() { showSayMenu(); });
+  }
+
+  // Stars button
+  addButton('Stars (' + G.stars + '/8)', function() {
+    addMessage("You've found " + G.stars + " of 8 star fragments. " + (G.stars < 8 ? "Keep exploring!" : "You have them all! Find the Star Pool!"), 'hint');
+    showMainMenu();
+  });
+
+  // 1-2 silly options
+  var sillies = shuffle(SILLY_ACTIONS.slice()).slice(0, 1 + Math.floor(Math.random() * 2));
+  sillies.forEach(function(s) {
+    addButton(s.text, function() {
+      SFX.funny();
+      addMessage(s.response, 'funny');
+      showMainMenu();
+    }, true);
+  });
+}
+
+function showLookMenu() {
+  clearButtons();
+  var room = getRoom();
+  var targets = [];
+
+  // Add room-specific look targets
+  if (room.onLook) {
+    Object.keys(room.onLook).forEach(function(key) {
+      targets.push(key);
+    });
+  }
+  if (room.onLook2) {
+    Object.keys(room.onLook2).forEach(function(key) {
+      if (targets.indexOf(key) < 0) targets.push(key);
+    });
+  }
+
+  targets.forEach(function(target) {
+    addButton(target, function() {
+      var result = null;
+      if (room.onLook && room.onLook[target]) {
+        result = typeof room.onLook[target] === 'function' ? room.onLook[target]() : room.onLook[target];
+      }
+      if (!result && room.onLook2 && room.onLook2[target]) {
+        result = typeof room.onLook2[target] === 'function' ? room.onLook2[target]() : room.onLook2[target];
+      }
+      if (result) {
+        SFX.action();
+        addMessage(typeof result === 'string' ? result : result.text, typeof result === 'object' ? result.cls : '');
+      }
+      showMainMenu();
+    });
+  });
+
+  addButton('Everything', function() {
+    SFX.action();
+    addMessage(room.desc(), '');
+    showMainMenu();
+  });
+
+  // Silly look options
+  addButton('Your own reflection', function() {
+    SFX.funny();
+    addMessage("You try to see your reflection. " + (G.room === 'pond' || G.room === 'starPool' ? "The water shows a brave young starkeeper staring back. Not bad." : "There's nothing reflective here. You imagine yourself looking heroic. That counts."), 'funny');
+    showMainMenu();
+  }, true);
+}
+
+function showGoMenu(exits) {
+  clearButtons();
+  var dirNames = { north: 'North', south: 'South', east: 'East', west: 'West' };
+  Object.keys(exits).forEach(function(dir) {
+    addButton(dirNames[dir] || dir, function() {
+      enterRoom(exits[dir]);
+    });
+  });
+
+  // Silly go options
+  var sillies = shuffle(SILLY_GO.slice()).slice(0, 1 + Math.floor(Math.random()));
+  sillies.forEach(function(s) {
+    addButton(s.text, function() {
+      SFX.funny();
+      addMessage(s.response, 'funny');
+      showMainMenu();
+    }, true);
+  });
+
+  addButton('Stay here', function() { showMainMenu(); });
+}
+
+function showTakeMenu(items) {
+  clearButtons();
+  items.forEach(function(item) {
+    addButton(item, function() {
+      var room = getRoom();
+      if (room.onTake && room.onTake[item]) {
+        var result = room.onTake[item]();
+        if (result) {
+          if (item === 'star fragment') { flash(); }
+          addMessage(result.text, result.cls);
+        }
+      } else {
+        G.inventory.push(item);
+        SFX.action();
+        addMessage("You pick up the " + item + ".", 'action');
+      }
+      updateStatus();
+      updateStarBar();
+      save();
+      showMainMenu();
+    });
+  });
+
+  addButton('A handful of air', function() {
+    SFX.funny();
+    addMessage("You grab a handful of air. You now have air. You had air before too, but now you have it ON PURPOSE.", 'funny');
+    showMainMenu();
+  }, true);
+}
+
+function showUseMenu() {
+  clearButtons();
+
+  // Inventory items
+  G.inventory.forEach(function(item) {
+    addButton(item, function() { showUseTargetMenu(item); });
+  });
+
+  // Following animals as usable
+  G.following.forEach(function(animal) {
+    addButton(animal, function() { tryUseAnimal(animal); });
+  });
+
+  // Silly use
+  var sillies = shuffle(SILLY_USE.slice()).slice(0, 1);
+  sillies.forEach(function(s) {
+    addButton(s.text, function() {
+      SFX.funny();
+      addMessage(s.response, 'funny');
+      showMainMenu();
+    }, true);
+  });
+
+  addButton('Never mind', function() { showMainMenu(); });
+}
+
+function showUseTargetMenu(item) {
+  clearButtons();
+  var room = getRoom();
+
+  // Room-specific targets
+  if (room.onLook) {
+    Object.keys(room.onLook).forEach(function(target) {
+      addButton('on ' + target, function() {
+        var result = null;
+        if (room.onUse && room.onUse[item]) {
+          result = room.onUse[item](target);
+        }
+        if (result) {
+          if (typeof result === 'object' && result.cls === 'celebrate') flash();
+          addMessage(result.text, typeof result === 'object' ? result.cls : '');
+          updateStatus();
+          updateStarBar();
+          save();
+        } else {
+          addMessage("You try to use the " + item + " on the " + target + ". Nothing interesting happens.", 'action');
+        }
+        showMainMenu();
+      });
+    });
+  }
+
+  // Generic use (no target)
+  addButton('just use it', function() {
+    var result = null;
+    if (room.onUse && room.onUse[item]) {
+      result = room.onUse[item]();
+    }
+    if (result) {
+      if (typeof result === 'object' && result.cls === 'celebrate') flash();
+      addMessage(result.text, typeof result === 'object' ? result.cls : '');
+      updateStatus(); updateStarBar(); save();
+    } else {
+      addMessage("You wave the " + item + " around purposefully. Nothing happens, but you looked very determined.", 'funny');
+    }
+    showMainMenu();
+  });
+
+  addButton('On your nose', function() {
+    SFX.funny();
+    addMessage("You balance the " + item + " on your nose. It falls off. You are not a trained seal.", 'funny');
+    showMainMenu();
+  }, true);
+}
+
+function tryUseAnimal(animal) {
+  var room = getRoom();
+  var result = null;
+  if (room.onUse && room.onUse[animal]) {
+    result = room.onUse[animal]();
+  }
+  if (result) {
+    if (typeof result === 'object' && result.cls === 'celebrate') flash();
+    addMessage(result.text, typeof result === 'object' ? result.cls : '');
+    updateStatus(); updateStarBar(); save();
+  } else {
+    var responses = {
+      bunny: "The bunny wiggles its nose at you. Cute, but not helpful right now.",
+      frog: "The frog croaks. \"What? I'm on break.\"",
+      owl: "The owl blinks slowly. \"Not everything requires my intervention, you know.\"",
+      hedgehog: "The hedgehog grunts from inside its blanket. \"Not now. Cosy.\"",
+      kitten: "The kitten purrs and bats at your ear. Adorable, but unhelpful.",
+    };
+    addMessage(responses[animal] || "Your " + animal + " looks at you blankly.", 'funny');
+  }
+  showMainMenu();
+}
+
+function getTalkTargets() {
+  var targets = [];
+  var room = getRoom();
+  // Animals in the room (based on room descriptions mentioning them)
+  if (room.onLook) {
+    ['bunny','frog','owl','hedgehog','kitten','fish'].forEach(function(a) {
+      if (room.onLook[a]) targets.push(a);
+    });
+  }
+  // Following animals
+  G.following.forEach(function(a) {
+    if (targets.indexOf(a) < 0) targets.push(a);
+  });
+  return targets;
+}
+
+function showTalkMenu(targets) {
+  clearButtons();
+  targets.forEach(function(target) {
+    addButton(target, function() {
+      SFX.action();
+      addMessage(getAnimalDialogue(target), 'animal');
+      showMainMenu();
+    });
+  });
+
+  addButton('Yourself', function() {
+    SFX.funny();
+    addMessage("\"Come on, Luna, you've got this,\" you tell yourself. It's surprisingly motivating. Self-pep-talks: underrated.", 'funny');
+    showMainMenu();
+  }, true);
+}
+
+function getAnimalDialogue(animal) {
+  switch(animal) {
+    case 'bunny':
+      if (G.animals.indexOf('bunny') < 0) return "The bush trembles. A tiny voice squeaks: \"Is\u2026 is the dark going to eat me?\" Poor thing. Maybe some light would help.";
+      if (G.room === 'cloudTerrace' && G.animals.indexOf('kitten') < 0) return "The bunny looks at the kitten on the ledge and wiggles her nose thoughtfully. She could probably coax it up\u2026";
+      return "The bunny nuzzles your ankle. She doesn't say much, but her nose wiggling speaks volumes.";
+    case 'frog':
+      if (G.animals.indexOf('frog') < 0) return "\"Oi!\" the frog croaks from its lily pad. \"Don't just stand there! I've been stuck here for ages. Get me a stick or a pole or\u2026 I dunno, a very long sandwich. Just GET ME OFF THIS PAD.\"";
+      if (G.room === 'gate' && !G.flags.gateOpen) return "The frog eyes the gate. \"I've seen this from the pond. The flowers go purple, gold, silver. Left to right. You're welcome. I accept payment in flies.\"";
+      if (G.room === 'crystalHall' && !G.flags.crystalFragment) return "The frog eyes the crystal. \"I could spit-blast that open. Just say the word. I've been practicing.\"";
+      return "\"Did I mention I saved everyone with my incredible spitting skills?\" the frog says. For the fourteenth time.";
+    case 'owl':
+      if (G.animals.indexOf('owl') < 0) return "The owl stares at you with unblinking golden eyes. It clicks its beak once. It's not going to talk until you've earned its trust. Something shiny might help.";
+      if (G.room === 'echoChamber' && !G.flags.echoSolved) return "The owl leans in and whispers: \"The word is 'starlight'. Don't tell the frog I helped. It'll never let me hear the end of it.\"";
+      if (G.room === 'summit' && !G.flags.summitFragment) return "The owl looks up at the star fragment on the peak. \"I could get that for you,\" it says casually. \"Just ask.\"";
+      return "The owl hoots wisely. Or at least it SOUNDS wise. It might just be thinking about mice.";
+    case 'hedgehog':
+      if (G.animals.indexOf('hedgehog') < 0) return "The hedgehog shivers. \"C-c-cold,\" it chatters. \"N-not that hedgehogs GET cold. We d-don't. This is\u2026 a choice. A lifestyle ch-choice.\" It's clearly freezing.";
+      if (G.room === 'mountainPath') return "\"I know a shortcut up the mountain,\" the hedgehog says, pointing with one tiny paw. \"Discovered it myself. Very brave. Don't ask about the part where I rolled down accidentally.\"";
+      return "The hedgehog adjusts its blanket and grunts: \"We're not lost, are we? Because I refuse to be lost. I have a reputation.\"";
+    case 'kitten':
+      if (G.animals.indexOf('kitten') < 0) return "\"Mew! Mew mew mew!\" Translation: \"I'm stuck and this is undignified and I demand assistance immediately!\"";
+      return "The kitten purrs and headbutts your chin. \"Mew,\" it says. Translation: \"You're mine now. I have claimed you. This is non-negotiable.\"";
+    case 'fish':
+      if (G.animals.indexOf('fish') < 0) return "The fish swims in frantic circles in its shrinking pool. It blows a stream of desperate bubbles at you. Fish can't talk, but its eyes say \"HELP.\"";
+      return "The fish leaps out of the water and does a flip. It can't talk, but the flip clearly means \"thanks.\"";
+    default: return "It looks at you.";
+  }
+}
+
+function showSayMenu() {
+  clearButtons();
+  var words = shuffle(['starlight', 'moonbeam', 'darkness', 'crystal', 'help', 'please', 'abracadabra']);
+  words.forEach(function(word) {
+    addButton('"' + word + '!"', function() {
+      var room = getRoom();
+      var result = room.onUse.say(word);
+      if (result) {
+        if (result.cls === 'celebrate') flash();
+        addMessage(result.text, result.cls);
+        save();
+      }
+      showMainMenu();
+    });
+  });
+  addButton('"SAUSAGES!"', function() {
+    SFX.funny();
+    addMessage("\"SAUSAGES!\" you yell. \"Sausages\u2026 sausages\u2026 sausages\u2026\" the echo repeats. The wall does nothing. But somewhere, a hedgehog perks up.", 'funny');
+    showMainMenu();
+  }, true);
+}
+
+function shuffle(arr) {
+  for (var i = arr.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  }
+  return arr;
+}
+
+// ============================================================
+// SAVE / LOAD
+// ============================================================
+function save() {
+  try { localStorage.setItem('starlight_save', JSON.stringify(G)); } catch(e) {}
+}
+
+function load() {
+  try {
+    var s = localStorage.getItem('starlight_save');
+    if (s) { G = JSON.parse(s); return true; }
+  } catch(e) {}
+  return false;
+}
+
+// ============================================================
+// START
+// ============================================================
+function startGame(fresh) {
+  storyEl.innerHTML = '';
+  if (!fresh && load()) {
+    addMessage("Welcome back, Luna. The stars still need you.", 'celebrate');
+    enterRoom(G.room);
+  } else {
+    G = { room: 'cottage', inventory: [], stars: 0, animals: [], following: [], flags: {} };
+    addMessage("The stars have gone out.", 'room-title');
+    addMessage("One by one, they flickered and faded. The sky is dark. The woodland creatures are scared. The meadow is cold without starlight.", '');
+    addMessage("But you are Luna, apprentice starkeeper. And you have a lantern, a pair of sturdy boots, and absolutely no intention of letting the dark win.", '');
+    addMessage("Find the eight lost star fragments. Rescue the animals lost in the darkness. Bring back the light.", 'celebrate');
+    enterRoom('cottage');
+  }
+}
+
+// Show title screen
+addMessage("~ STARLIGHT RESCUE ~", 'celebrate');
+addMessage("A text adventure about stars, bravery, and being kind to hedgehogs.", '');
+clearButtons();
+addButton('New Adventure', function() { startGame(true); });
+if (localStorage.getItem('starlight_save')) {
+  addButton('Continue', function() { startGame(false); });
+}
+updateStarBar();
+
+</script>
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px Segoe UI,Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px"><span id="vc-count">...</span> Rescuers</div>
+<script>
+(function(){var G="starlight-rescue",SU="https://ivhpqkqnfqcgrfrsvszf.supabase.co",SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM";function hdr(){return{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json"}}async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("").slice(0,32)}catch(e){return"anon-"+Math.random().toString(36).slice(2,10)}}async function run(){var h=await vh();try{await fetch(SU+"/rest/v1/game_visits",{method:"POST",headers:Object.assign(hdr(),{"Prefer":"resolution=merge-duplicates,return=minimal"}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}try{var r=await fetch(SU+"/rest/v1/game_visits?game=eq."+G+"&select=id",{headers:Object.assign(hdr(),{"Prefer":"count=exact"})});var c=r.headers.get("content-range");if(c){var n=c.split("/")[1];if(n&&n!=="*")document.getElementById("vc-count").textContent=Number(n).toLocaleString()}}catch(e){}}run()})();
+</script>
+</body>
+</html>

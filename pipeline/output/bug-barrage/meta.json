@@ -1,0 +1,44 @@
+{
+  "request": "a tower defense game where you place turrets to stop waves of bugs",
+  "spec": {
+    "title": "Bug Barrage",
+    "genre": "Tower Defense",
+    "coreLoop": [
+      "placement",
+      "wave-spawning",
+      "resource-management"
+    ],
+    "controls": {
+      "keyboard": [
+        "arrow keys",
+        "spacebar",
+        "number keys"
+      ],
+      "touch": [
+        "tap",
+        "swipe",
+        "pinch"
+      ]
+    },
+    "theme": "Defending against waves of insect infestation",
+    "visualStyle": "Colorful pixel art"
+  },
+  "benchmarks": {
+    "avgEntityCount": 35,
+    "commonMechanics": [
+      "wave-spawning",
+      "resource-management",
+      "tower-placement",
+      "tower-upgrading"
+    ],
+    "avgSessionLength": 1716,
+    "recommendedDifficulty": "stepped",
+    "corroboratedProducts": 4
+  },
+  "entityCount": 9,
+  "spriteCount": 9,
+  "mechanicCount": 3,
+  "cost": 2.4548508,
+  "elapsed": "1819.4",
+  "timestamp": "2026-03-23T08:24:36.887Z"
+}

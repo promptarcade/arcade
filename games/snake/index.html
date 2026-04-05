@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Fruit Snake</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a1a0a; }
+canvas { display: block; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function() {
+'use strict';
+
+// ============================================================
+// SOUND
+// ============================================================
+const SFX = {
+  _ctx: null,
+  _get() { if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this._ctx.state === 'suspended') this._ctx.resume(); return this._ctx; },
+  _tone(f, type, dur, vol) { try { const c = this._get(), o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(vol, c.currentTime); g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur); o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + dur); } catch(e) {} },
+  eat() { this._tone(500 + Math.random() * 300, 'sine', 0.08, 0.12); setTimeout(() => this._tone(800, 'sine', 0.06, 0.1), 40); },
+  die() { this._tone(200, 'sawtooth', 0.2, 0.12); setTimeout(() => this._tone(120, 'sawtooth', 0.3, 0.08), 100); },
+  turn() { this._tone(300, 'sine', 0.02, 0.04); },
+};
+
+// ============================================================
+// SCORE SUBMISSION
+// ============================================================
+const _SU = 'https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+const _SK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(score) {
+  const n = prompt('Score: ' + score + '! Enter your name (max 5 chars):');
+  if (!n) return; const name = n.trim().slice(0, 5).toUpperCase(); if (!name) return;
+  let hash = '';
+  try { const d = navigator.userAgent + screen.width + screen.height + new Date().getTimezoneOffset(); const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(d)); hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('').slice(0,32); } catch(e) {}
+  try { await fetch(_SU + '/rest/v1/high_scores', { method: 'POST', headers: { 'apikey': _SK, 'Authorization': 'Bearer ' + _SK, 'Content-Type': 'application/json' }, body: JSON.stringify({ game: 'snake', initials: name, score: score, player_hash: hash }) }); } catch(e) {}
+}
+
+// ============================================================
+// FRUITS
+// ============================================================
+const FRUITS = [
+  { emoji: '\u{1F34E}', name: 'apple', color: '#ff4444', points: 1 },
+  { emoji: '\u{1F34A}', name: 'orange', color: '#ff8800', points: 1 },
+  { emoji: '\u{1F347}', name: 'grapes', color: '#aa44cc', points: 2 },
+  { emoji: '\u{1F34C}', name: 'banana', color: '#ffdd00', points: 1 },
+  { emoji: '\u{1F353}', name: 'strawberry', color: '#ff2244', points: 2 },
+  { emoji: '\u{1F349}', name: 'watermelon', color: '#44cc44', points: 3 },
+  { emoji: '\u{1F352}', name: 'cherries', color: '#cc2244', points: 2 },
+  { emoji: '\u{1F351}', name: 'peach', color: '#ffaa88', points: 1 },
+  { emoji: '\u{1F34D}', name: 'pineapple', color: '#ddcc00', points: 3 },
+  { emoji: '\u{1F95D}', name: 'kiwi', color: '#66aa44', points: 2 },
+];
+
+// ============================================================
+// CANVAS
+// ============================================================
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, COLS, ROWS, CELL;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  CELL = Math.floor(Math.min(W / 22, H / 22));
+  COLS = Math.floor(W / CELL);
+  ROWS = Math.floor(H / CELL);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// GAME STATE
+// ============================================================
+let state = 'title'; // title, playing, dead
+let snake = [];
+let dir = { x: 1, y: 0 };
+let nextDir = { x: 1, y: 0 };
+let fruit = null;
+let score = 0;
+let highScore = parseInt(localStorage.getItem('fruit-snake-hs') || '0');
+let moveTimer = 0;
+let moveInterval = 0.3; // seconds per step — starts slow, speeds up
+let animTimer = 0;
+let particles = [];
+let growQueue = 0;
+let deathTimer = 0;
+
+function startGame() {
+  const cx = Math.floor(COLS / 2);
+  const cy = Math.floor(ROWS / 2);
+  snake = [];
+  for (let i = 0; i < 4; i++) snake.push({ x: cx - i, y: cy });
+  dir = { x: 1, y: 0 };
+  nextDir = { x: 1, y: 0 };
+  score = 0;
+  moveTimer = 0;
+  moveInterval = 0.3;
+  growQueue = 0;
+  particles = [];
+  deathTimer = 0;
+  spawnFruit();
+  state = 'playing';
+}
+
+function spawnFruit() {
+  const occupied = new Set(snake.map(s => s.x + ',' + s.y));
+  let attempts = 0;
+  while (attempts < 500) {
+    const x = Math.floor(Math.random() * COLS);
+    const y = Math.floor(Math.random() * ROWS);
+    if (!occupied.has(x + ',' + y)) {
+      const type = FRUITS[Math.floor(Math.random() * FRUITS.length)];
+      fruit = { x, y, type, spawnTime: animTimer };
+      return;
+    }
+    attempts++;
+  }
+}
+
+function moveSnake() {
+  dir = nextDir;
+  const head = snake[0];
+  const nx = head.x + dir.x;
+  const ny = head.y + dir.y;
+
+  // Wall collision
+  if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) { die(); return; }
+
+  // Self collision
+  for (const seg of snake) {
+    if (seg.x === nx && seg.y === ny) { die(); return; }
+  }
+
+  // Move
+  snake.unshift({ x: nx, y: ny });
+
+  // Eat fruit
+  if (fruit && nx === fruit.x && ny === fruit.y) {
+    score += fruit.type.points;
+    growQueue += fruit.type.points;
+    SFX.eat();
+    // Particles
+    for (let i = 0; i < 8; i++) {
+      particles.push({
+        x: (fruit.x + 0.5) * CELL, y: (fruit.y + 0.5) * CELL,
+        vx: (Math.random() - 0.5) * 150, vy: (Math.random() - 0.5) * 150 - 30,
+        life: 0.5 + Math.random() * 0.3, maxLife: 0.8,
+        color: fruit.type.color, size: 3 + Math.random() * 3,
+      });
+    }
+    spawnFruit();
+    // Speed up slightly
+    // Speed up gradually: 0.3 -> 0.08 over ~30 fruits
+    moveInterval = Math.max(0.08, moveInterval - 0.007);
+  }
+
+  // Grow or remove tail
+  if (growQueue > 0) { growQueue--; }
+  else { snake.pop(); }
+}
+
+function die() {
+  state = 'dead';
+  deathTimer = 0;
+  SFX.die();
+  if (score > highScore) {
+    highScore = score;
+    localStorage.setItem('fruit-snake-hs', highScore);
+  }
+  if (score > 0) submitScore(score);
+  // Death particles from each segment
+  for (let i = 0; i < snake.length; i++) {
+    const seg = snake[i];
+    for (let j = 0; j < 3; j++) {
+      particles.push({
+        x: (seg.x + 0.5) * CELL, y: (seg.y + 0.5) * CELL,
+        vx: (Math.random() - 0.5) * 80, vy: (Math.random() - 0.5) * 80,
+        life: 0.5 + Math.random() * 0.5, maxLife: 1,
+        color: i === 0 ? '#88ff88' : '#44aa44', size: 4 + Math.random() * 3,
+      });
+    }
+  }
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+function setDir(dx, dy) {
+  // Prevent reversing into self
+  if (dx === -dir.x && dy === -dir.y) return;
+  if (dx === dir.x && dy === dir.y) return;
+  nextDir = { x: dx, y: dy };
+  SFX.turn();
+}
+
+window.addEventListener('keydown', e => {
+  SFX._get();
+  if (state === 'title') { startGame(); return; }
+  if (state === 'dead' && deathTimer > 0.5) { startGame(); return; }
+  const k = e.key;
+  if (k === 'ArrowUp' || k === 'w' || k === 'W') { e.preventDefault(); setDir(0, -1); }
+  else if (k === 'ArrowDown' || k === 's' || k === 'S') { e.preventDefault(); setDir(0, 1); }
+  else if (k === 'ArrowLeft' || k === 'a' || k === 'A') { e.preventDefault(); setDir(-1, 0); }
+  else if (k === 'ArrowRight' || k === 'd' || k === 'D') { e.preventDefault(); setDir(1, 0); }
+});
+
+// Touch — swipe to change direction
+let touchStartX = 0, touchStartY = 0;
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault(); SFX._get();
+  if (state === 'title') { startGame(); return; }
+  if (state === 'dead' && deathTimer > 0.5) { startGame(); return; }
+  const t = e.touches[0];
+  touchStartX = t.clientX;
+  touchStartY = t.clientY;
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (state !== 'playing') return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+  const absDx = Math.abs(dx), absDy = Math.abs(dy);
+  if (absDx < 15 && absDy < 15) return; // tap, not swipe
+  if (absDx > absDy) setDir(dx > 0 ? 1 : -1, 0);
+  else setDir(0, dy > 0 ? 1 : -1);
+}, { passive: false });
+
+canvas.addEventListener('click', e => {
+  SFX._get();
+  if (state === 'title') startGame();
+  if (state === 'dead' && deathTimer > 0.5) startGame();
+});
+
+// ============================================================
+// DRAWING
+// ============================================================
+function drawGrid() {
+  // Checkerboard
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      ctx.fillStyle = (x + y) % 2 === 0 ? '#0e1e0e' : '#0c1c0c';
+      ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+    }
+  }
+  // Border
+  ctx.strokeStyle = '#1a3a1a';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(0, 0, COLS * CELL, ROWS * CELL);
+}
+
+function drawSnake() {
+  for (let i = snake.length - 1; i >= 0; i--) {
+    const seg = snake[i];
+    const sx = seg.x * CELL, sy = seg.y * CELL;
+    const isHead = i === 0;
+    const t = i / snake.length; // 0 at head, 1 at tail
+
+    // Body segment
+    const r = CELL * (isHead ? 0.48 : 0.42 - t * 0.08);
+    const cx = sx + CELL / 2, cy = sy + CELL / 2;
+
+    // Colour gradient: bright green head, darker toward tail
+    const green = Math.floor(200 - t * 100);
+    const red = Math.floor(30 + t * 20);
+    ctx.fillStyle = `rgb(${red},${green},${Math.floor(30 + t * 10)})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Scale pattern
+    if (!isHead && i % 2 === 0) {
+      ctx.fillStyle = `rgba(255,255,255,0.06)`;
+      ctx.beginPath();
+      ctx.arc(cx - r * 0.2, cy - r * 0.2, r * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Head details
+    if (isHead) {
+      // Outline
+      ctx.strokeStyle = '#2a6a2a';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Eyes
+      const eyeOff = CELL * 0.18;
+      const eyeR = CELL * 0.1;
+      // Position eyes based on direction
+      const ex1 = cx + dir.y * eyeOff + dir.x * CELL * 0.1;
+      const ey1 = cy - dir.x * eyeOff + dir.y * CELL * 0.1;
+      const ex2 = cx - dir.y * eyeOff + dir.x * CELL * 0.1;
+      const ey2 = cy + dir.x * eyeOff + dir.y * CELL * 0.1;
+
+      // Eye whites
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(ex1, ey1, eyeR, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex2, ey2, eyeR, 0, Math.PI * 2); ctx.fill();
+
+      // Pupils — look in movement direction
+      const pupOff = eyeR * 0.3;
+      ctx.fillStyle = '#111';
+      ctx.beginPath(); ctx.arc(ex1 + dir.x * pupOff, ey1 + dir.y * pupOff, eyeR * 0.55, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex2 + dir.x * pupOff, ey2 + dir.y * pupOff, eyeR * 0.55, 0, Math.PI * 2); ctx.fill();
+
+      // Tongue — flickers
+      if (Math.sin(animTimer * 8) > 0.3) {
+        ctx.strokeStyle = '#ff4444';
+        ctx.lineWidth = Math.max(1, CELL * 0.04);
+        ctx.lineCap = 'round';
+        const tx = cx + dir.x * CELL * 0.45;
+        const ty = cy + dir.y * CELL * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(cx + dir.x * CELL * 0.35, cy + dir.y * CELL * 0.35);
+        ctx.lineTo(tx, ty);
+        ctx.stroke();
+        // Fork
+        const forkLen = CELL * 0.1;
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(tx + dir.x * forkLen + dir.y * forkLen * 0.5, ty + dir.y * forkLen - dir.x * forkLen * 0.5);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(tx + dir.x * forkLen - dir.y * forkLen * 0.5, ty + dir.y * forkLen + dir.x * forkLen * 0.5);
+        ctx.stroke();
+      }
+    }
+
+    // Connect segments smoothly
+    if (i > 0) {
+      const prev = snake[i - 1];
+      const px = prev.x * CELL + CELL / 2, py = prev.y * CELL + CELL / 2;
+      const connR = CELL * (0.38 - t * 0.06);
+      ctx.fillStyle = `rgb(${red},${green},${Math.floor(30 + t * 10)})`;
+      ctx.beginPath();
+      ctx.arc((cx + px) / 2, (cy + py) / 2, connR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function drawFruit() {
+  if (!fruit) return;
+  const fx = fruit.x * CELL + CELL / 2;
+  const fy = fruit.y * CELL + CELL / 2;
+  const bob = Math.sin((animTimer - fruit.spawnTime) * 4) * 2;
+  const size = CELL * 0.75;
+
+  // Glow
+  ctx.fillStyle = fruit.type.color + '22';
+  ctx.beginPath();
+  ctx.arc(fx, fy + bob, CELL * 0.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Fruit emoji
+  ctx.font = `${size}px Segoe UI`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(fruit.type.emoji, fx, fy + bob);
+
+  // Points indicator
+  if (fruit.type.points > 1) {
+    ctx.font = `bold ${Math.max(10, CELL * 0.3)}px Segoe UI`;
+    ctx.fillStyle = '#ff8';
+    ctx.fillText('x' + fruit.type.points, fx + CELL * 0.35, fy - CELL * 0.3 + bob);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    const a = Math.max(0, p.life / p.maxLife);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * a, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawHUD() {
+  // Score
+  ctx.font = `bold ${Math.min(24, CELL * 1.2)}px Segoe UI`;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillText(score, 14, CELL + 4);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(score, 12, CELL + 2);
+
+  // High score
+  ctx.font = `${Math.min(14, CELL * 0.7)}px Segoe UI`;
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#886';
+  ctx.fillText('Best: ' + highScore, W - 12, CELL + 2);
+
+  // Length
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#6a6';
+  ctx.fillText('Length: ' + snake.length, W / 2, CELL + 2);
+}
+
+function drawTitle() {
+  drawGrid();
+
+  // Draw a decorative snake
+  ctx.save();
+  const t = animTimer;
+  for (let i = 0; i < 12; i++) {
+    const angle = t * 0.8 + i * 0.5;
+    const r = 60 + i * 8;
+    const sx = W / 2 + Math.cos(angle) * r;
+    const sy = H * 0.4 + Math.sin(angle) * r * 0.4;
+    const segR = (12 - i) * 1.5 + 4;
+    const green = 200 - i * 12;
+    ctx.fillStyle = `rgb(30,${green},30)`;
+    ctx.beginPath(); ctx.arc(sx, sy, segR, 0, Math.PI * 2); ctx.fill();
+    if (i === 0) {
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(sx + 4, sy - 3, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(sx - 4, sy - 3, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#111';
+      ctx.beginPath(); ctx.arc(sx + 5, sy - 3, 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(sx - 3, sy - 3, 1.5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.restore();
+
+  // Scattered fruits
+  ctx.font = `${Math.min(30, W * 0.04)}px Segoe UI`;
+  ctx.textAlign = 'center';
+  for (let i = 0; i < 6; i++) {
+    const fx = W * (0.1 + i * 0.15) + Math.sin(t + i) * 10;
+    const fy = H * 0.65 + Math.cos(t * 1.3 + i * 2) * 8;
+    ctx.fillText(FRUITS[i].emoji, fx, fy);
+  }
+
+  ctx.font = `bold ${Math.min(52, W * 0.08)}px Segoe UI`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#44cc44';
+  ctx.fillText('FRUIT SNAKE', W / 2, H * 0.15);
+
+  ctx.font = `${Math.min(18, W * 0.028)}px Segoe UI`;
+  ctx.fillStyle = '#aaa';
+  ctx.fillText('Eat fruit. Grow longer. Don\'t crash!', W / 2, H * 0.22);
+
+  if (highScore > 0) {
+    ctx.font = `${Math.min(16, W * 0.024)}px Segoe UI`;
+    ctx.fillStyle = '#ff8';
+    ctx.fillText('High Score: ' + highScore, W / 2, H * 0.78);
+  }
+
+  const pulse = 0.6 + Math.sin(t * 3) * 0.4;
+  ctx.globalAlpha = pulse;
+  ctx.font = `bold ${Math.min(24, W * 0.035)}px Segoe UI`;
+  ctx.fillStyle = '#7f7';
+  ctx.fillText('Tap or Press Any Key', W / 2, H * 0.88);
+  ctx.globalAlpha = 1;
+}
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.font = `bold ${Math.min(48, W * 0.07)}px Segoe UI`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ff4444';
+  ctx.fillText('GAME OVER', W / 2, H * 0.3);
+
+  ctx.font = `${Math.min(28, W * 0.04)}px Segoe UI`;
+  ctx.fillStyle = '#fff';
+  ctx.fillText('Score: ' + score, W / 2, H * 0.42);
+  ctx.fillText('Length: ' + snake.length, W / 2, H * 0.49);
+
+  if (score >= highScore && score > 0) {
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `bold ${Math.min(20, W * 0.03)}px Segoe UI`;
+    ctx.fillText('NEW HIGH SCORE!', W / 2, H * 0.57);
+  }
+
+  if (deathTimer > 0.5) {
+    const pulse = 0.6 + Math.sin(animTimer * 3) * 0.4;
+    ctx.globalAlpha = pulse;
+    ctx.font = `bold ${Math.min(22, W * 0.032)}px Segoe UI`;
+    ctx.fillStyle = '#7f7';
+    ctx.fillText('Tap or Press Any Key', W / 2, H * 0.75);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+// LOOP
+// ============================================================
+let lastTime = performance.now();
+
+function update(dt) {
+  animTimer += dt;
+
+  // Particles
+  for (const p of particles) {
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vy += 200 * dt;
+    p.life -= dt;
+  }
+  particles = particles.filter(p => p.life > 0);
+
+  if (state === 'dead') { deathTimer += dt; return; }
+  if (state !== 'playing') return;
+
+  moveTimer += dt;
+  if (moveTimer >= moveInterval) {
+    moveTimer -= moveInterval;
+    moveSnake();
+  }
+}
+
+function draw() {
+  ctx.fillStyle = '#0a1a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  if (state === 'title') { drawTitle(); return; }
+
+  drawGrid();
+  drawFruit();
+  drawSnake();
+  drawParticles();
+  drawHUD();
+
+  if (state === 'dead') drawGameOver();
+}
+
+function loop() {
+  const now = performance.now();
+  const dt = Math.min((now - lastTime) / 1000, 0.1);
+  lastTime = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+
+})();
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px 'Segoe UI',Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px;">
+  <span id="vc-count">...</span> Slitherers
+</div>
+<script>
+(function(){
+  var G='fruit-snake',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

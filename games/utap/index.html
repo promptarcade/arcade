@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#f5f5f5">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="images/animals/lion.jpg">
+<title>Utap</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#f5f5f5;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  -webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;
+  touch-action:manipulation;overscroll-behavior:none}
+
+/* Prevent pull-to-refresh, pinch zoom, and edge swipe navigation */
+body{position:fixed;inset:0}
+
+/* Title screen */
+.title-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  height:100%;padding:20px;gap:24px;overflow:hidden}
+.category-cards{display:flex;flex-direction:column;gap:16px;width:100%;max-width:400px}
+.category-card{position:relative;border-radius:16px;overflow:hidden;cursor:pointer;
+  aspect-ratio:16/9;box-shadow:0 4px 16px rgba(0,0,0,0.12);
+  transition:transform 0.15s,box-shadow 0.15s;
+  display:grid;grid-template-columns:repeat(6,1fr);grid-template-rows:repeat(3,1fr);gap:2px;background:#ddd}
+.category-card:active{transform:scale(0.97)}
+.category-card img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* Category screen */
+.category-screen{display:none;height:100%;flex-direction:column}
+.category-screen.active{display:flex}
+.cat-header{display:flex;align-items:center;padding:8px;background:#fff;
+  box-shadow:0 2px 8px rgba(0,0,0,0.08);flex-shrink:0;z-index:10}
+.back-btn{width:64px;height:64px;border:none;background:#e8e8e8;cursor:pointer;
+  font-size:32px;display:flex;align-items:center;justify-content:center;
+  border-radius:16px;color:#2d3436;flex-shrink:0;
+  transition:transform 0.12s,background 0.12s}
+.back-btn:active{transform:scale(0.9);background:#d0d0d0}
+/* Color stripe on back button to match category */
+.cat-animals .back-btn{border-left:6px solid #4CAF50}
+.cat-instruments .back-btn{border-left:6px solid #FF9800}
+.cat-machines .back-btn{border-left:6px solid #2196F3}
+
+.grid-wrap{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px}
+@media(min-width:600px){.grid{grid-template-columns:repeat(4,1fr);gap:12px;padding:16px}}
+@media(min-width:900px){.grid{grid-template-columns:repeat(5,1fr);gap:16px;padding:24px;max-width:1000px;margin:0 auto}}
+
+.card{position:relative;aspect-ratio:1;border-radius:12px;overflow:hidden;cursor:pointer;
+  box-shadow:0 2px 8px rgba(0,0,0,0.1);transition:transform 0.12s,box-shadow 0.15s;background:#e0e0e0}
+.card:active{transform:scale(0.95)}
+.card img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.card.playing{box-shadow:0 0 0 4px #0984e3,0 4px 20px rgba(9,132,227,0.35);transform:scale(1.03)}
+.card.playing img{animation:pulse 0.8s ease-in-out infinite alternate}
+@keyframes pulse{from{opacity:1}to{opacity:0.85}}
+</style>
+</head>
+<body>
+
+<div class="title-screen" id="title">
+  <div class="category-cards">
+    <div class="category-card" id="thumb-animals" onclick="showCategory('animals')"></div>
+    <div class="category-card" id="thumb-instruments" onclick="showCategory('instruments')"></div>
+    <div class="category-card" id="thumb-machines" onclick="showCategory('machines')"></div>
+  </div>
+</div>
+
+<div class="category-screen cat-animals" id="cat-animals">
+  <div class="cat-header">
+    <button class="back-btn" onclick="showTitle()">&#9664;</button>
+  </div>
+  <div class="grid-wrap"><div class="grid" id="grid-animals"></div></div>
+</div>
+
+<div class="category-screen cat-instruments" id="cat-instruments">
+  <div class="cat-header">
+    <button class="back-btn" onclick="showTitle()">&#9664;</button>
+  </div>
+  <div class="grid-wrap"><div class="grid" id="grid-instruments"></div></div>
+</div>
+
+<div class="category-screen cat-machines" id="cat-machines">
+  <div class="cat-header">
+    <button class="back-btn" onclick="showTitle()">&#9664;</button>
+  </div>
+  <div class="grid-wrap"><div class="grid" id="grid-machines"></div></div>
+</div>
+
+<script>
+var DATA = {
+  animals: [
+    'babygiraffe','babyseal','bat','bear','blowfly','camel','canadianlynx',
+    'cat','cheetah','chimpanzee','cow','cricket','crocodile','crow','dog',
+    'dolphin','donkey','duck','eagle','elephant','emperorpenguin','eurasianlynx',
+    'fawn','ferret','frog','goat','gorilla','hippopotamus','horse','kangaroo',
+    'koala','lion','meerkatcub','mouse','owl','panda','pig','rattlesnake',
+    'rooster','sheep','sloth','snowwolf','tasmaniandevil','tiger','whale','wombat'
+  ],
+  instruments: [
+    'accordion','bagpipes','banjo','bass','bugle','cello','clarinet',
+    'didgeredoo','drums','flute','guitar','guzheng','harmonica','harp',
+    'kazoo','mandolin','panpipes','piano','pipeorgan','saxophone',
+    'trombone','trumpet','violin','xylophone'
+  ],
+  machines: [
+    'VWbus','aeroplane','blimp','bus','drag','enterprise','formula1',
+    'harley','helicopter','miner','porsche','scooter','snowmobile','tank','v8'
+  ]
+};
+
+var AUDIO_MAP = {
+  'hippopotamus': 'hippotamus',
+  'didgeredoo': 'didgeridoo',
+  'VWbus': 'vwbus'
+};
+
+var IMG_EXT = {
+  'chimpanzee': 'jpeg'
+};
+
+var currentAudio = null;
+var currentCard = null;
+
+function getImagePath(cat, name) {
+  var ext = IMG_EXT[name] || 'jpg';
+  return 'images/' + cat + '/' + name + '.' + ext;
+}
+
+function getAudioPath(cat, name) {
+  var audioName = AUDIO_MAP[name] || name;
+  return 'sound/' + cat + '/' + audioName + '.mp3';
+}
+
+function stopCurrent() {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+    currentAudio = null;
+  }
+  if (currentCard) {
+    currentCard.classList.remove('playing');
+    currentCard = null;
+  }
+}
+
+function playItem(cat, name, cardEl) {
+  if (currentCard === cardEl && currentAudio && !currentAudio.paused) {
+    stopCurrent();
+    return;
+  }
+  stopCurrent();
+  var audio = new Audio(getAudioPath(cat, name));
+  currentAudio = audio;
+  currentCard = cardEl;
+  cardEl.classList.add('playing');
+  audio.addEventListener('ended', function() {
+    cardEl.classList.remove('playing');
+    if (currentCard === cardEl) { currentAudio = null; currentCard = null; }
+  });
+  audio.play().catch(function() {});
+}
+
+function buildGrid(cat) {
+  var grid = document.getElementById('grid-' + cat);
+  var items = DATA[cat];
+  for (var i = 0; i < items.length; i++) {
+    (function(name) {
+      var card = document.createElement('div');
+      card.className = 'card';
+      var img = document.createElement('img');
+      img.src = getImagePath(cat, name);
+      img.alt = '';
+      img.loading = 'lazy';
+      img.draggable = false;
+      card.appendChild(img);
+      card.addEventListener('click', function() { playItem(cat, name, card); });
+      grid.appendChild(card);
+    })(items[i]);
+  }
+}
+
+function showCategory(cat) {
+  stopCurrent();
+  document.getElementById('title').style.display = 'none';
+  document.getElementById('cat-animals').classList.remove('active');
+  document.getElementById('cat-instruments').classList.remove('active');
+  document.getElementById('cat-machines').classList.remove('active');
+  document.getElementById('cat-' + cat).classList.add('active');
+  // Reset scroll position
+  var wrap = document.querySelector('#cat-' + cat + ' .grid-wrap');
+  if (wrap) wrap.scrollTop = 0;
+  // Push history state so hardware back button returns to categories
+  history.pushState({cat: cat}, '');
+}
+
+function showTitle() {
+  stopCurrent();
+  document.getElementById('cat-animals').classList.remove('active');
+  document.getElementById('cat-instruments').classList.remove('active');
+  document.getElementById('cat-machines').classList.remove('active');
+  document.getElementById('title').style.display = '';
+}
+
+// Hardware back button / browser back → return to categories instead of leaving
+window.addEventListener('popstate', function(e) {
+  var anyActive = document.querySelector('.category-screen.active');
+  if (anyActive) {
+    // Going back from category → show title
+    showTitle();
+  } else {
+    // Already on title — push state to prevent leaving the page
+    history.pushState({home: true}, '');
+  }
+});
+// Seed initial history state so first back press doesn't leave
+history.pushState({home: true}, '');
+
+// Prevent accidental navigation gestures
+window.addEventListener('beforeunload', function(e) {
+  // Only block if audio is playing (indicates active use)
+  if (currentAudio && !currentAudio.paused) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+// Block context menu (long-press on images)
+document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+
+// Block drag (prevents dragging images which looks broken)
+document.addEventListener('dragstart', function(e) { e.preventDefault(); });
+
+// Block double-tap zoom
+var lastTap = 0;
+document.addEventListener('touchend', function(e) {
+  var now = Date.now();
+  if (now - lastTap < 300) { e.preventDefault(); }
+  lastTap = now;
+}, {passive: false});
+
+// Block pinch zoom
+document.addEventListener('touchmove', function(e) {
+  if (e.touches.length > 1) { e.preventDefault(); }
+}, {passive: false});
+
+// Block keyboard shortcuts that navigate away (Ctrl+W, Alt+Left, etc on desktop)
+document.addEventListener('keydown', function(e) {
+  // Allow nothing that navigates
+  if (e.key === 'Backspace' || (e.altKey && e.key === 'ArrowLeft')) {
+    e.preventDefault();
+    var anyActive = document.querySelector('.category-screen.active');
+    if (anyActive) showTitle();
+  }
+});
+
+function buildThumbnails(cat) {
+  var container = document.getElementById('thumb-' + cat);
+  var items = DATA[cat];
+  var count = 18;
+  var step = Math.max(1, Math.floor(items.length / count));
+  for (var i = 0; i < count; i++) {
+    var idx = (i * step) % items.length;
+    var img = document.createElement('img');
+    img.src = getImagePath(cat, items[idx]);
+    img.alt = '';
+    img.loading = 'lazy';
+    img.draggable = false;
+    container.appendChild(img);
+  }
+}
+
+buildGrid('animals');
+buildGrid('instruments');
+buildGrid('machines');
+buildThumbnails('animals');
+buildThumbnails('instruments');
+buildThumbnails('machines');
+
+// Register service worker for offline support
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(function(){});
+}
+</script>
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px Segoe UI,Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px"><span id="vc-count">...</span> Listeners</div>
+<script>
+(function(){var G="utap",SU="https://ivhpqkqnfqcgrfrsvszf.supabase.co",SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM";function hdr(){return{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json"}}async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("").slice(0,32)}catch(e){return"anon-"+Math.random().toString(36).slice(2,10)}}async function run(){var h=await vh();try{await fetch(SU+"/rest/v1/game_visits",{method:"POST",headers:Object.assign(hdr(),{"Prefer":"resolution=merge-duplicates,return=minimal"}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}try{var r=await fetch(SU+"/rest/v1/game_visits?game=eq."+G+"&select=id",{headers:Object.assign(hdr(),{"Prefer":"count=exact"})});var c=r.headers.get("content-range");if(c){var n=c.split("/")[1];if(n&&n!=="*")document.getElementById("vc-count").textContent=Number(n).toLocaleString()}}catch(e){}}run()})();
+</script>
+</body>
+</html>

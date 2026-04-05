@@ -1,0 +1,1570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Capybara Clicker</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+body { background: #2d1b0e; font-family: 'Segoe UI', Arial, sans-serif; color: #f5e6d3; display: flex; flex-direction: column; }
+#top-bar { background: linear-gradient(to bottom, #3a2415, #2d1b0e); padding: 8px 16px; display: flex; align-items: center; justify-content: center; gap: 24px; border-bottom: 2px solid #5a3a20; flex-shrink: 0; min-height: 56px; flex-wrap: wrap; }
+.stat { text-align: center; }
+.stat .label { font-size: 11px; color: #a08060; text-transform: uppercase; letter-spacing: 1px; }
+.stat .value { font-size: 22px; font-weight: bold; }
+.stat-points .value { color: #ffd700; }
+.stat-pps .value { color: #8fdf8f; }
+.stat-ppc .value { color: #88ccff; }
+#main { display: flex; flex: 1; min-height: 0; }
+#click-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; overflow: hidden; cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; background: radial-gradient(ellipse at center, #3a2818 0%, #2d1b0e 70%); }
+#click-area canvas { max-width: 100%; max-height: 100%; }
+#shop { width: 340px; flex-shrink: 0; background: #1e1208; border-left: 2px solid #5a3a20; overflow-y: auto; overflow-x: hidden; }
+#shop::-webkit-scrollbar { width: 6px; }
+#shop::-webkit-scrollbar-track { background: #1e1208; }
+#shop::-webkit-scrollbar-thumb { background: #5a3a20; border-radius: 3px; }
+.shop-header { padding: 12px 16px; font-size: 18px; font-weight: bold; color: #ffd700; border-bottom: 1px solid #3a2415; position: sticky; top: 0; background: #1e1208; z-index: 1; }
+.upgrade-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; border: none; border-bottom: 1px solid #2d1b0e; background: #2a1a0c; color: #f5e6d3; cursor: pointer; text-align: left; transition: background 0.15s; }
+.upgrade-btn:hover:not(.locked) { background: #3a2818; }
+.upgrade-btn.locked { opacity: 0.4; cursor: not-allowed; }
+.upgrade-btn .icon { width: 44px; height: 44px; flex-shrink: 0; border-radius: 8px; overflow: hidden; background: #1a0e04; border: 1px solid #3a2415; }
+.upgrade-btn .info { flex: 1; min-width: 0; }
+.upgrade-btn .name { font-weight: bold; font-size: 13px; }
+.upgrade-btn .desc { font-size: 11px; color: #a08060; }
+.upgrade-btn .cost-line { font-size: 12px; color: #ffd700; margin-top: 2px; }
+.upgrade-btn .count { font-size: 20px; font-weight: bold; color: #8fdf8f; width: 36px; text-align: right; flex-shrink: 0; }
+#prestige-bar { padding: 10px 14px; border-bottom: 1px solid #3a2415; }
+#prestige-btn { width: 100%; padding: 10px; border: 2px solid #a855f7; border-radius: 8px; background: linear-gradient(to bottom, #4a1a6a, #2d0f40); color: #d8b4fe; font-size: 14px; font-weight: bold; cursor: pointer; transition: all 0.2s; }
+#prestige-btn:hover:not(:disabled) { background: linear-gradient(to bottom, #5a2a7a, #3d1f50); box-shadow: 0 0 12px rgba(168,85,247,0.4); }
+#prestige-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+#prestige-info { font-size: 11px; color: #a078c0; margin-top: 6px; text-align: center; }
+/* Mobile */
+@media (max-width: 700px) {
+  #main { flex-direction: column; }
+  #click-area { flex: none; height: 55vh; }
+  #shop { width: 100%; flex: 1; border-left: none; border-top: 2px solid #5a3a20; }
+  #top-bar { gap: 16px; padding: 6px 10px; min-height: 48px; }
+  .stat .value { font-size: 18px; }
+}
+</style>
+</head>
+<body>
+<div id="top-bar">
+  <div class="stat stat-points"><div class="label">Points</div><div class="value" id="points-display">0</div></div>
+  <div class="stat stat-pps"><div class="label">Per Second</div><div class="value" id="pps-display">0</div></div>
+  <div class="stat stat-ppc"><div class="label">Per Click</div><div class="value" id="ppc-display">1</div></div>
+</div>
+<div id="main">
+  <div id="click-area">
+    <canvas id="capy-canvas"></canvas>
+  </div>
+  <div id="shop">
+    <div class="shop-header">Upgrades</div>
+    <div id="prestige-bar">
+      <button id="prestige-btn" disabled>Prestige (need 1M points)</button>
+      <div id="prestige-info">Prestige multiplier: x1.00</div>
+    </div>
+    <div id="upgrade-list"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+'use strict';
+// ============================================================
+// ANTI-TAMPER UTILITIES
+// ============================================================
+const _SALT = 'c4py-b4r4-2026';
+function _checksum(obj) {
+  const s = JSON.stringify(obj);
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  // Mix with salt
+  for (let i = 0; i < _SALT.length; i++) {
+    h = ((h << 5) - h + _SALT.charCodeAt(i)) | 0;
+  }
+  return (h >>> 0).toString(36);
+}
+
+// Validate that game state is internally consistent
+function _validateState(data) {
+  if (typeof data.points !== 'number' || data.points < 0) return false;
+  if (typeof data.totalPoints !== 'number' || data.totalPoints < 0) return false;
+  if (typeof data.allTimePoints !== 'number' || data.allTimePoints < 0) return false;
+  if (data.totalPoints > data.allTimePoints) return false;
+  if (data.points > data.totalPoints) return false;
+  if (typeof data.prestigeCount !== 'number' || data.prestigeCount < 0 || data.prestigeCount > 1000) return false;
+  if (!Array.isArray(data.generators) || data.generators.length !== UPGRADES.length) return false;
+  if (!Array.isArray(data.clickUpgrades) || data.clickUpgrades.length !== CLICK_UPGRADES.length) return false;
+  // Check each generator count is a reasonable non-negative integer
+  for (const g of data.generators) {
+    if (typeof g !== 'number' || g < 0 || g > 10000 || g !== Math.floor(g)) return false;
+  }
+  // Calculate max possible points from generators owned (sanity bound)
+  let totalSpent = 0;
+  for (let i = 0; i < UPGRADES.length; i++) {
+    const u = UPGRADES[i];
+    for (let n = 0; n < data.generators[i]; n++) {
+      totalSpent += u.baseCost * Math.pow(u.costMult, n);
+    }
+  }
+  for (let i = 0; i < CLICK_UPGRADES.length; i++) {
+    if (data.clickUpgrades[i]) totalSpent += CLICK_UPGRADES[i].cost;
+  }
+  // allTimePoints should be at least what was spent (with some prestige tolerance)
+  const prestigeFactor = Math.max(1, data.prestigeCount + 1);
+  if (data.allTimePoints > totalSpent * 500 * prestigeFactor + 1e8 * prestigeFactor) return false;
+  return true;
+}
+
+// ============================================================
+// SOUND
+// ============================================================
+const SFX = {
+  _ctx: null,
+  _getCtx() {
+    if (!this._ctx) {
+      this._ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (this._ctx.state === 'suspended') this._ctx.resume();
+    return this._ctx;
+  },
+  _play(freq, type, dur, vol) {
+    try {
+      const ctx = this._getCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(vol, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + dur);
+    } catch(e) {}
+  },
+  click() {
+    this._play(800 + Math.random() * 200, 'sine', 0.08, 0.12);
+  },
+  buy() {
+    this._play(520, 'sine', 0.06, 0.1);
+    setTimeout(() => this._play(780, 'sine', 0.08, 0.1), 50);
+  },
+  prestige() {
+    this._play(440, 'sine', 0.3, 0.12);
+    setTimeout(() => this._play(660, 'sine', 0.3, 0.1), 100);
+    setTimeout(() => this._play(880, 'sine', 0.4, 0.08), 200);
+  },
+  milestone() {
+    this._play(600, 'triangle', 0.1, 0.1);
+    setTimeout(() => this._play(800, 'triangle', 0.15, 0.1), 80);
+    setTimeout(() => this._play(1000, 'triangle', 0.2, 0.08), 160);
+  }
+};
+
+// ============================================================
+// CONFIG
+// ============================================================
+const UPGRADES = [
+  { name: 'Baby Capy',       icon: '\u{1F43E}', desc: 'A tiny friend joins the family',          baseCost: 15,       baseRate: 0.1,   costMult: 1.15 },
+  { name: 'Duck Friend',     icon: '\u{1F986}', desc: 'Ducks and capybaras are best pals',       baseCost: 100,      baseRate: 1,     costMult: 1.15 },
+  { name: 'Orange Grove',    icon: '\u{1F34A}', desc: 'Their favourite snack, unlimited supply',  baseCost: 500,      baseRate: 5,     costMult: 1.15 },
+  { name: 'Hot Spring',      icon: '\u{2668}\u{FE0F}',  desc: 'Nothing beats a warm relaxing soak',     baseCost: 2500,     baseRate: 25,    costMult: 1.15 },
+  { name: 'Capy Herd',       icon: '\u{1F43F}\u{FE0F}', desc: 'Strength in numbers, chill in numbers',  baseCost: 12000,    baseRate: 100,   costMult: 1.15 },
+  { name: 'Capy Resort',     icon: '\u{1F3D6}\u{FE0F}', desc: 'A five-star capybara vacation spot',     baseCost: 60000,    baseRate: 500,   costMult: 1.15 },
+  { name: 'Golden Capy',     icon: '\u{1F451}', desc: 'A legendary capybara made of pure gold',   baseCost: 300000,   baseRate: 2500,  costMult: 1.15 },
+  { name: 'Capy Dimension',  icon: '\u{1F30C}', desc: 'An entire dimension of capybaras',         baseCost: 1500000,  baseRate: 12000, costMult: 1.15 },
+  { name: 'Capy Singularity', icon: '\u{2728}', desc: 'All of reality becomes capybara',          baseCost: 10000000, baseRate: 60000, costMult: 1.15 },
+];
+Object.freeze(UPGRADES); UPGRADES.forEach(Object.freeze);
+
+const CLICK_UPGRADES = [
+  { name: 'Gentle Pat',       icon: '\u{1F44B}', desc: '+1 per click',   cost: 50,       bonus: 1 },
+  { name: 'Belly Rub',        icon: '\u{1F90D}', desc: '+5 per click',   cost: 500,      bonus: 5 },
+  { name: 'Head Scratch',     icon: '\u{1F485}', desc: '+25 per click',  cost: 5000,     bonus: 25 },
+  { name: 'Full Massage',     icon: '\u{1F486}', desc: '+100 per click', cost: 50000,    bonus: 100 },
+  { name: 'Capy Whisperer',   icon: '\u{1F9D8}', desc: '+500 per click', cost: 500000,   bonus: 500 },
+  { name: 'Transcendence',    icon: '\u{1F4AB}', desc: '+2500 per click', cost: 5000000, bonus: 2500 },
+];
+Object.freeze(CLICK_UPGRADES); CLICK_UPGRADES.forEach(Object.freeze);
+
+// ============================================================
+// FORMATTING
+// ============================================================
+function fmt(n) {
+  if (n < 1000) return Math.floor(n).toString();
+  if (n < 1e6) return (n / 1e3).toFixed(1) + 'K';
+  if (n < 1e9) return (n / 1e6).toFixed(2) + 'M';
+  if (n < 1e12) return (n / 1e9).toFixed(2) + 'B';
+  return (n / 1e12).toFixed(2) + 'T';
+}
+
+function fmtRate(n) {
+  if (n < 10) return n.toFixed(1);
+  return fmt(n);
+}
+
+// ============================================================
+// PARTICLES
+// ============================================================
+class Particle {
+  constructor(x, y, text, color, size) {
+    this.x = x;
+    this.y = y;
+    this.text = text;
+    this.color = color;
+    this.size = size || 18;
+    this.vx = (Math.random() - 0.5) * 60;
+    this.vy = -40 - Math.random() * 60;
+    this.life = 1.2;
+    this.maxLife = 1.2;
+    this.rotation = (Math.random() - 0.5) * 0.5;
+  }
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.vy += 20 * dt;
+    this.life -= dt;
+  }
+  draw(ctx) {
+    const a = Math.max(0, this.life / this.maxLife);
+    ctx.globalAlpha = a;
+    ctx.font = `bold ${this.size}px Segoe UI`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = this.color;
+    ctx.fillText(this.text, this.x, this.y);
+    ctx.globalAlpha = 1;
+  }
+}
+
+class HeartParticle {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 30 + Math.random() * 80;
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed - 40;
+    this.life = 0.8 + Math.random() * 0.6;
+    this.maxLife = this.life;
+    this.size = 10 + Math.random() * 14;
+    this.emoji = Math.random() < 0.6 ? '\u2764\uFE0F' : (Math.random() < 0.5 ? '\u2728' : '\u{1F34A}');
+  }
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.vy += 50 * dt;
+    this.life -= dt;
+  }
+  draw(ctx) {
+    const a = Math.max(0, this.life / this.maxLife);
+    ctx.globalAlpha = a;
+    ctx.font = `${this.size}px Segoe UI`;
+    ctx.textAlign = 'center';
+    ctx.fillText(this.emoji, this.x, this.y);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+// CLICK EFFECTS — visual splashes per click upgrade
+// ============================================================
+class ClickEffect {
+  constructor(x, y, type) {
+    this.x = x; this.y = y; this.type = type;
+    this.life = type === 'transcend' ? 0.8 : 0.6;
+    this.maxLife = this.life;
+    this.vx = (Math.random() - 0.5) * 30;
+    this.vy = type === 'note' ? -50 - Math.random() * 40 : -20;
+    this.phase = Math.random() * Math.PI * 2;
+    this.size = 1;
+  }
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.life -= dt;
+    this.size += dt * 3;
+    this.phase += dt * 5;
+  }
+  draw(ctx) {
+    const t = 1 - this.life / this.maxLife; // 0→1
+    const a = this.life < 0.2 ? this.life / 0.2 : 1;
+    ctx.globalAlpha = a;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    switch(this.type) {
+      case 'ripple': {
+        const r = t * 50;
+        ctx.strokeStyle = 'rgba(255,220,150,0.5)';
+        ctx.lineWidth = 3 * (1 - t);
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+        break;
+      }
+      case 'heart': {
+        const hs = 8 + t * 4;
+        ctx.fillStyle = '#ff6688';
+        ctx.beginPath();
+        ctx.moveTo(0, hs * 0.3);
+        ctx.bezierCurveTo(0, -hs*0.1, -hs, -hs*0.4, -hs*0.5, -hs*0.6);
+        ctx.bezierCurveTo(0, -hs*0.8, 0, -hs*0.1, 0, hs*0.3);
+        ctx.moveTo(0, hs * 0.3);
+        ctx.bezierCurveTo(0, -hs*0.1, hs, -hs*0.4, hs*0.5, -hs*0.6);
+        ctx.bezierCurveTo(0, -hs*0.8, 0, -hs*0.1, 0, hs*0.3);
+        ctx.fill();
+        break;
+      }
+      case 'sparkle_ring': {
+        const count = 8;
+        const r = 20 + t * 30;
+        for (let i = 0; i < count; i++) {
+          const angle = (i / count) * Math.PI * 2 + this.phase;
+          const sx = Math.cos(angle) * r;
+          const sy = Math.sin(angle) * r;
+          ctx.fillStyle = `hsla(${45 + i * 10}, 90%, 70%, ${a})`;
+          ctx.save(); ctx.translate(sx, sy); ctx.rotate(angle);
+          ctx.fillRect(-2, -5, 4, 10);
+          ctx.fillRect(-5, -2, 10, 4);
+          ctx.restore();
+        }
+        break;
+      }
+      case 'wave': {
+        for (let i = 0; i < 3; i++) {
+          const r = t * 60 + i * 15;
+          const wa = (1 - t) * 0.3 * (1 - i * 0.25);
+          ctx.strokeStyle = `rgba(150,220,255,${wa})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+        }
+        break;
+      }
+      case 'note': {
+        ctx.fillStyle = '#ff88aa';
+        ctx.font = `${16 + t * 6}px Segoe UI`;
+        ctx.textAlign = 'center';
+        const notes = ['\u266A', '\u266B', '\u266C'];
+        ctx.fillText(notes[Math.floor(this.phase) % 3], 0, 0);
+        break;
+      }
+      case 'transcend': {
+        // Golden expanding aura
+        const r = t * 80;
+        const grd = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+        grd.addColorStop(0, `rgba(255,215,0,${0.4 * (1-t)})`);
+        grd.addColorStop(0.5, `rgba(255,180,50,${0.2 * (1-t)})`);
+        grd.addColorStop(1, 'rgba(255,150,0,0)');
+        ctx.fillStyle = grd;
+        ctx.fillRect(-r, -r, r*2, r*2);
+        // Inner flash
+        if (t < 0.3) {
+          ctx.fillStyle = `rgba(255,255,255,${(0.3-t) * 2})`;
+          ctx.beginPath(); ctx.arc(0, 0, 15 * (1-t*3), 0, Math.PI*2); ctx.fill();
+        }
+        break;
+      }
+      case 'icon_hand': {
+        // Floating hand icon
+        const sz = 18 * (1 - t * 0.3);
+        ctx.fillStyle = '#ddb896';
+        ctx.beginPath(); ctx.ellipse(0, 0, sz*0.7, sz*0.45, -0.2, 0, Math.PI*2); ctx.fill();
+        for (let i = 0; i < 4; i++) {
+          ctx.beginPath(); ctx.ellipse(-sz*0.35 + i*sz*0.22, -sz*0.35, sz*0.12, sz*0.28, 0, 0, Math.PI*2); ctx.fill();
+        }
+        break;
+      }
+      case 'icon_scratch': {
+        // Scratch marks
+        ctx.strokeStyle = `rgba(255,255,200,${a})`;
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 3; i++) {
+          const ox = i * 8 - 8;
+          ctx.beginPath();
+          ctx.moveTo(ox, -10 * (1-t));
+          ctx.lineTo(ox + 3, 10 * (1-t));
+          ctx.stroke();
+        }
+        break;
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+// CAPYBARA DRAWING
+// ============================================================
+function drawCapybara(ctx, cx, cy, scale, bobPhase) {
+  const s = scale;
+  const bob = Math.sin(bobPhase) * 3 * s;
+  ctx.save();
+  ctx.translate(cx, cy + bob);
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(0, 58 * s, 70 * s, 12 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Back legs
+  ctx.fillStyle = '#6b4226';
+  ctx.beginPath(); ctx.ellipse(-35 * s, 45 * s, 14 * s, 18 * s, -0.1, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(35 * s, 45 * s, 14 * s, 18 * s, 0.1, 0, Math.PI * 2); ctx.fill();
+
+  // Body
+  ctx.fillStyle = '#8B5E3C';
+  ctx.beginPath();
+  ctx.ellipse(0, 10 * s, 60 * s, 45 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Belly lighter area
+  ctx.fillStyle = '#a07050';
+  ctx.beginPath();
+  ctx.ellipse(0, 20 * s, 40 * s, 28 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Front legs
+  ctx.fillStyle = '#7a4f30';
+  ctx.beginPath(); ctx.ellipse(-28 * s, 48 * s, 12 * s, 16 * s, -0.15, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(28 * s, 48 * s, 12 * s, 16 * s, 0.15, 0, Math.PI * 2); ctx.fill();
+
+  // Head
+  ctx.fillStyle = '#8B5E3C';
+  ctx.beginPath();
+  ctx.ellipse(0, -38 * s, 38 * s, 30 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Snout (lighter, rounder)
+  ctx.fillStyle = '#a07050';
+  ctx.beginPath();
+  ctx.ellipse(0, -25 * s, 22 * s, 16 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Ears
+  ctx.fillStyle = '#6b4226';
+  ctx.beginPath(); ctx.ellipse(-25 * s, -60 * s, 10 * s, 8 * s, -0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(25 * s, -60 * s, 10 * s, 8 * s, 0.3, 0, Math.PI * 2); ctx.fill();
+  // Inner ears
+  ctx.fillStyle = '#c08060';
+  ctx.beginPath(); ctx.ellipse(-25 * s, -60 * s, 6 * s, 5 * s, -0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(25 * s, -60 * s, 6 * s, 5 * s, 0.3, 0, Math.PI * 2); ctx.fill();
+
+  // Eyes
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath(); ctx.arc(-14 * s, -42 * s, 5 * s, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(14 * s, -42 * s, 5 * s, 0, Math.PI * 2); ctx.fill();
+  // Eye highlights
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(-12 * s, -44 * s, 2 * s, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(16 * s, -44 * s, 2 * s, 0, Math.PI * 2); ctx.fill();
+
+  // Nose
+  ctx.fillStyle = '#4a2a15';
+  ctx.beginPath();
+  ctx.ellipse(0, -28 * s, 6 * s, 4 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Nostrils
+  ctx.fillStyle = '#2a1508';
+  ctx.beginPath(); ctx.arc(-3 * s, -27.5 * s, 1.5 * s, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(3 * s, -27.5 * s, 1.5 * s, 0, Math.PI * 2); ctx.fill();
+
+  // Whiskers
+  ctx.strokeStyle = '#5a3520';
+  ctx.lineWidth = 1 * s;
+  // Left
+  ctx.beginPath(); ctx.moveTo(-22 * s, -26 * s); ctx.lineTo(-45 * s, -30 * s); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-22 * s, -24 * s); ctx.lineTo(-44 * s, -22 * s); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-20 * s, -22 * s); ctx.lineTo(-40 * s, -15 * s); ctx.stroke();
+  // Right
+  ctx.beginPath(); ctx.moveTo(22 * s, -26 * s); ctx.lineTo(45 * s, -30 * s); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(22 * s, -24 * s); ctx.lineTo(44 * s, -22 * s); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(20 * s, -22 * s); ctx.lineTo(40 * s, -15 * s); ctx.stroke();
+
+  // Mouth (subtle smile)
+  ctx.strokeStyle = '#5a3520';
+  ctx.lineWidth = 1.5 * s;
+  ctx.beginPath();
+  ctx.arc(-5 * s, -22 * s, 5 * s, 0.2, Math.PI - 0.2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(5 * s, -22 * s, 5 * s, 0.2, Math.PI - 0.2);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// ============================================================
+// COMPANION — persistent big friends near the capybara
+// ============================================================
+class Companion {
+  constructor(type, cx, cy, capyScale) {
+    this.type = type;
+    this.phase = Math.random() * Math.PI * 2;
+    this.dir = Math.random() < 0.5 ? -1 : 1;
+    // Position near the capybara
+    const angle = Math.random() * Math.PI * 2;
+    const dist = (60 + Math.random() * 40) * capyScale;
+    this.homeX = cx + Math.cos(angle) * dist;
+    this.homeY = cy + 30 * capyScale + Math.sin(angle) * dist * 0.5;
+    this.x = this.homeX;
+    this.y = this.homeY;
+    this.wanderX = this.homeX;
+    this.wanderY = this.homeY;
+    this.scale = capyScale * (0.4 + Math.random() * 0.2);
+  }
+  update(dt, cx, cy, capyScale) {
+    this.phase += dt * 2.5;
+    // Wander near home
+    if (Math.random() < dt * 0.3) {
+      this.wanderX = this.homeX + (Math.random() - 0.5) * 40 * capyScale;
+      this.wanderY = this.homeY + (Math.random() - 0.5) * 20 * capyScale;
+    }
+    const dx = this.wanderX - this.x;
+    const dy = this.wanderY - this.y;
+    this.x += dx * dt * 0.8;
+    this.y += dy * dt * 0.8;
+    if (Math.abs(dx) > 2) this.dir = dx > 0 ? 1 : -1;
+  }
+  draw(ctx) {
+    const s = this.scale;
+    const bob = Math.sin(this.phase) * 3 * s;
+    ctx.save();
+    ctx.translate(this.x, this.y + bob);
+    ctx.scale(this.dir, 1);
+    if (this.type === 'baby_capy') this._drawBabyCapy(ctx, s);
+    else if (this.type === 'duck') this._drawDuck(ctx, s);
+    ctx.restore();
+  }
+  _drawBabyCapy(ctx, s) {
+    const legOff = Math.sin(this.phase * 2) * 3 * s;
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath(); ctx.ellipse(0, 20*s, 16*s, 5*s, 0, 0, Math.PI*2); ctx.fill();
+    // Back legs
+    ctx.fillStyle = '#6b4226';
+    ctx.fillRect(-10*s, 10*s + legOff, 6*s, 10*s);
+    ctx.fillRect(5*s, 10*s - legOff, 6*s, 10*s);
+    // Body
+    ctx.fillStyle = '#7a5030';
+    ctx.beginPath(); ctx.ellipse(0, 4*s, 16*s, 12*s, 0, 0, Math.PI*2); ctx.fill();
+    // Belly
+    ctx.fillStyle = '#906840';
+    ctx.beginPath(); ctx.ellipse(0, 7*s, 10*s, 7*s, 0, 0, Math.PI*2); ctx.fill();
+    // Head
+    ctx.fillStyle = '#8B5E3C';
+    ctx.beginPath(); ctx.arc(0, -10*s, 10*s, 0, Math.PI*2); ctx.fill();
+    // Snout
+    ctx.fillStyle = '#a07050';
+    ctx.beginPath(); ctx.ellipse(0, -6*s, 7*s, 5*s, 0, 0, Math.PI*2); ctx.fill();
+    // Eyes
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.arc(-4*s, -12*s, 2*s, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(4*s, -12*s, 2*s, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(-3*s, -13*s, 0.8*s, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(5*s, -13*s, 0.8*s, 0, Math.PI*2); ctx.fill();
+    // Nose
+    ctx.fillStyle = '#4a2a15';
+    ctx.beginPath(); ctx.ellipse(0, -7*s, 2.5*s, 1.5*s, 0, 0, Math.PI*2); ctx.fill();
+    // Ears
+    ctx.fillStyle = '#6b4226';
+    ctx.beginPath(); ctx.ellipse(-7*s, -18*s, 3*s, 2.5*s, -0.3, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(7*s, -18*s, 3*s, 2.5*s, 0.3, 0, Math.PI*2); ctx.fill();
+  }
+  _drawDuck(ctx, s) {
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.beginPath(); ctx.ellipse(0, 14*s, 14*s, 5*s, 0, 0, Math.PI*2); ctx.fill();
+    // Body
+    ctx.fillStyle = '#ffdd44';
+    ctx.beginPath(); ctx.ellipse(0, 4*s, 14*s, 10*s, 0, 0, Math.PI*2); ctx.fill();
+    // Wing
+    ctx.fillStyle = '#eec830';
+    ctx.beginPath(); ctx.ellipse(4*s, 2*s, 8*s, 6*s, 0.2, 0, Math.PI*2); ctx.fill();
+    // Head
+    ctx.fillStyle = '#ffee66';
+    ctx.beginPath(); ctx.arc(0, -8*s, 8*s, 0, Math.PI*2); ctx.fill();
+    // Beak
+    ctx.fillStyle = '#ff8800';
+    ctx.beginPath();
+    ctx.moveTo(-8*s, -8*s); ctx.lineTo(-16*s, -10*s); ctx.lineTo(-8*s, -5*s);
+    ctx.closePath(); ctx.fill();
+    // Eye
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.arc(-3*s, -10*s, 1.8*s, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(-2*s, -11*s, 0.7*s, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+// ============================================================
+// CAPY INTERACTION — timed animations on the main capybara
+// ============================================================
+// Interactions: { id, interval, duration, drawFn }
+const INTERACTIONS = [
+  { id: 'eat_orange', genIdx: 2, interval: 5, duration: 1.5 },
+  { id: 'soak_spring', genIdx: 3, interval: 25, duration: 3 },
+  { id: 'golden_glow', genIdx: 6, interval: 15, duration: 2 },
+  { id: 'portal_flash', genIdx: 7, interval: 20, duration: 1.5 },
+  { id: 'crown_sparkle', genIdx: 8, interval: 10, duration: 1.8 },
+];
+
+class InteractionManager {
+  constructor() {
+    this.timers = {};
+    this.active = null; // { id, elapsed, duration }
+    for (const inter of INTERACTIONS) {
+      this.timers[inter.id] = inter.interval * Math.random(); // stagger start
+    }
+  }
+  update(dt, generators) {
+    if (this.active) {
+      this.active.elapsed += dt;
+      if (this.active.elapsed >= this.active.duration) this.active = null;
+      return;
+    }
+    for (const inter of INTERACTIONS) {
+      if (generators[inter.genIdx] <= 0) continue;
+      this.timers[inter.id] = (this.timers[inter.id] || 0) + dt;
+      if (this.timers[inter.id] >= inter.interval) {
+        this.timers[inter.id] = 0;
+        this.active = { id: inter.id, elapsed: 0, duration: inter.duration };
+        return;
+      }
+    }
+  }
+  drawOverCapy(ctx, cx, cy, s, bobY) {
+    if (!this.active) return;
+    const a = this.active;
+    const t = a.elapsed / a.duration; // 0→1
+    const fadeIn = Math.min(1, a.elapsed * 4);
+    const fadeOut = Math.min(1, (a.duration - a.elapsed) * 4);
+    const alpha = fadeIn * fadeOut;
+    ctx.save();
+    ctx.translate(cx, cy + bobY);
+    ctx.globalAlpha = alpha;
+    switch(a.id) {
+      case 'eat_orange': {
+        // Orange floats to mouth then disappears
+        const orangeX = 30 * s * (1 - t);
+        const orangeY = -25 * s - 15 * s * Math.sin(t * Math.PI);
+        const orangeSize = (1 - t * 0.5) * 8 * s;
+        if (t < 0.8) {
+          ctx.fillStyle = '#ff8800';
+          ctx.beginPath(); ctx.arc(orangeX, orangeY, orangeSize, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = '#ffaa22';
+          ctx.beginPath(); ctx.arc(orangeX - 2*s, orangeY - 2*s, orangeSize*0.4, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = '#44aa22';
+          ctx.beginPath(); ctx.ellipse(orangeX + 2*s, orangeY - orangeSize, 3*s, 1.5*s, 0.5, 0, Math.PI*2); ctx.fill();
+        }
+        // Munch particles near mouth
+        if (t > 0.5 && t < 0.9) {
+          for (let i = 0; i < 3; i++) {
+            const px = (Math.random()-0.5) * 10 * s;
+            const py = -25*s + (Math.random()-0.5) * 6 * s;
+            ctx.fillStyle = '#ff9922';
+            ctx.beginPath(); ctx.arc(px, py, 2*s*Math.random(), 0, Math.PI*2); ctx.fill();
+          }
+        }
+        // Happy closed eyes when eating
+        if (t > 0.4) {
+          ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 2*s;
+          ctx.beginPath(); ctx.arc(-14*s, -42*s, 4*s, 0.3, Math.PI-0.3); ctx.stroke();
+          ctx.beginPath(); ctx.arc(14*s, -42*s, 4*s, 0.3, Math.PI-0.3); ctx.stroke();
+        }
+        break;
+      }
+      case 'soak_spring': {
+        // Water pool rises around the capy
+        const waterLevel = 30 * s * Math.min(1, t * 2);
+        const waterAlpha = t < 0.8 ? 1 : (1 - t) * 5;
+        ctx.globalAlpha = alpha * waterAlpha * 0.6;
+        ctx.fillStyle = '#4488cc';
+        ctx.beginPath();
+        ctx.ellipse(0, 30*s, 70*s, waterLevel, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = '#55aadd';
+        ctx.beginPath();
+        ctx.ellipse(0, 30*s - 3*s, 65*s, waterLevel * 0.8, 0, 0, Math.PI*2);
+        ctx.fill();
+        // Steam wisps
+        ctx.globalAlpha = alpha * waterAlpha * 0.5;
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2*s;
+        for (let i = 0; i < 4; i++) {
+          const sx = (i - 1.5) * 25 * s;
+          const steamT = (a.elapsed * 2 + i) % 3;
+          ctx.beginPath();
+          ctx.moveTo(sx, -10*s);
+          ctx.quadraticCurveTo(sx + Math.sin(steamT)*8*s, -30*s, sx + Math.sin(steamT+1)*5*s, -50*s);
+          ctx.stroke();
+        }
+        // Blissful eyes
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 2*s;
+        ctx.beginPath(); ctx.arc(-14*s, -42*s, 4*s, 0.3, Math.PI-0.3); ctx.stroke();
+        ctx.beginPath(); ctx.arc(14*s, -42*s, 4*s, 0.3, Math.PI-0.3); ctx.stroke();
+        break;
+      }
+      case 'golden_glow': {
+        // Pulsing gold aura
+        const r = 80 * s * (0.8 + Math.sin(a.elapsed * 4) * 0.2);
+        const grd = ctx.createRadialGradient(0, 0, 10*s, 0, 0, r);
+        grd.addColorStop(0, `rgba(255,215,0,${0.25 * alpha})`);
+        grd.addColorStop(0.6, `rgba(255,180,0,${0.1 * alpha})`);
+        grd.addColorStop(1, 'rgba(255,150,0,0)');
+        ctx.fillStyle = grd;
+        ctx.fillRect(-r, -r, r*2, r*2);
+        // Floating sparkles
+        for (let i = 0; i < 6; i++) {
+          const ang = a.elapsed * 1.5 + i * Math.PI / 3;
+          const sr = (40 + i * 8) * s;
+          const sx = Math.cos(ang) * sr;
+          const sy = Math.sin(ang) * sr * 0.6;
+          ctx.fillStyle = `rgba(255,255,200,${0.7 * alpha})`;
+          ctx.save(); ctx.translate(sx, sy); ctx.rotate(ang);
+          ctx.fillRect(-2*s, -5*s, 4*s, 10*s);
+          ctx.fillRect(-5*s, -2*s, 10*s, 4*s);
+          ctx.restore();
+        }
+        break;
+      }
+      case 'portal_flash': {
+        // Swirling portal behind capy
+        for (let r = 60*s; r > 5*s; r -= 8*s) {
+          ctx.fillStyle = `hsla(${270 + r + a.elapsed*80}, 60%, ${35 + r*0.3}%, ${0.3 * alpha})`;
+          ctx.beginPath(); ctx.arc(0, -10*s, r, 0, Math.PI*2); ctx.fill();
+        }
+        break;
+      }
+      case 'crown_sparkle': {
+        // Rainbow burst from above
+        for (let i = 0; i < 8; i++) {
+          const ang = (i/8) * Math.PI * 2 + a.elapsed * 2;
+          const r = 50 * s * t;
+          ctx.strokeStyle = `hsla(${i*45 + a.elapsed*60}, 80%, 65%, ${0.6 * alpha})`;
+          ctx.lineWidth = 3*s;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(ang)*10*s, -60*s + Math.sin(ang)*10*s);
+          ctx.lineTo(Math.cos(ang)*r, -60*s + Math.sin(ang)*r*0.5);
+          ctx.stroke();
+        }
+        break;
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+// UPGRADE ICONS — canvas-drawn mini illustrations
+// ============================================================
+function drawUpgradeIcon(canvas, type, idx) {
+  canvas.width = 44; canvas.height = 44;
+  const ctx = canvas.getContext('2d');
+  const s = 44;
+
+  // Background gradient per type
+  const bgColors = {
+    gen: ['#1a2810','#0e1a08','#142008','#0a1820','#1a1408','#18100a','#1a1800','#0a0820','#180818'],
+    click: ['#0a1828','#0a1828','#0a1828','#0a1828','#0a1828','#10082a'],
+  };
+  const bgList = type === 'gen' ? bgColors.gen : bgColors.click;
+  ctx.fillStyle = bgList[idx] || '#1a0e04';
+  ctx.fillRect(0, 0, s, s);
+
+  if (type === 'gen') {
+    switch(idx) {
+      case 0: // Baby Capy — tiny capybara
+        ctx.fillStyle = '#6b4226';
+        ctx.beginPath(); ctx.ellipse(22, 28, 12, 9, 0, 0, Math.PI * 2); ctx.fill(); // body
+        ctx.fillStyle = '#8B5E3C';
+        ctx.beginPath(); ctx.ellipse(22, 22, 8, 6, 0, 0, Math.PI * 2); ctx.fill(); // head
+        ctx.fillStyle = '#1a1a1a';
+        ctx.beginPath(); ctx.arc(19, 20, 1.5, 0, Math.PI * 2); ctx.fill(); // eye
+        ctx.beginPath(); ctx.arc(25, 20, 1.5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#4a2a15';
+        ctx.beginPath(); ctx.ellipse(22, 24, 2, 1.3, 0, 0, Math.PI * 2); ctx.fill(); // nose
+        // tiny paw prints
+        ctx.fillStyle = 'rgba(139,94,60,0.3)';
+        ctx.beginPath(); ctx.arc(8, 12, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(36, 38, 2, 0, Math.PI * 2); ctx.fill();
+        break;
+      case 1: // Duck Friend — duck with capybara
+        ctx.fillStyle = '#8B5E3C';
+        ctx.beginPath(); ctx.ellipse(28, 30, 10, 8, 0, 0, Math.PI * 2); ctx.fill(); // capy body
+        ctx.fillStyle = '#ffdd44';
+        ctx.beginPath(); ctx.ellipse(12, 26, 7, 6, 0, 0, Math.PI * 2); ctx.fill(); // duck body
+        ctx.fillStyle = '#ffee66';
+        ctx.beginPath(); ctx.arc(12, 20, 5, 0, Math.PI * 2); ctx.fill(); // duck head
+        ctx.fillStyle = '#ff8800';
+        ctx.beginPath(); ctx.moveTo(7, 20); ctx.lineTo(3, 19); ctx.lineTo(7, 22); ctx.fill(); // beak
+        ctx.fillStyle = '#1a1a1a';
+        ctx.beginPath(); ctx.arc(10, 19, 1, 0, Math.PI * 2); ctx.fill(); // duck eye
+        // water ripples
+        ctx.strokeStyle = 'rgba(100,180,255,0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(20, 38, 14, -0.4, Math.PI + 0.4); ctx.stroke();
+        break;
+      case 2: // Orange Grove — orange tree
+        ctx.fillStyle = '#5a3a20';
+        ctx.fillRect(19, 22, 6, 18); // trunk
+        ctx.fillStyle = '#2a6a20';
+        ctx.beginPath(); ctx.arc(22, 16, 14, 0, Math.PI * 2); ctx.fill(); // canopy
+        ctx.fillStyle = '#3a8a30';
+        ctx.beginPath(); ctx.arc(18, 12, 8, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(28, 14, 7, 0, Math.PI * 2); ctx.fill();
+        // oranges
+        ctx.fillStyle = '#ff8800';
+        ctx.beginPath(); ctx.arc(14, 18, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(26, 10, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(30, 20, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ffaa00';
+        ctx.beginPath(); ctx.arc(20, 8, 2.5, 0, Math.PI * 2); ctx.fill();
+        break;
+      case 3: // Hot Spring — steamy pool
+        ctx.fillStyle = '#4488bb';
+        ctx.beginPath(); ctx.ellipse(22, 32, 18, 10, 0, 0, Math.PI * 2); ctx.fill(); // pool
+        ctx.fillStyle = '#55aadd';
+        ctx.beginPath(); ctx.ellipse(22, 30, 15, 7, 0, 0, Math.PI * 2); ctx.fill(); // water surface
+        // capy in water
+        ctx.fillStyle = '#8B5E3C';
+        ctx.beginPath(); ctx.ellipse(22, 26, 7, 5, 0, 0, Math.PI * 2); ctx.fill(); // head poking out
+        ctx.fillStyle = '#1a1a1a';
+        ctx.beginPath(); ctx.arc(19, 24, 1.2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(25, 24, 1.2, 0, Math.PI * 2); ctx.fill();
+        // steam wisps
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < 3; i++) {
+          const sx = 12 + i * 10;
+          ctx.beginPath();
+          ctx.moveTo(sx, 18); ctx.quadraticCurveTo(sx - 3, 12, sx, 6);
+          ctx.stroke();
+        }
+        break;
+      case 4: // Capy Herd — multiple capybaras
+        for (let i = 0; i < 5; i++) {
+          const cx = 8 + (i % 3) * 12;
+          const cy = i < 3 ? 18 : 32;
+          ctx.fillStyle = i % 2 ? '#7a4f30' : '#8B5E3C';
+          ctx.beginPath(); ctx.ellipse(cx, cy, 7, 5, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = i % 2 ? '#6b4226' : '#8B5E3C';
+          ctx.beginPath(); ctx.arc(cx, cy - 5, 4, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#1a1a1a';
+          ctx.beginPath(); ctx.arc(cx - 1.5, cy - 6, 0.8, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(cx + 1.5, cy - 6, 0.8, 0, Math.PI * 2); ctx.fill();
+        }
+        break;
+      case 5: // Capy Resort — palm tree + pool + umbrella
+        // sky
+        ctx.fillStyle = '#1a4a6a';
+        ctx.fillRect(0, 0, s, 24);
+        // sand
+        ctx.fillStyle = '#c4a050';
+        ctx.fillRect(0, 24, s, 20);
+        // pool
+        ctx.fillStyle = '#44aadd';
+        ctx.beginPath(); ctx.ellipse(28, 32, 12, 6, 0, 0, Math.PI * 2); ctx.fill();
+        // palm tree
+        ctx.fillStyle = '#6b4226';
+        ctx.fillRect(7, 10, 3, 24);
+        ctx.fillStyle = '#2a8a20';
+        ctx.beginPath(); ctx.moveTo(8, 10); ctx.quadraticCurveTo(-2, 6, -4, 14); ctx.quadraticCurveTo(2, 8, 8, 10); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(9, 10); ctx.quadraticCurveTo(20, 4, 22, 12); ctx.quadraticCurveTo(16, 7, 9, 10); ctx.fill();
+        // umbrella
+        ctx.fillStyle = '#dd4444';
+        ctx.beginPath(); ctx.arc(30, 24, 8, Math.PI, 0); ctx.fill();
+        ctx.fillStyle = '#bb3333';
+        ctx.fillRect(29.5, 24, 1, 10);
+        break;
+      case 6: // Golden Capy — shining golden capybara
+        // glow
+        const grd = ctx.createRadialGradient(22, 24, 2, 22, 24, 20);
+        grd.addColorStop(0, 'rgba(255,215,0,0.3)');
+        grd.addColorStop(1, 'rgba(255,215,0,0)');
+        ctx.fillStyle = grd;
+        ctx.fillRect(0, 0, s, s);
+        // golden body
+        ctx.fillStyle = '#ffd700';
+        ctx.beginPath(); ctx.ellipse(22, 28, 13, 10, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ffea00';
+        ctx.beginPath(); ctx.ellipse(22, 20, 9, 7, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#332200';
+        ctx.beginPath(); ctx.arc(18, 18, 1.5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(26, 18, 1.5, 0, Math.PI * 2); ctx.fill();
+        // crown
+        ctx.fillStyle = '#ff4444';
+        ctx.beginPath();
+        ctx.moveTo(14, 14); ctx.lineTo(15, 8); ctx.lineTo(18, 12); ctx.lineTo(22, 6);
+        ctx.lineTo(26, 12); ctx.lineTo(29, 8); ctx.lineTo(30, 14); ctx.closePath();
+        ctx.fill();
+        // sparkles
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(8, 10, 1.5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(36, 16, 1, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(6, 34, 1.2, 0, Math.PI * 2); ctx.fill();
+        break;
+      case 7: // Capy Dimension — portal with capybara
+        // swirling portal
+        for (let r = 16; r > 2; r -= 2) {
+          ctx.fillStyle = `hsl(${270 + r * 5}, 70%, ${30 + r * 2}%)`;
+          ctx.beginPath(); ctx.arc(22, 22, r, 0, Math.PI * 2); ctx.fill();
+        }
+        // stars
+        ctx.fillStyle = '#fff';
+        for (let i = 0; i < 8; i++) {
+          const ax = 4 + Math.sin(i * 1.7) * 18 + 18;
+          const ay = 4 + Math.cos(i * 2.3) * 16 + 18;
+          ctx.beginPath(); ctx.arc(ax, ay, 0.8, 0, Math.PI * 2); ctx.fill();
+        }
+        // tiny capy silhouette in center
+        ctx.fillStyle = '#1a0a00';
+        ctx.beginPath(); ctx.ellipse(22, 24, 5, 4, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(22, 20, 3.5, 0, Math.PI * 2); ctx.fill();
+        break;
+      case 8: // Capy Singularity — cosmic explosion
+        // radial burst
+        for (let i = 0; i < 12; i++) {
+          const a = (i / 12) * Math.PI * 2;
+          ctx.strokeStyle = `hsl(${i * 30}, 80%, 60%)`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(22 + Math.cos(a) * 4, 22 + Math.sin(a) * 4);
+          ctx.lineTo(22 + Math.cos(a) * 20, 22 + Math.sin(a) * 20);
+          ctx.stroke();
+        }
+        // bright center
+        const sg = ctx.createRadialGradient(22, 22, 0, 22, 22, 10);
+        sg.addColorStop(0, '#ffffff');
+        sg.addColorStop(0.4, '#ffd700');
+        sg.addColorStop(1, 'transparent');
+        ctx.fillStyle = sg;
+        ctx.fillRect(0, 0, s, s);
+        // tiny capy in center
+        ctx.fillStyle = '#8B5E3C';
+        ctx.beginPath(); ctx.ellipse(22, 24, 4, 3, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(22, 21, 2.5, 0, Math.PI * 2); ctx.fill();
+        break;
+    }
+  } else { // click upgrades
+    switch(idx) {
+      case 0: // Gentle Pat — hand above capy
+        ctx.fillStyle = '#8B5E3C';
+        ctx.beginPath(); ctx.ellipse(22, 32, 10, 7, 0, 0, Math.PI * 2); ctx.fill();
+        // hand
+        ctx.fillStyle = '#ddb896';
+        ctx.beginPath(); ctx.ellipse(22, 16, 8, 5, -0.2, 0, Math.PI * 2); ctx.fill();
+        // fingers
+        for (let i = 0; i < 4; i++) {
+          ctx.beginPath(); ctx.ellipse(16 + i * 4, 12, 2, 4, 0, 0, Math.PI * 2); ctx.fill();
+        }
+        // motion lines
+        ctx.strokeStyle = 'rgba(255,255,200,0.4)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(10, 20); ctx.lineTo(6, 18); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(34, 20); ctx.lineTo(38, 18); ctx.stroke();
+        break;
+      case 1: // Belly Rub — heart + capy on back
+        ctx.fillStyle = '#8B5E3C';
+        ctx.beginPath(); ctx.ellipse(22, 30, 12, 7, 0, 0, Math.PI * 2); ctx.fill();
+        // legs up
+        ctx.fillStyle = '#6b4226';
+        ctx.beginPath(); ctx.ellipse(16, 24, 3, 5, -0.3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(28, 24, 3, 5, 0.3, 0, Math.PI * 2); ctx.fill();
+        // heart
+        ctx.fillStyle = '#ff6688';
+        ctx.beginPath();
+        ctx.moveTo(22, 14); ctx.bezierCurveTo(22, 10, 16, 6, 14, 10);
+        ctx.bezierCurveTo(12, 14, 22, 20, 22, 20);
+        ctx.bezierCurveTo(22, 20, 32, 14, 30, 10);
+        ctx.bezierCurveTo(28, 6, 22, 10, 22, 14);
+        ctx.fill();
+        break;
+      case 2: // Head Scratch — sparkles around head
+        ctx.fillStyle = '#8B5E3C';
+        ctx.beginPath(); ctx.ellipse(22, 28, 10, 8, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(22, 20, 7, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#1a1a1a';
+        ctx.beginPath(); ctx.arc(19, 18, 1.2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(25, 18, 1.2, 0, Math.PI * 2); ctx.fill();
+        // closed happy eyes (arcs)
+        ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(19, 18, 2, 0.3, Math.PI - 0.3); ctx.stroke();
+        ctx.beginPath(); ctx.arc(25, 18, 2, 0.3, Math.PI - 0.3); ctx.stroke();
+        // sparkles
+        ctx.fillStyle = '#ffee44';
+        const sparkPos = [[8,12],[36,8],[6,32],[38,28],[22,6]];
+        for (const [sx, sy] of sparkPos) {
+          ctx.save(); ctx.translate(sx, sy); ctx.rotate(0.4);
+          ctx.fillRect(-1, -4, 2, 8); ctx.fillRect(-4, -1, 8, 2);
+          ctx.restore();
+        }
+        break;
+      case 3: // Full Massage — spa scene
+        // massage table
+        ctx.fillStyle = '#d4c4a0';
+        ctx.fillRect(6, 26, 32, 6);
+        ctx.fillStyle = '#aa9060';
+        ctx.fillRect(8, 32, 4, 8);
+        ctx.fillRect(32, 32, 4, 8);
+        // capy on table
+        ctx.fillStyle = '#8B5E3C';
+        ctx.beginPath(); ctx.ellipse(22, 24, 12, 6, 0, 0, Math.PI * 2); ctx.fill();
+        // cucumber slices on eyes
+        ctx.fillStyle = '#66bb44';
+        ctx.beginPath(); ctx.arc(18, 20, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(26, 20, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#88dd66';
+        ctx.beginPath(); ctx.arc(18, 20, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(26, 20, 2, 0, Math.PI * 2); ctx.fill();
+        // steam
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(14, 16); ctx.quadraticCurveTo(12, 10, 14, 4); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(30, 16); ctx.quadraticCurveTo(32, 10, 30, 4); ctx.stroke();
+        break;
+      case 4: // Capy Whisperer — speech bubble with capy
+        ctx.fillStyle = '#8B5E3C';
+        ctx.beginPath(); ctx.ellipse(14, 30, 8, 6, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(14, 24, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#1a1a1a';
+        ctx.beginPath(); ctx.arc(12, 23, 1, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(16, 23, 1, 0, Math.PI * 2); ctx.fill();
+        // speech bubble
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.roundRect(22, 6, 18, 14, 4); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(24, 20); ctx.lineTo(20, 24); ctx.lineTo(28, 20); ctx.fill();
+        // musical notes
+        ctx.fillStyle = '#ff6688';
+        ctx.font = '10px Segoe UI';
+        ctx.fillText('\u266A', 26, 16);
+        ctx.fillText('\u266B', 33, 14);
+        break;
+      case 5: // Transcendence — floating enlightened capy
+        // aura rings
+        for (let r = 18; r > 4; r -= 4) {
+          ctx.strokeStyle = `hsla(${40 + r * 3}, 80%, 60%, ${0.15 + (18 - r) * 0.03})`;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(22, 22, r, 0, Math.PI * 2); ctx.stroke();
+        }
+        // floating capy
+        ctx.fillStyle = '#c0a060';
+        ctx.beginPath(); ctx.ellipse(22, 24, 8, 6, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(22, 18, 5, 0, Math.PI * 2); ctx.fill();
+        // closed serene eyes
+        ctx.strokeStyle = '#4a3020'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(20, 17, 1.5, 0.2, Math.PI - 0.2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(24, 17, 1.5, 0.2, Math.PI - 0.2); ctx.stroke();
+        // halo
+        ctx.strokeStyle = '#ffd700'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(22, 12, 7, 2.5, 0, 0, Math.PI * 2); ctx.stroke();
+        break;
+    }
+  }
+}
+
+// ============================================================
+// GAME
+// ============================================================
+class Game {
+  constructor() {
+    this.canvas = document.getElementById('capy-canvas');
+    this.ctx = this.canvas.getContext('2d');
+    this.particles = [];
+    this.companions = [];
+    this.interactions = new InteractionManager();
+    this.bobPhase = 0;
+    this.clickScale = 1;
+    this.clickScaleTarget = 1;
+
+    // State
+    this.points = 0;
+    this.totalPoints = 0; // lifetime (for prestige)
+    this.allTimePoints = 0; // across all prestiges
+    this.prestigeCount = 0;
+    this.prestigeMult = 1;
+    this.generators = UPGRADES.map(() => 0);
+    this.clickUpgrades = CLICK_UPGRADES.map(() => false);
+    this.milestones = new Set();
+
+    this.load();
+    this.resize();
+    this.buildShop();
+    window.addEventListener('resize', () => this.resize());
+
+    // Click/tap
+    this.canvas.addEventListener('click', e => this.handleClick(e));
+    this.canvas.addEventListener('touchstart', e => {
+      e.preventDefault();
+      // Synthesize click from first touch
+      const touch = e.touches[0];
+      const rect = this.canvas.getBoundingClientRect();
+      this.handleClick({
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        target: this.canvas,
+      });
+    }, { passive: false });
+
+    // Auto-save every 30s
+    setInterval(() => this.save(), 30000);
+
+    this.lastTime = performance.now();
+    this.loop();
+  }
+
+  resize() {
+    const area = document.getElementById('click-area');
+    const w = area.clientWidth;
+    const h = area.clientHeight;
+    const dpr = 1; // Keep 1:1 for crisp rendering
+    this.canvas.width = w * dpr;
+    this.canvas.height = h * dpr;
+    this.canvas.style.width = w + 'px';
+    this.canvas.style.height = h + 'px';
+    this.capyScale = Math.min(w / 250, h / 250, 2.5);
+  }
+
+  handleClick(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (this.canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (this.canvas.height / rect.height);
+
+    const ppc = this.getPointsPerClick();
+    this.points += ppc;
+    this.totalPoints += ppc;
+    this.allTimePoints += ppc;
+
+    // Click animation — bigger bounce with more upgrades
+    const clickLevel = this.clickUpgrades.filter(Boolean).length;
+    this.clickScale = 1.1 + clickLevel * 0.02;
+
+    // Point particle — grows with click power
+    const fontSize = 18 + Math.min(clickLevel * 3, 18);
+    this.particles.push(new Particle(x, y - 20, '+' + fmt(ppc), '#ffd700', fontSize));
+
+    // Base heart/sparkle particles
+    const count = Math.min(2 + clickLevel, 8);
+    for (let i = 0; i < count; i++) {
+      this.particles.push(new HeartParticle(x + (Math.random() - 0.5) * 40, y + (Math.random() - 0.5) * 40));
+    }
+
+    // Click upgrade visual effects — each owned upgrade adds its layer
+    if (this.clickUpgrades[0]) { // Gentle Pat — hand icon + ripple
+      this.particles.push(new ClickEffect(x, y, 'ripple'));
+      this.particles.push(new ClickEffect(x + 20, y - 30, 'icon_hand'));
+    }
+    if (this.clickUpgrades[1]) { // Belly Rub — hearts burst
+      for (let i = 0; i < 3; i++) {
+        this.particles.push(new ClickEffect(
+          x + (Math.random()-0.5)*60, y + (Math.random()-0.5)*60, 'heart'
+        ));
+      }
+    }
+    if (this.clickUpgrades[2]) { // Head Scratch — sparkle ring + scratch lines
+      this.particles.push(new ClickEffect(x, y, 'sparkle_ring'));
+      this.particles.push(new ClickEffect(x - 15, y - 20, 'icon_scratch'));
+    }
+    if (this.clickUpgrades[3]) { // Full Massage — soothing waves
+      this.particles.push(new ClickEffect(x, y, 'wave'));
+    }
+    if (this.clickUpgrades[4]) { // Capy Whisperer — musical notes
+      for (let i = 0; i < 3; i++) {
+        this.particles.push(new ClickEffect(
+          x + (Math.random()-0.5)*80, y - Math.random()*30, 'note'
+        ));
+      }
+    }
+    if (this.clickUpgrades[5]) { // Transcendence — golden flash + halo
+      this.particles.push(new ClickEffect(x, y, 'transcend'));
+    }
+
+    SFX.click();
+    this.checkMilestones();
+  }
+
+  getPointsPerClick() {
+    let base = 1;
+    for (let i = 0; i < CLICK_UPGRADES.length; i++) {
+      if (this.clickUpgrades[i]) base += CLICK_UPGRADES[i].bonus;
+    }
+    return Math.floor(base * this.prestigeMult);
+  }
+
+  getPointsPerSecond() {
+    let total = 0;
+    for (let i = 0; i < UPGRADES.length; i++) {
+      total += UPGRADES[i].baseRate * this.generators[i];
+    }
+    return total * this.prestigeMult;
+  }
+
+  getUpgradeCost(idx) {
+    const u = UPGRADES[idx];
+    return Math.floor(u.baseCost * Math.pow(u.costMult, this.generators[idx]));
+  }
+
+  buyGenerator(idx) {
+    const cost = this.getUpgradeCost(idx);
+    if (this.points < cost) return;
+    this.points -= cost;
+    this.generators[idx]++;
+    SFX.buy();
+    this.updateShop();
+  }
+
+  buyClickUpgrade(idx) {
+    if (this.clickUpgrades[idx]) return;
+    if (this.points < CLICK_UPGRADES[idx].cost) return;
+    this.points -= CLICK_UPGRADES[idx].cost;
+    this.clickUpgrades[idx] = true;
+    SFX.buy();
+    this.updateShop();
+  }
+
+  prestige() {
+    if (this.totalPoints < 1e6) return;
+    const bonus = Math.floor(Math.sqrt(this.totalPoints / 1e6) * 100) / 100;
+    this.prestigeCount++;
+    this.prestigeMult = 1 + bonus;
+    this.points = 0;
+    this.totalPoints = 0;
+    this.generators = UPGRADES.map(() => 0);
+    this.clickUpgrades = CLICK_UPGRADES.map(() => false);
+    this.companions = [];
+    this.interactions = new InteractionManager();
+    SFX.prestige();
+    this.save();
+    this.updateShop();
+  }
+
+  checkMilestones() {
+    const thresholds = [100, 1000, 10000, 100000, 1e6, 1e7, 1e8, 1e9, 1e12];
+    for (const t of thresholds) {
+      if (this.allTimePoints >= t && !this.milestones.has(t)) {
+        this.milestones.add(t);
+        SFX.milestone();
+        // Big particle burst in the center
+        const cx = this.canvas.width / 2;
+        const cy = this.canvas.height / 2;
+        this.particles.push(new Particle(cx, cy - 80, fmt(t) + ' points!', '#ff88ff', 28));
+        for (let i = 0; i < 12; i++) {
+          this.particles.push(new HeartParticle(cx, cy));
+        }
+      }
+    }
+  }
+
+  buildShop() {
+    const list = document.getElementById('upgrade-list');
+    list.innerHTML = '';
+
+    // Click upgrades section
+    const clickHeader = document.createElement('div');
+    clickHeader.className = 'shop-header';
+    clickHeader.textContent = 'Click Power';
+    clickHeader.style.fontSize = '14px';
+    clickHeader.style.color = '#88ccff';
+    list.appendChild(clickHeader);
+
+    for (let i = 0; i < CLICK_UPGRADES.length; i++) {
+      const u = CLICK_UPGRADES[i];
+      const btn = document.createElement('button');
+      btn.className = 'upgrade-btn';
+      btn.id = 'click-upgrade-' + i;
+      btn.onclick = () => this.buyClickUpgrade(i);
+      const iconCanvas = document.createElement('canvas');
+      iconCanvas.className = 'icon';
+      drawUpgradeIcon(iconCanvas, 'click', i);
+      btn.appendChild(iconCanvas);
+      const info = document.createElement('div');
+      info.className = 'info';
+      info.innerHTML = `<div class="name">${u.name}</div><div class="desc">${u.desc}</div><div class="cost-line">${fmt(u.cost)} points</div>`;
+      btn.appendChild(info);
+      const count = document.createElement('span');
+      count.className = 'count';
+      count.id = 'click-check-' + i;
+      btn.appendChild(count);
+      list.appendChild(btn);
+    }
+
+    // Generators section
+    const genHeader = document.createElement('div');
+    genHeader.className = 'shop-header';
+    genHeader.textContent = 'Generators';
+    genHeader.style.fontSize = '14px';
+    genHeader.style.color = '#8fdf8f';
+    list.appendChild(genHeader);
+
+    for (let i = 0; i < UPGRADES.length; i++) {
+      const u = UPGRADES[i];
+      const btn = document.createElement('button');
+      btn.className = 'upgrade-btn';
+      btn.id = 'gen-upgrade-' + i;
+      btn.onclick = () => this.buyGenerator(i);
+      const iconCanvas = document.createElement('canvas');
+      iconCanvas.className = 'icon';
+      drawUpgradeIcon(iconCanvas, 'gen', i);
+      btn.appendChild(iconCanvas);
+      const info = document.createElement('div');
+      info.className = 'info';
+      info.innerHTML = `<div class="name">${u.name}</div><div class="desc">${u.desc}</div><div class="cost-line" id="gen-cost-${i}"></div>`;
+      btn.appendChild(info);
+      const count = document.createElement('span');
+      count.className = 'count';
+      count.id = 'gen-count-' + i;
+      count.textContent = '0';
+      btn.appendChild(count);
+      list.appendChild(btn);
+    }
+
+    this.updateShop();
+  }
+
+  updateShop() {
+    // Click upgrades
+    for (let i = 0; i < CLICK_UPGRADES.length; i++) {
+      const btn = document.getElementById('click-upgrade-' + i);
+      const check = document.getElementById('click-check-' + i);
+      if (this.clickUpgrades[i]) {
+        btn.classList.add('locked');
+        check.textContent = '\u2714';
+        check.style.color = '#8fdf8f';
+      } else {
+        btn.classList.toggle('locked', this.points < CLICK_UPGRADES[i].cost);
+        check.textContent = '';
+      }
+    }
+
+    // Generators
+    for (let i = 0; i < UPGRADES.length; i++) {
+      const btn = document.getElementById('gen-upgrade-' + i);
+      const cost = this.getUpgradeCost(i);
+      document.getElementById('gen-cost-' + i).textContent = fmt(cost) + ' points (+' + fmtRate(UPGRADES[i].baseRate * this.prestigeMult) + '/s)';
+      document.getElementById('gen-count-' + i).textContent = this.generators[i];
+      btn.classList.toggle('locked', this.points < cost);
+    }
+
+    // Prestige
+    const prestigeBtn = document.getElementById('prestige-btn');
+    const canPrestige = this.totalPoints >= 1e6;
+    prestigeBtn.disabled = !canPrestige;
+    if (canPrestige) {
+      const nextMult = 1 + Math.floor(Math.sqrt(this.totalPoints / 1e6) * 100) / 100;
+      prestigeBtn.textContent = `Prestige (x${nextMult.toFixed(2)} multiplier)`;
+    } else {
+      prestigeBtn.textContent = `Prestige (need ${fmt(1e6)} points)`;
+    }
+    document.getElementById('prestige-info').textContent =
+      `Prestige count: ${this.prestigeCount} | Current multiplier: x${this.prestigeMult.toFixed(2)}`;
+  }
+
+  updateUI() {
+    document.getElementById('points-display').textContent = fmt(this.points);
+    document.getElementById('pps-display').textContent = fmtRate(this.getPointsPerSecond());
+    document.getElementById('ppc-display').textContent = fmt(this.getPointsPerClick());
+  }
+
+  update(dt) {
+    // Generate points
+    const pps = this.getPointsPerSecond();
+    if (pps > 0) {
+      const earned = pps * dt;
+      this.points += earned;
+      this.totalPoints += earned;
+      this.allTimePoints += earned;
+    }
+
+    // Click scale animation
+    this.clickScale += (1 - this.clickScale) * Math.min(1, dt * 12);
+
+    // Bob
+    this.bobPhase += dt * 2;
+
+    // Particles
+    for (const p of this.particles) p.update(dt);
+    this.particles = this.particles.filter(p => p.life > 0);
+
+    // Companions — sync with generators
+    const cx = this.canvas.width / 2;
+    const cy = this.canvas.height / 2 + 10;
+    const babyCount = Math.min(this.generators[0], 4); // Baby Capys
+    const duckCount = Math.min(this.generators[1], 3); // Duck Friends
+    const currentBabies = this.companions.filter(c => c.type === 'baby_capy').length;
+    const currentDucks = this.companions.filter(c => c.type === 'duck').length;
+    if (currentBabies < babyCount) {
+      this.companions.push(new Companion('baby_capy', cx, cy, this.capyScale));
+    }
+    if (currentDucks < duckCount) {
+      this.companions.push(new Companion('duck', cx, cy, this.capyScale));
+    }
+    // Remove excess on prestige
+    if (currentBabies > babyCount) {
+      const idx = this.companions.findIndex(c => c.type === 'baby_capy');
+      if (idx >= 0) this.companions.splice(idx, 1);
+    }
+    if (currentDucks > duckCount) {
+      const idx = this.companions.findIndex(c => c.type === 'duck');
+      if (idx >= 0) this.companions.splice(idx, 1);
+    }
+    for (const c of this.companions) c.update(dt, cx, cy, this.capyScale);
+
+    // Timed interactions
+    this.interactions.update(dt, this.generators);
+  }
+
+  draw() {
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Companions behind capybara
+    const cx = w / 2;
+    const cy = h / 2 + 10;
+    for (const c of this.companions) c.draw(ctx);
+
+    // Draw capybara
+    const s = this.capyScale * this.clickScale;
+    const bobY = Math.sin(this.bobPhase) * 3 * s;
+    drawCapybara(ctx, cx, cy, s, this.bobPhase);
+
+    // Timed interactions (drawn over capybara)
+    this.interactions.drawOverCapy(ctx, cx, cy, s, bobY);
+
+    // Particles (in front of everything)
+    for (const p of this.particles) p.draw(ctx);
+
+    // Points per second indicator (subtle rain of numbers when earning)
+    const pps = this.getPointsPerSecond();
+    if (pps > 0 && Math.random() < Math.min(0.05, pps / 10000)) {
+      const rx = cx + (Math.random() - 0.5) * 120 * this.capyScale;
+      const ry = cy - 80 * this.capyScale;
+      this.particles.push(new Particle(rx, ry, '+' + fmtRate(pps * 0.1), '#8fdf8f', 12));
+    }
+  }
+
+  // ============================================================
+  // SAVE / LOAD
+  // ============================================================
+  save() {
+    const data = {
+      points: this.points,
+      totalPoints: this.totalPoints,
+      allTimePoints: this.allTimePoints,
+      prestigeCount: this.prestigeCount,
+      prestigeMult: this.prestigeMult,
+      generators: [...this.generators],
+      clickUpgrades: [...this.clickUpgrades],
+      milestones: [...this.milestones],
+      timestamp: Date.now(),
+    };
+    data._k = _checksum(data);
+    try { localStorage.setItem('capybara-clicker-save', JSON.stringify(data)); } catch(e) {}
+  }
+
+  load() {
+    try {
+      const raw = localStorage.getItem('capybara-clicker-save');
+      if (!raw) return;
+      const data = JSON.parse(raw);
+
+      // Verify checksum
+      const savedCheck = data._k;
+      delete data._k;
+      if (savedCheck !== _checksum(data)) {
+        console.warn('Save data integrity check failed. Starting fresh.');
+        localStorage.removeItem('capybara-clicker-save');
+        return;
+      }
+
+      // Validate state consistency
+      if (!_validateState(data)) {
+        console.warn('Save data validation failed. Starting fresh.');
+        localStorage.removeItem('capybara-clicker-save');
+        return;
+      }
+
+      this.points = data.points || 0;
+      this.totalPoints = data.totalPoints || 0;
+      this.allTimePoints = data.allTimePoints || 0;
+      this.prestigeCount = data.prestigeCount || 0;
+      this.prestigeMult = data.prestigeMult || 1;
+      this.generators = data.generators || UPGRADES.map(() => 0);
+      this.clickUpgrades = data.clickUpgrades || CLICK_UPGRADES.map(() => false);
+      this.milestones = new Set(data.milestones || []);
+
+      // Offline earnings (cap at 8 hours)
+      if (data.timestamp) {
+        const elapsed = Math.min((Date.now() - data.timestamp) / 1000, 8 * 3600);
+        const pps = this.getPointsPerSecond();
+        if (pps > 0 && elapsed > 5) {
+          const earned = pps * elapsed * 0.5; // 50% efficiency offline
+          this.points += earned;
+          this.totalPoints += earned;
+          this.allTimePoints += earned;
+        }
+      }
+    } catch(e) {
+      localStorage.removeItem('capybara-clicker-save');
+    }
+  }
+
+  // ============================================================
+  // LOOP
+  // ============================================================
+  loop() {
+    const now = performance.now();
+    const dt = Math.min((now - this.lastTime) / 1000, 0.1);
+    this.lastTime = now;
+
+    this.update(dt);
+    this.draw();
+    this.updateUI();
+
+    // Update shop less frequently (every ~500ms)
+    if (!this._shopTimer) this._shopTimer = 0;
+    this._shopTimer += dt;
+    if (this._shopTimer > 0.5) {
+      this._shopTimer = 0;
+      this.updateShop();
+      this.checkMilestones();
+    }
+
+    requestAnimationFrame(() => this.loop());
+  }
+}
+
+// ============================================================
+// BOOT
+// ============================================================
+const _g = new Game();
+
+// Wire prestige button (can't use inline onclick since game is scoped)
+document.getElementById('prestige-btn').onclick = function() { _g.prestige(); };
+})();
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px 'Segoe UI',Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px;">
+  <span id="vc-count">...</span> Capy Fans
+</div>
+<script>
+(function(){
+  var G='capybara-clicker',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+Here is my quality assessment:
+
+---
+
+**FORM: 2/5** — The torso reads as a rounded jar or barrel, not a human torso. The silhouette bulges outward symmetrically like a ceramic vessel. A human torso should have broader shoulders tapering slightly to a waist, with the belt cinching at a natural waistline. The cylinder shading is technically present (light on left, dark on right), but the underlying shape it describes is wrong — it describes a pot, not a body.
+
+**TEXTURE: 2/5** — The blue tunic surface is essentially a smooth gradient. There is no visible fabric texture — no weave pattern, no dithered noise, no drape modulation. The exercise description calls for "fabric texture via dithered zone transitions, multi-scale hash noise, drape modulation" and none of these are legible. The belt has slight tonal variation but reads as flat leather. Compared to the dragon eye references where every square pixel of scale surface has bump detail and micro-texture, this is barren.
+
+**TONAL RANGE: 3/5** — The blue tunic does span from near-white highlights (top-left shoulder area) to dark navy shadows (right side). The belt has its own range from tan to dark brown. This is adequate — the tonal sweep exists per-form. However, the transitions are smooth/banded rather than the rich zone-based rendering described in progress.txt. The specular highlights are small white dots that feel placed rather than earned by the lighting model.
+
+**FACE: N/A** — Torso-only exercise. The small head peek at the top shows skin tone and dark hair but is not being evaluated.
+
+**HAIR: N/A** — Not part of this exercise.
+
+**EDGES: 2/5** — Dark outlines exist at the silhouette boundary. The belt has top/bottom edges. But the critical edge PAIRS (dark crevice + bright ridge) that define where forms meet are absent or barely visible. The shoulder seams called for in the description are not apparent. The V-neck collar boundary is a faint dark triangle. The sleeve-to-body transition isn't defined. The dragon eye references show every scale boundary with a deliberate dark line + adjacent bright ridge — that level of edge craft is not present here.
+
+**COLOUR: 2/5** — The blue palette goes from light to dark blue but stays on a single hue axis — no visible warm/cool temperature shift (warm highlights shifting toward cyan-white, cool shadows shifting toward purple-navy). The belt is flat tan-to-brown. The exercise calls for "three materials: fabric, leather, skin" but they don't read as distinct materials through colour — they're just different-colored smooth gradients. Dragon eye references show rich hue shifting across each scale (red → orange in highlights, red → deep crimson in shadows).
+
+**CONSTRUCTION: 2/5** — The silhouette does not read as a human torso. It reads as a squat, wide-bottomed vessel or jar with a narrow neck. Key anatomical failures:
+- Too wide at the bottom, creating a pear/pot shape instead of a torso
+- No shoulder definition — the top rounds into the neck without any shoulder width
+- V-neck collar barely registers as a small dark notch
+- Belt buckle is a small square that doesn't read as a buckle
+- No shoulder seams visible
+- The overall proportions suggest a container, not a body
+
+**QUALITY: 2/5** — Dragon eye quality means: every form has its own complete lighting solution, surface texture breaks monotony, edges define boundaries with deliberate dark/bright pairs, materials are distinguishable by their rendering properties. This torso has basic cylinder shading and that's it. At the resolution available (64x64), there's plenty of pixel budget for zone-based rendering, dithered transitions, fabric texture, and edge detail — it's simply not being used. The arm exercise (iteration 3) demonstrated these techniques work at this scale. The torso has regressed to pre-training smooth gradients.
+
+**CRAFT: 2/5** — At 1x scale (visible in bottom-right), this reads as a small blue blob with a brown stripe. At 4x, the jar/barrel shape is obvious and would look out of place next to properly proportioned characters. Compare to the lvl5-3 characters (previous best): those have readable torsos with correct chibi proportions, visible clothing details, and identifiable silhouettes — and they're at half the resolution. This 64px torso has more pixels to work with but produces a less recognizable result.
+
+---
+
+**VERDICT: FAIL**
+
+**FEEDBACK:**
+1. **Shape is the #1 problem.** The silhouette must read as a human torso, not a jar. Wider at shoulders, narrower at waist, belt at natural waistline. Reference the profile function from the arm exercise — use cubic interpolation control points for shoulder → chest → waist → hip.
+2. **V-neck collar needs to be a visible feature.** At 64px, the V-neck should be 8-10px tall with clear skin showing through. Currently it's a tiny dark notch.
+3. **No fabric texture is present.** The progress notes document that multi-scale hash noise + sine drape modulation work for fabric. Apply them — the smooth gradient is a regression from the arm exercise.
+4. **Missing shoulder seams.** Two visible seam lines from collar to shoulder edge would define the garment's construction and break the barrel silhouette.
+5. **Edge pairs absent.** Every material boundary (collar, belt top, belt bottom, sleeve attachment) needs dark crevice + bright ridge. Currently they're single-tone lines.
+6. **No material differentiation.** Fabric, leather, and skin should render differently — different specular behavior, different texture frequency. Currently they're all smooth gradients in different colors.
+7. **Warm/cool hue shift missing.** The blue palette should shift toward warm (teal/cyan) in highlights and cool (purple/indigo) in shadows. The belt should shift from warm ochre to cool brown.

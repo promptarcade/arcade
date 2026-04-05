@@ -1,0 +1,2045 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Fruit Slash</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a1a; }
+canvas { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function() {
+'use strict';
+
+// ============================================================
+// SOUND
+// ============================================================
+const SFX = {
+  _ctx: null,
+  _get() {
+    if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (this._ctx.state === 'suspended') this._ctx.resume();
+    return this._ctx;
+  },
+  _tone(f, type, dur, vol) {
+    try {
+      const c = this._get(), o = c.createOscillator(), g = c.createGain();
+      o.type = type; o.frequency.value = f;
+      g.gain.setValueAtTime(vol, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
+      o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + dur);
+    } catch(e) {}
+  },
+  slice() { this._tone(600 + Math.random() * 400, 'sine', 0.08, 0.15); },
+  combo() { this._tone(800, 'sine', 0.05, 0.12); setTimeout(() => this._tone(1000, 'sine', 0.06, 0.1), 40); },
+  bomb() {
+    this._tone(100, 'square', 0.3, 0.2);
+    this._tone(80, 'sawtooth', 0.4, 0.15);
+  },
+  miss() { this._tone(200, 'sine', 0.15, 0.08); },
+  gameOver() {
+    this._tone(300, 'sine', 0.2, 0.12);
+    setTimeout(() => this._tone(200, 'sine', 0.3, 0.1), 150);
+    setTimeout(() => this._tone(100, 'sine', 0.5, 0.08), 300);
+  },
+};
+
+// ============================================================
+// SCORE SUBMISSION
+// ============================================================
+const _SU = 'https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+const _SK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(score) {
+  const initials = prompt('Score: ' + score + '! Enter your name (max 5 chars):');
+  if (!initials) return;
+  const name = initials.trim().slice(0, 5).toUpperCase();
+  if (!name) return;
+  let hash = '';
+  try {
+    const d = navigator.userAgent + screen.width + screen.height + new Date().getTimezoneOffset();
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(d));
+    hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('').slice(0,32);
+  } catch(e) {}
+  try {
+    await fetch(_SU + '/rest/v1/high_scores', {
+      method: 'POST',
+      headers: { 'apikey': _SK, 'Authorization': 'Bearer ' + _SK, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ game: 'fruit-slash', initials: name, score: score, player_hash: hash }),
+    });
+  } catch(e) {}
+}
+
+// ============================================================
+// CONFIG
+// ============================================================
+const FRUITS = [
+  { name: 'watermelon', r: 38, color: '#2ecc40', inner: '#ff4136', seeds: true },
+  { name: 'orange',     r: 30, color: '#ff851b', inner: '#ffdc00', seeds: false },
+  { name: 'apple',      r: 28, color: '#ff4136', inner: '#ffffaa', seeds: true },
+  { name: 'pineapple',  r: 32, color: '#ffdc00', inner: '#ffec80', seeds: false },
+  { name: 'kiwi',       r: 24, color: '#6b5b3a', inner: '#2ecc40', seeds: true },
+  { name: 'coconut',    r: 30, color: '#8b6f47', inner: '#fff', seeds: false },
+  { name: 'grape',      r: 20, color: '#b10dc9', inner: '#d4a5e8', seeds: false },
+  { name: 'peach',      r: 26, color: '#ffb3a7', inner: '#ffe0b2', seeds: true },
+];
+
+// ============================================================
+// SPRITE ENGINE (inlined from SpriteForge v2)
+// ============================================================
+function sf2_makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+function sf2_seededRNG(seed) {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function sf2_hexToRGB(hex) {
+  if (typeof hex !== 'string') return hex;
+  hex = hex.replace('#', '');
+  if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return {
+    r: parseInt(hex.slice(0,2), 16),
+    g: parseInt(hex.slice(2,4), 16),
+    b: parseInt(hex.slice(4,6), 16),
+  };
+}
+
+function sf2_rgbToHSL(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return { h: h * 360, s, l };
+}
+
+function sf2_hslToRGB(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  h /= 360;
+  let r, g, b;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+}
+
+function sf2_packRGBA(r, g, b, a) {
+  return ((a & 0xFF) << 24) | ((b & 0xFF) << 16) | ((g & 0xFF) << 8) | (r & 0xFF);
+}
+
+function sf2_unpackRGBA(v) {
+  return { r: v & 0xFF, g: (v >> 8) & 0xFF, b: (v >> 16) & 0xFF, a: (v >> 24) & 0xFF };
+}
+
+const ColorRamp = {
+  generate(baseHex) {
+    const rgb = sf2_hexToRGB(baseHex);
+    const hsl = sf2_rgbToHSL(rgb.r, rgb.g, rgb.b);
+    const deepShadow = sf2_hslToRGB(hsl.h + 20, Math.min(1, hsl.s * 0.80), Math.max(0.05, hsl.l * 0.45));
+    const shadow = sf2_hslToRGB(hsl.h + 10, Math.min(1, hsl.s * 0.90), Math.max(0.08, hsl.l * 0.70));
+    const base = rgb;
+    const highlight = sf2_hslToRGB(hsl.h - 15, Math.min(1, hsl.s * 0.85), Math.min(0.95, hsl.l * 1.30));
+    return [deepShadow, shadow, base, highlight];
+  },
+  generatePacked(baseHex) {
+    return ColorRamp.generate(baseHex).map(c => sf2_packRGBA(c.r, c.g, c.b, 255));
+  },
+  buildPalette(colorGroups) {
+    const palette = new Uint32Array(256);
+    const groupForIndex = new Uint8Array(256);
+    const groups = {};
+    palette[0] = 0;
+    let idx = 1;
+    let groupId = 1;
+    for (const [name, baseHex] of Object.entries(colorGroups)) {
+      let ramp;
+      if (name === 'eyes') {
+        const iris = sf2_hexToRGB(baseHex);
+        ramp = [
+          sf2_packRGBA(15, 10, 20, 255),
+          sf2_packRGBA(iris.r, iris.g, iris.b, 255),
+          sf2_packRGBA(240, 240, 245, 255),
+          sf2_packRGBA(255, 255, 255, 255),
+        ];
+      } else {
+        ramp = ColorRamp.generatePacked(baseHex);
+      }
+      const startIdx = idx;
+      for (let i = 0; i < 4; i++) {
+        palette[idx] = ramp[i];
+        groupForIndex[idx] = groupId;
+        idx++;
+      }
+      groups[name] = { startIdx, groupId, ramp };
+      groupId++;
+    }
+    palette[idx] = sf2_packRGBA(0, 0, 0, 255);
+    const outlineIdx = idx;
+    idx++;
+    return { palette, groups, groupForIndex, outlineIdx, nextIdx: idx };
+  },
+};
+
+class PixelCanvas {
+  constructor(width, height) {
+    this.width = width;
+    this.height = height;
+    this.pixels = new Uint8Array(width * height);
+    this.groupMap = new Uint8Array(width * height);
+    this.palette = null;
+    this.groupForIndex = null;
+  }
+  setPalette(palette, groupForIndex) {
+    this.palette = palette;
+    this.groupForIndex = groupForIndex;
+  }
+  clear() { this.pixels.fill(0); this.groupMap.fill(0); }
+  setPixel(x, y, idx) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+    const off = y * this.width + x;
+    this.pixels[off] = idx;
+    if (this.groupForIndex) this.groupMap[off] = this.groupForIndex[idx];
+  }
+  getPixel(x, y) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return 0;
+    return this.pixels[y * this.width + x];
+  }
+  isFilled(x, y) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return false;
+    return this.pixels[y * this.width + x] !== 0;
+  }
+  hline(x, y, len, idx) { for (let i = 0; i < len; i++) this.setPixel(x + i, y, idx); }
+  vline(x, y, len, idx) { for (let i = 0; i < len; i++) this.setPixel(x, y + i, idx); }
+  fillRect(x, y, w, h, idx) { for (let row = 0; row < h; row++) this.hline(x, y + row, w, idx); }
+  fillEllipse(cx, cy, rx, ry, idx) {
+    if (rx <= 0 || ry <= 0) return;
+    cx = Math.round(cx); cy = Math.round(cy);
+    rx = Math.round(rx); ry = Math.round(ry);
+    const rx2 = rx * rx, ry2 = ry * ry;
+    for (let y = -ry; y <= ry; y++) {
+      const yf = y * y;
+      const xSpan = Math.floor(rx * Math.sqrt(1 - yf / ry2));
+      this.hline(cx - xSpan, cy + y, xSpan * 2 + 1, idx);
+    }
+  }
+  fillCircle(cx, cy, r, idx) { this.fillEllipse(cx, cy, r, r, idx); }
+  line(x0, y0, x1, y1, idx) {
+    x0 = Math.round(x0); y0 = Math.round(y0);
+    x1 = Math.round(x1); y1 = Math.round(y1);
+    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    while (true) {
+      this.setPixel(x0, y0, idx);
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x0 += sx; }
+      if (e2 < dx) { err += dx; y0 += sy; }
+    }
+  }
+  fillTriangle(x0, y0, x1, y1, x2, y2, idx) {
+    if (y0 > y1) { [x0,y0,x1,y1] = [x1,y1,x0,y0]; }
+    if (y0 > y2) { [x0,y0,x2,y2] = [x2,y2,x0,y0]; }
+    if (y1 > y2) { [x1,y1,x2,y2] = [x2,y2,x1,y1]; }
+    const lerp = (a, b, t) => a + (b - a) * t;
+    for (let y = Math.round(y0); y <= Math.round(y2); y++) {
+      let xa, xb;
+      if (y < y1) {
+        if (y1 === y0) continue;
+        const t1 = (y - y0) / (y1 - y0);
+        const t2 = (y - y0) / (y2 - y0);
+        xa = lerp(x0, x1, t1);
+        xb = lerp(x0, x2, t2);
+      } else {
+        if (y2 === y1) continue;
+        const t1 = (y - y1) / (y2 - y1);
+        const t2 = (y - y0) / (y2 - y0);
+        xa = lerp(x1, x2, t1);
+        xb = lerp(x0, x2, t2);
+      }
+      if (xa > xb) { const tmp = xa; xa = xb; xb = tmp; }
+      this.hline(Math.round(xa), y, Math.round(xb - xa) + 1, idx);
+    }
+  }
+  mirrorHorizontal() {
+    const { width, height, pixels, groupMap } = this;
+    const half = Math.floor(width / 2);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < half; x++) {
+        const src = y * width + x;
+        const dst = y * width + (width - 1 - x);
+        pixels[dst] = pixels[src];
+        groupMap[dst] = groupMap[src];
+      }
+    }
+  }
+  scatterNoise(x, y, w, h, idx, density, rng) {
+    rng = rng || Math.random;
+    for (let py = y; py < y + h; py++) {
+      for (let px = x; px < x + w; px++) {
+        if (this.isFilled(px, py) && rng() < density) {
+          this.setPixel(px, py, idx);
+        }
+      }
+    }
+  }
+  ditherCheckerboard(x, y, w, h, idxA, idxB) {
+    for (let py = y; py < y + h; py++) {
+      for (let px = x; px < x + w; px++) {
+        if (this.isFilled(px, py)) {
+          this.setPixel(px, py, (px + py) % 2 === 0 ? idxA : idxB);
+        }
+      }
+    }
+  }
+  toCanvas() {
+    const cvs = sf2_makeCanvas(this.width, this.height);
+    const c = cvs.getContext('2d');
+    const imgData = c.createImageData(this.width, this.height);
+    const data = imgData.data;
+    const { pixels, palette, width, height } = this;
+    for (let i = 0; i < width * height; i++) {
+      const idx = pixels[i];
+      if (idx === 0) continue;
+      const rgba = palette[idx];
+      const off = i * 4;
+      data[off]     = rgba & 0xFF;
+      data[off + 1] = (rgba >> 8) & 0xFF;
+      data[off + 2] = (rgba >> 16) & 0xFF;
+      data[off + 3] = (rgba >> 24) & 0xFF;
+    }
+    c.putImageData(imgData, 0, 0);
+    return cvs;
+  }
+}
+
+const PostProcess = {
+  _dirs: [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]],
+  _lightDir: (function() {
+    const lx = -0.7, ly = -0.7;
+    const len = Math.sqrt(lx*lx + ly*ly);
+    return { x: lx/len, y: ly/len };
+  })(),
+  applyShading(pc, groups) {
+    const { width, height, pixels, groupMap } = pc;
+    const dirs = PostProcess._dirs;
+    const light = PostProcess._lightDir;
+    const newPixels = new Uint8Array(pixels.length);
+    newPixels.set(pixels);
+    const groupBase = new Uint8Array(256);
+    for (const g of Object.values(groups)) groupBase[g.groupId] = g.startIdx;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const off = y * width + x;
+        if (pixels[off] === 0) continue;
+        const gid = groupMap[off];
+        if (gid === 0) continue;
+        const base = groupBase[gid];
+        if (base === 0) continue;
+        let nx = 0, ny = 0, emptyCount = 0;
+        for (const [dx, dy] of dirs) {
+          const px2 = x + dx, py2 = y + dy;
+          if (px2 < 0 || px2 >= width || py2 < 0 || py2 >= height || pixels[py2 * width + px2] === 0) {
+            nx -= dx; ny -= dy; emptyCount++;
+          }
+        }
+        if (emptyCount === 0) { newPixels[off] = base + 2; continue; }
+        const len = Math.sqrt(nx * nx + ny * ny);
+        if (len > 0) { nx /= len; ny /= len; }
+        const dot = nx * light.x + ny * light.y;
+        let tone;
+        if (dot > 0.4) tone = 3;
+        else if (dot > -0.1) tone = 2;
+        else if (dot > -0.5) tone = 1;
+        else tone = 0;
+        newPixels[off] = base + tone;
+      }
+    }
+    pc.pixels.set(newPixels);
+  },
+  applyOutlines(pc, groups, mode) {
+    if (mode === 'none') return;
+    const { width, height, pixels, groupMap } = pc;
+    const dirs = PostProcess._dirs;
+    const newPixels = new Uint8Array(pixels.length);
+    const newGroupMap = new Uint8Array(groupMap.length);
+    newPixels.set(pixels);
+    newGroupMap.set(groupMap);
+    const groupBase = new Uint8Array(256);
+    for (const g of Object.values(groups)) groupBase[g.groupId] = g.startIdx;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const off = y * width + x;
+        if (pixels[off] !== 0) continue;
+        let nearestGroup = 0, found = false;
+        for (const [dx, dy] of dirs) {
+          const px2 = x + dx, py2 = y + dy;
+          if (px2 >= 0 && px2 < width && py2 >= 0 && py2 < height) {
+            const noff = py2 * width + px2;
+            if (pixels[noff] !== 0) { nearestGroup = groupMap[noff]; found = true; break; }
+          }
+        }
+        if (!found) continue;
+        const base = groupBase[nearestGroup];
+        if (base === 0) continue;
+        if (mode === 'tinted') { newPixels[off] = base + 0; }
+        else if (mode === 'black') { newPixels[off] = 255; }
+        if (newPixels[off] !== 0) newGroupMap[off] = nearestGroup;
+      }
+    }
+    pc.pixels.set(newPixels);
+    pc.groupMap.set(newGroupMap);
+  },
+};
+
+// ============================================================
+// FRUIT PROP DEFINITIONS (inlined from tools/props/fs-*.js)
+// ============================================================
+const FRUIT_PROPS = {
+  watermelon: {
+    width: 48, height: 48,
+    colors: { body: '#2d6e2d', stripe: '#88cc44', stem: '#665533' },
+    draw(pc, pal) {
+      const b = pal.groups.body.startIdx;
+      const s = pal.groups.stripe.startIdx;
+      const st = pal.groups.stem.startIdx;
+      const cx = 24, cy = 24;
+      pc.fillEllipse(cx, cy, 20, 14, b + 2);
+      pc.fillEllipse(cx, cy + 4, 18, 10, b + 1);
+      pc.fillEllipse(cx, cy, 18, 12, b + 2);
+      const stripeYs = [-7, -3, 1, 5, 9];
+      for (const sy of stripeYs) {
+        for (let dx = -17; dx <= 17; dx++) {
+          const t = dx / 17;
+          const curvature = Math.round(2 * Math.sin(t * Math.PI));
+          const py = cy + sy - curvature;
+          const px = cx + dx;
+          const nx = (px - cx) / 20;
+          const ny = (py - cy) / 14;
+          if (nx * nx + ny * ny < 0.92) {
+            pc.hline(px, py, 1, s + 2);
+            if (nx * nx + ((py + 1 - cy) / 14) * ((py + 1 - cy) / 14) < 0.92) {
+              pc.setPixel(px, py + 1, s + 1);
+            }
+          }
+        }
+      }
+      pc.fillEllipse(cx - 6, cy - 6, 6, 4, b + 3);
+      pc.fillRect(cx + 19, cy - 2, 3, 3, st + 2);
+      pc.setPixel(cx + 21, cy - 2, st + 3);
+      pc.setPixel(cx + 22, cy - 1, st + 1);
+      const rng = sf2_seededRNG(42);
+      pc.scatterNoise(cx - 16, cy - 10, 32, 20, b + 1, 0.04, rng);
+    },
+    drawPost(pc, pal) {
+      const b = pal.groups.body.startIdx;
+      const s = pal.groups.stripe.startIdx;
+      const cx = 24, cy = 24;
+      for (const sy of [-7, -3, 1]) {
+        for (let dx = -10; dx <= 6; dx += 3) {
+          const px = cx + dx;
+          const py = cy + sy - Math.round(2 * Math.sin((dx / 17) * Math.PI));
+          const nx = (px - cx) / 20;
+          const ny = (py - cy) / 14;
+          if (nx * nx + ny * ny < 0.75) pc.setPixel(px, py, s + 3);
+        }
+      }
+      pc.setPixel(cx - 8, cy - 8, b + 3);
+      pc.setPixel(cx - 7, cy - 9, b + 3);
+    },
+  },
+  orange: {
+    width: 40, height: 40,
+    colors: { body: '#ee8811', navel: '#cc6600', stem: '#556633' },
+    draw(pc, pal) {
+      const b = pal.groups.body.startIdx;
+      const n = pal.groups.navel.startIdx;
+      const st = pal.groups.stem.startIdx;
+      const cx = 20, cy = 20;
+      pc.fillCircle(cx, cy, 15, b + 2);
+      pc.fillEllipse(cx + 1, cy + 5, 12, 10, b + 1);
+      pc.fillEllipse(cx, cy - 2, 14, 12, b + 2);
+      pc.fillEllipse(cx - 4, cy - 5, 7, 5, b + 3);
+      const rng = sf2_seededRNG(77);
+      pc.scatterNoise(cx - 12, cy - 12, 24, 24, b + 1, 0.08, rng);
+      const rng2 = sf2_seededRNG(88);
+      pc.scatterNoise(cx - 9, cy - 9, 12, 10, b + 3, 0.06, rng2);
+      pc.fillCircle(cx, cy + 13, 2, n + 1);
+      pc.setPixel(cx, cy + 13, n + 0);
+      pc.setPixel(cx - 2, cy + 12, n + 2);
+      pc.setPixel(cx + 2, cy + 12, n + 2);
+      pc.setPixel(cx, cy + 15, n + 2);
+      pc.fillRect(cx - 1, cy - 15, 3, 2, st + 1);
+      pc.setPixel(cx, cy - 16, st + 2);
+      pc.setPixel(cx - 2, cy - 14, st + 2);
+      pc.setPixel(cx + 2, cy - 14, st + 2);
+      pc.setPixel(cx - 1, cy - 14, st + 3);
+      pc.setPixel(cx + 1, cy - 14, st + 3);
+    },
+    drawPost(pc, pal) {
+      const b = pal.groups.body.startIdx;
+      const cx = 20, cy = 20;
+      pc.setPixel(cx - 6, cy - 8, b + 3);
+      pc.setPixel(cx - 5, cy - 9, b + 3);
+      pc.setPixel(cx - 7, cy - 7, b + 3);
+      const rng3 = sf2_seededRNG(99);
+      pc.scatterNoise(cx - 10, cy - 4, 20, 16, b + 0, 0.02, rng3);
+    },
+  },
+  apple: {
+    width: 40, height: 44,
+    colors: { body: '#cc2222', green: '#88aa22', stem: '#664422', leaf: '#44aa33' },
+    draw(pc, pal) {
+      const b = pal.groups.body.startIdx;
+      const g = pal.groups.green.startIdx;
+      const st = pal.groups.stem.startIdx;
+      const lf = pal.groups.leaf.startIdx;
+      const cx = 20, cy = 24;
+      for (let row = 0; row < 32; row++) {
+        const t = row / 31;
+        let halfW;
+        if (t < 0.06) halfW = Math.round(3 + 4 * (t / 0.06));
+        else if (t < 0.12) { const u = (t - 0.06) / 0.06; halfW = Math.round(7 + 3 * u); }
+        else if (t < 0.3) { const u = (t - 0.12) / 0.18; halfW = Math.round(10 + 5 * Math.sin(u * Math.PI / 2)); }
+        else if (t < 0.55) halfW = 15;
+        else if (t < 0.75) { const u = (t - 0.55) / 0.2; halfW = Math.round(15 - 3 * u); }
+        else { const u = (t - 0.75) / 0.25; halfW = Math.round(12 * Math.cos(u * Math.PI / 2)); }
+        const y = cy - 16 + row;
+        if (halfW > 0) pc.hline(cx - halfW, y, halfW * 2 + 1, b + 2);
+      }
+      pc.hline(cx - 2, cy - 16, 5, b + 0);
+      pc.hline(cx - 1, cy - 15, 3, b + 0);
+      pc.setPixel(cx, cy - 14, b + 1);
+      for (let row = 3; row < 10; row++) { const y = cy - 16 + row; pc.setPixel(cx, y, b + 1); }
+      for (let row = 8; row < 30; row++) {
+        const t = row / 31;
+        let halfW;
+        if (t < 0.3) { const u = (t - 0.12) / 0.18; halfW = Math.round(10 + 5 * Math.sin(Math.max(0, u) * Math.PI / 2)); }
+        else if (t < 0.55) halfW = 15;
+        else if (t < 0.75) { const u = (t - 0.55) / 0.2; halfW = Math.round(15 - 3 * u); }
+        else { const u = (t - 0.75) / 0.25; halfW = Math.round(12 * Math.cos(u * Math.PI / 2)); }
+        if (halfW < 5) continue;
+        const y = cy - 16 + row;
+        pc.setPixel(cx + halfW - 1, y, b + 0);
+        pc.setPixel(cx + halfW - 2, y, b + 0);
+        if (halfW > 8) pc.setPixel(cx + halfW - 3, y, b + 1);
+      }
+      for (let row = 26; row < 31; row++) {
+        const t = row / 31;
+        let halfW;
+        if (t < 0.75) { const u = (t - 0.55) / 0.2; halfW = Math.round(15 - 3 * u); }
+        else { const u = (t - 0.75) / 0.25; halfW = Math.round(12 * Math.cos(u * Math.PI / 2)); }
+        if (halfW < 2) continue;
+        const y = cy - 16 + row;
+        pc.hline(cx - halfW + 1, y, halfW * 2 - 1, b + 1);
+      }
+      pc.fillEllipse(cx - 5, cy - 5, 3, 5, b + 3);
+      pc.setPixel(cx - 6, cy - 8, b + 3);
+      pc.setPixel(cx - 4, cy - 9, b + 3);
+      pc.fillEllipse(cx + 4, cy - 6, 2, 3, b + 3);
+      pc.fillRect(cx - 1, cy - 20, 2, 6, st + 2);
+      pc.setPixel(cx, cy - 20, st + 3);
+      pc.setPixel(cx - 1, cy - 20, st + 1);
+      pc.setPixel(cx, cy - 15, st + 1);
+      pc.fillTriangle(cx + 1, cy - 18, cx + 9, cy - 22, cx + 6, cy - 16, lf + 2);
+      pc.setPixel(cx + 3, cy - 18, lf + 3);
+      pc.setPixel(cx + 5, cy - 19, lf + 3);
+      pc.setPixel(cx + 7, cy - 21, lf + 3);
+      pc.setPixel(cx + 7, cy - 21, lf + 1);
+      pc.setPixel(cx + 8, cy - 22, lf + 1);
+      const rng = sf2_seededRNG(55);
+      pc.scatterNoise(cx - 12, cy - 8, 24, 22, b + 1, 0.03, rng);
+    },
+    drawPost(pc, pal) {
+      const b = pal.groups.body.startIdx;
+      const cx = 20, cy = 24;
+      pc.setPixel(cx - 6, cy - 8, b + 3);
+      pc.setPixel(cx - 5, cy - 9, b + 3);
+    },
+  },
+  pineapple: {
+    width: 40, height: 56,
+    colors: { body: '#cc8822', hatch: '#886611', crown: '#33aa33', pip: '#aa6611' },
+    draw(pc, pal) {
+      const b = pal.groups.body.startIdx;
+      const h = pal.groups.hatch.startIdx;
+      const cr = pal.groups.crown.startIdx;
+      const pp = pal.groups.pip.startIdx;
+      const cx = 20, cy = 33;
+      pc.fillEllipse(cx, cy, 14, 18, b + 2);
+      pc.fillEllipse(cx + 3, cy + 4, 12, 16, b + 1);
+      pc.fillEllipse(cx - 1, cy - 2, 13, 16, b + 2);
+      pc.fillEllipse(cx - 4, cy - 7, 5, 6, b + 3);
+      for (let d = -30; d <= 30; d += 5) {
+        for (let i = -20; i <= 20; i++) {
+          const px = cx + i, py = cy + i + d;
+          const nx = (px - cx) / 14, ny = (py - cy) / 18;
+          if (nx * nx + ny * ny < 0.88) pc.setPixel(px, py, h + 1);
+        }
+      }
+      for (let d = -30; d <= 30; d += 5) {
+        for (let i = -20; i <= 20; i++) {
+          const px = cx + i, py = cy - i + d;
+          const nx = (px - cx) / 14, ny = (py - cy) / 18;
+          if (nx * nx + ny * ny < 0.88) pc.setPixel(px, py, h + 1);
+        }
+      }
+      for (let dy = -16; dy <= 16; dy += 5) {
+        for (let dx = -12; dx <= 12; dx += 5) {
+          const px = cx + dx, py = cy + dy;
+          const nx = (px - cx) / 14, ny = (py - cy) / 18;
+          if (nx * nx + ny * ny < 0.75) { pc.setPixel(px, py, pp + 2); pc.setPixel(px, py - 1, pp + 3); }
+        }
+      }
+      const rng = sf2_seededRNG(33);
+      pc.scatterNoise(cx - 10, cy - 12, 20, 28, b + 1, 0.03, rng);
+      pc.fillEllipse(cx, cy - 17, 8, 3, cr + 1);
+      pc.fillTriangle(cx - 2, cy - 18, cx + 2, cy - 18, cx, cy - 35, cr + 2);
+      pc.fillTriangle(cx - 3, cy - 17, cx - 1, cy - 18, cx - 5, cy - 31, cr + 2);
+      pc.fillTriangle(cx + 1, cy - 18, cx + 3, cy - 17, cx + 5, cy - 31, cr + 2);
+      pc.fillTriangle(cx - 5, cy - 16, cx - 3, cy - 17, cx - 9, cy - 27, cr + 2);
+      pc.fillTriangle(cx + 3, cy - 17, cx + 5, cy - 16, cx + 9, cy - 27, cr + 2);
+      pc.fillTriangle(cx - 7, cy - 15, cx - 5, cy - 16, cx - 11, cy - 23, cr + 1);
+      pc.fillTriangle(cx + 5, cy - 16, cx + 7, cy - 15, cx + 11, cy - 23, cr + 1);
+      pc.setPixel(cx - 1, cy - 28, cr + 3); pc.setPixel(cx, cy - 30, cr + 3);
+      pc.setPixel(cx + 1, cy - 28, cr + 3); pc.setPixel(cx - 4, cy - 26, cr + 3);
+      pc.setPixel(cx + 4, cy - 26, cr + 3);
+      pc.setPixel(cx, cy - 24, cr + 0); pc.setPixel(cx, cy - 26, cr + 0);
+      pc.setPixel(cx - 4, cy - 23, cr + 0); pc.setPixel(cx + 4, cy - 23, cr + 0);
+    },
+    drawPost(pc, pal) {
+      const b = pal.groups.body.startIdx;
+      const cr = pal.groups.crown.startIdx;
+      const cx = 20, cy = 33;
+      pc.setPixel(cx - 6, cy - 10, b + 3); pc.setPixel(cx - 5, cy - 11, b + 3);
+      pc.setPixel(cx - 7, cy - 9, b + 3);
+      pc.setPixel(cx, cy - 34, cr + 3); pc.setPixel(cx - 5, cy - 30, cr + 3);
+      pc.setPixel(cx + 5, cy - 30, cr + 3); pc.setPixel(cx - 9, cy - 26, cr + 3);
+      pc.setPixel(cx + 9, cy - 26, cr + 3);
+    },
+  },
+  kiwi: {
+    width: 36, height: 36,
+    colors: { body: '#8b6914', fuzz: '#a07828', cap: '#6b4e0a' },
+    draw(pc, pal) {
+      const b = pal.groups.body.startIdx;
+      const f = pal.groups.fuzz.startIdx;
+      const c = pal.groups.cap.startIdx;
+      const cx = 18, cy = 18;
+      pc.fillEllipse(cx, cy, 12, 14, b + 2);
+      pc.fillEllipse(cx + 1, cy, 11, 13, b + 1);
+      pc.fillEllipse(cx - 1, cy - 1, 10, 12, b + 2);
+      pc.fillEllipse(cx - 4, cy - 5, 5, 5, b + 3);
+      pc.fillRect(cx - 4, cy - 14, 8, 2, c + 1);
+      pc.hline(cx - 3, cy - 14, 6, c + 2);
+      pc.setPixel(cx, cy - 14, c + 0);
+      pc.fillRect(cx - 4, cy + 12, 8, 2, c + 1);
+      pc.hline(cx - 3, cy + 13, 6, c + 2);
+      pc.setPixel(cx, cy + 13, c + 0);
+      const rng = sf2_seededRNG(42);
+      pc.scatterNoise(cx - 11, cy - 13, 22, 26, f + 2, 0.12, rng);
+      const rng2 = sf2_seededRNG(99);
+      pc.scatterNoise(cx - 10, cy - 12, 20, 24, f + 3, 0.06, rng2);
+      const rng3 = sf2_seededRNG(77);
+      pc.scatterNoise(cx - 9, cy - 10, 20, 22, f + 0, 0.04, rng3);
+    },
+    drawPost(pc, pal) {
+      const f = pal.groups.fuzz.startIdx;
+      const cx = 18, cy = 18;
+      pc.setPixel(cx - 13, cy - 3, f + 1); pc.setPixel(cx - 13, cy + 1, f + 2);
+      pc.setPixel(cx - 12, cy - 7, f + 1); pc.setPixel(cx - 12, cy + 5, f + 2);
+      pc.setPixel(cx + 13, cy - 2, f + 1); pc.setPixel(cx + 12, cy + 3, f + 2);
+      pc.setPixel(cx + 12, cy - 6, f + 1); pc.setPixel(cx + 13, cy + 1, f + 2);
+      pc.setPixel(cx - 5, cy - 8, f + 3); pc.setPixel(cx - 3, cy - 10, f + 3);
+      pc.setPixel(cx - 6, cy - 4, f + 3);
+    },
+  },
+  coconut: {
+    width: 44, height: 44,
+    colors: { shell: '#6b3a1f', fiber: '#8b5e3c', eye: '#2a1508' },
+    draw(pc, pal) {
+      const s = pal.groups.shell.startIdx;
+      const f = pal.groups.fiber.startIdx;
+      const e = pal.groups.eye.startIdx;
+      const cx = 22, cy = 22;
+      pc.fillCircle(cx, cy, 18, s + 2);
+      pc.fillCircle(cx + 2, cy + 2, 17, s + 1);
+      pc.fillCircle(cx - 1, cy - 1, 16, s + 2);
+      pc.fillEllipse(cx - 6, cy - 7, 7, 6, s + 3);
+      pc.fillEllipse(cx - 8, cy - 9, 4, 3, s + 3);
+      const rng1 = sf2_seededRNG(101);
+      pc.scatterNoise(cx - 16, cy - 16, 32, 32, f + 2, 0.14, rng1);
+      const rng2 = sf2_seededRNG(202);
+      pc.scatterNoise(cx - 14, cy - 14, 28, 28, f + 1, 0.08, rng2);
+      const rng3 = sf2_seededRNG(303);
+      pc.scatterNoise(cx - 15, cy - 15, 30, 30, f + 3, 0.05, rng3);
+      const rng4 = sf2_seededRNG(404);
+      pc.scatterNoise(cx - 13, cy - 13, 26, 26, s + 0, 0.06, rng4);
+      for (let i = -3; i <= 3; i++) {
+        const xo = cx + i * 4;
+        pc.setPixel(xo, cy - 10, f + 0); pc.setPixel(xo, cy - 5, f + 1);
+        pc.setPixel(xo, cy, f + 0); pc.setPixel(xo, cy + 5, f + 1);
+        pc.setPixel(xo, cy + 10, f + 0);
+      }
+    },
+    drawPost(pc, pal) {
+      const e = pal.groups.eye.startIdx;
+      const s = pal.groups.shell.startIdx;
+      const cx = 22, cy = 22;
+      pc.fillEllipse(cx - 5, cy - 4, 3, 2, e + 0);
+      pc.fillEllipse(cx - 5, cy - 4, 2, 1, e + 1);
+      pc.fillEllipse(cx + 5, cy - 4, 3, 2, e + 0);
+      pc.fillEllipse(cx + 5, cy - 4, 2, 1, e + 1);
+      pc.fillEllipse(cx, cy + 3, 3, 3, e + 0);
+      pc.fillEllipse(cx, cy + 3, 2, 2, e + 1);
+      pc.setPixel(cx - 3, cy - 2, s + 0); pc.setPixel(cx - 1, cy - 1, s + 0);
+      pc.setPixel(cx + 1, cy - 1, s + 0); pc.setPixel(cx + 3, cy - 2, s + 0);
+      pc.setPixel(cx - 2, cy + 1, s + 0); pc.setPixel(cx + 2, cy + 1, s + 0);
+    },
+  },
+  grape: {
+    width: 40, height: 44,
+    colors: { grape: '#7b2d8e', stem: '#4a8c2a' },
+    draw(pc, pal) {
+      const g = pal.groups.grape.startIdx;
+      const s = pal.groups.stem.startIdx;
+      const cx = 20, cy = 24;
+      pc.fillRect(cx - 1, cy - 20, 3, 6, s + 2);
+      pc.setPixel(cx, cy - 21, s + 3); pc.setPixel(cx - 1, cy - 20, s + 1); pc.setPixel(cx + 1, cy - 20, s + 3);
+      pc.fillEllipse(cx + 4, cy - 18, 4, 2, s + 2);
+      pc.fillEllipse(cx + 4, cy - 18, 3, 1, s + 3);
+      pc.hline(cx + 2, cy - 18, 5, s + 1);
+      pc.setPixel(cx - 3, cy - 17, s + 2); pc.setPixel(cx - 4, cy - 16, s + 2); pc.setPixel(cx - 4, cy - 15, s + 1);
+      pc.vline(cx, cy - 14, 3, s + 1);
+      const grapes = [
+        { x: cx, y: cy - 10 },
+        { x: cx - 5, y: cy - 4 }, { x: cx + 5, y: cy - 4 },
+        { x: cx - 7, y: cy + 3 }, { x: cx, y: cy + 3 }, { x: cx + 7, y: cy + 3 },
+        { x: cx, y: cy + 10 },
+      ];
+      for (const grape of grapes) {
+        pc.fillCircle(grape.x, grape.y, 5, g + 1);
+        pc.fillCircle(grape.x - 1, grape.y - 1, 4, g + 2);
+        pc.fillCircle(grape.x - 1, grape.y - 1, 2, g + 3);
+      }
+      pc.setPixel(cx, cy - 4, g + 0); pc.setPixel(cx - 3, cy + 3, g + 0); pc.setPixel(cx + 3, cy + 3, g + 0);
+      pc.setPixel(cx - 3, cy - 1, g + 0); pc.setPixel(cx + 3, cy - 1, g + 0); pc.setPixel(cx, cy + 6, g + 0);
+    },
+    drawPost(pc, pal) {
+      const g = pal.groups.grape.startIdx;
+      const cx = 20, cy = 24;
+      const grapes = [
+        { x: cx, y: cy - 10 },
+        { x: cx - 5, y: cy - 4 }, { x: cx + 5, y: cy - 4 },
+        { x: cx - 7, y: cy + 3 }, { x: cx, y: cy + 3 }, { x: cx + 7, y: cy + 3 },
+        { x: cx, y: cy + 10 },
+      ];
+      for (const grape of grapes) pc.setPixel(grape.x - 2, grape.y - 3, g + 3);
+    },
+  },
+  peach: {
+    width: 40, height: 44,
+    colors: { body: '#f0944c', blush: '#e05a5a', stem: '#6b4226', leaf: '#4a9e2f' },
+    draw(pc, pal) {
+      const b = pal.groups.body.startIdx;
+      const bl = pal.groups.blush.startIdx;
+      const st = pal.groups.stem.startIdx;
+      const lf = pal.groups.leaf.startIdx;
+      const cx = 20, cy = 24;
+      for (let row = 0; row < 30; row++) {
+        const t = row / 29;
+        let halfW;
+        if (t < 0.15) halfW = Math.round(10 * Math.sin(t / 0.15 * Math.PI / 2));
+        else if (t < 0.5) halfW = Math.round(10 + 4 * Math.sin((t - 0.15) / 0.35 * Math.PI / 2));
+        else halfW = Math.round(14 * Math.cos((t - 0.5) / 0.5 * Math.PI / 2));
+        const y = cy - 14 + row;
+        if (halfW > 0) pc.hline(cx - halfW, y, halfW * 2 + 1, b + 2);
+      }
+      for (let row = 3; row < 28; row++) {
+        const t = row / 29;
+        let halfW;
+        if (t < 0.15) halfW = Math.round(8 * Math.sin(t / 0.15 * Math.PI / 2));
+        else if (t < 0.5) halfW = Math.round(8 + 3 * Math.sin((t - 0.15) / 0.35 * Math.PI / 2));
+        else halfW = Math.round(11 * Math.cos((t - 0.5) / 0.5 * Math.PI / 2));
+        const y = cy - 14 + row;
+        if (halfW > 3) pc.hline(cx + halfW - 2, y, 3, b + 1);
+      }
+      pc.fillEllipse(cx - 5, cy - 6, 6, 5, b + 3);
+      pc.fillEllipse(cx - 7, cy - 8, 3, 2, b + 3);
+      const rng_bl1 = sf2_seededRNG(111);
+      pc.scatterNoise(cx - 2, cy - 6, 14, 14, bl + 2, 0.18, rng_bl1);
+      const rng_bl2 = sf2_seededRNG(222);
+      pc.scatterNoise(cx, cy - 4, 10, 10, bl + 3, 0.10, rng_bl2);
+      const rng_bl3 = sf2_seededRNG(333);
+      pc.scatterNoise(cx - 4, cy - 8, 16, 16, bl + 1, 0.06, rng_bl3);
+      for (let row = 0; row < 24; row++) {
+        const t = row / 23;
+        const xOff = Math.round(2 - t * 2);
+        const y = cy - 13 + row;
+        pc.setPixel(cx + xOff, y, b + 0);
+        if (row % 2 === 0) pc.setPixel(cx + xOff + 1, y, b + 1);
+      }
+      const rng = sf2_seededRNG(55);
+      pc.scatterNoise(cx - 12, cy - 12, 24, 24, b + 3, 0.04, rng);
+    },
+    drawPost(pc, pal) {
+      const st = pal.groups.stem.startIdx;
+      const lf = pal.groups.leaf.startIdx;
+      const b = pal.groups.body.startIdx;
+      const cx = 20, cy = 24;
+      pc.vline(cx + 1, cy - 17, 4, st + 2);
+      pc.setPixel(cx + 1, cy - 18, st + 1);
+      pc.setPixel(cx + 2, cy - 16, st + 3);
+      pc.setPixel(cx, cy - 15, st + 1);
+      pc.fillEllipse(cx + 5, cy - 17, 4, 2, lf + 2);
+      pc.fillEllipse(cx + 5, cy - 17, 3, 1, lf + 3);
+      pc.hline(cx + 3, cy - 17, 5, lf + 1);
+      pc.setPixel(cx + 9, cy - 17, lf + 1);
+      pc.setPixel(cx - 8, cy - 9, b + 3);
+      pc.setPixel(cx - 7, cy - 10, b + 3);
+    },
+  },
+};
+
+const SLICE_PROPS = {
+  watermelon: {
+    width: 48, height: 48,
+    colors: { rind: '#2ecc40', pith: '#e8e8d0', flesh: '#ff4466', seed: '#1a1a1a' },
+    draw(pc, pal) {
+      const r = pal.groups.rind.startIdx;
+      const p = pal.groups.pith.startIdx;
+      const f = pal.groups.flesh.startIdx;
+      const cx = 24, cy = 26;
+      const outerR = 20;
+      for (let row = 0; row <= outerR; row++) {
+        const y = cy + row;
+        if (y >= 48) break;
+        const halfW = Math.round(Math.sqrt(outerR * outerR - row * row));
+        if (halfW > 0) pc.hline(cx - halfW, y, halfW * 2 + 1, r + 2);
+      }
+      pc.hline(cx - outerR, cy, outerR * 2 + 1, r + 2);
+      for (let row = outerR - 2; row <= outerR; row++) {
+        const y = cy + row; if (y >= 48) break;
+        const halfW = Math.round(Math.sqrt(outerR * outerR - row * row));
+        if (halfW > 0) pc.hline(cx - halfW, y, halfW * 2 + 1, r + 1);
+      }
+      for (let row = outerR - 1; row <= outerR; row++) {
+        const y = cy + row; if (y >= 48) break;
+        const halfW = Math.round(Math.sqrt(outerR * outerR - row * row));
+        if (halfW > 0 && halfW <= 8) pc.hline(cx - halfW, y, halfW * 2 + 1, r + 0);
+      }
+      for (let row = 2; row <= outerR; row++) {
+        const y = cy + row; if (y >= 48) break;
+        const halfW = Math.round(Math.sqrt(outerR * outerR - row * row));
+        if (halfW >= 8) { pc.setPixel(cx - 8, y, r + 0); pc.setPixel(cx + 8, y, r + 0); }
+        if (halfW >= 14) { pc.setPixel(cx - 14, y, r + 1); pc.setPixel(cx + 14, y, r + 1); }
+      }
+      const pithR = outerR - 3;
+      for (let row = 0; row <= pithR; row++) {
+        const y = cy + row;
+        const halfW = Math.round(Math.sqrt(pithR * pithR - row * row));
+        if (halfW > 0) pc.hline(cx - halfW, y, halfW * 2 + 1, p + 2);
+      }
+      pc.hline(cx - pithR, cy, pithR * 2 + 1, p + 2);
+      const fleshR = outerR - 5;
+      for (let row = 0; row <= fleshR; row++) {
+        const y = cy + row;
+        const halfW = Math.round(Math.sqrt(fleshR * fleshR - row * row));
+        if (halfW > 0) pc.hline(cx - halfW, y, halfW * 2 + 1, f + 2);
+      }
+      pc.hline(cx - fleshR, cy, fleshR * 2 + 1, f + 2);
+      const innerR = fleshR - 4;
+      for (let row = 0; row <= innerR; row++) {
+        const y = cy + row;
+        const halfW = Math.round(Math.sqrt(innerR * innerR - row * row));
+        if (halfW > 0) pc.hline(cx - halfW, y, halfW * 2 + 1, f + 3);
+      }
+      const rng = sf2_seededRNG(42);
+      pc.scatterNoise(cx - fleshR, cy, fleshR * 2, fleshR, f + 1, 0.04, rng);
+    },
+    drawPost(pc, pal) {
+      const s = pal.groups.seed.startIdx;
+      const cx = 24, cy = 26;
+      const seeds = [
+        [cx-10,cy+4],[cx-6,cy+2],[cx-3,cy+7],[cx+1,cy+3],[cx+5,cy+6],
+        [cx+9,cy+3],[cx-8,cy+9],[cx+3,cy+10],[cx+7,cy+9],
+      ];
+      for (const [sx, sy] of seeds) {
+        pc.setPixel(sx, sy, s + 1); pc.setPixel(sx + 1, sy, s + 1);
+        pc.setPixel(sx, sy + 1, s + 2); pc.setPixel(sx + 1, sy + 1, s + 2);
+        pc.setPixel(sx, sy + 2, s + 1);
+      }
+      const f = pal.groups.flesh.startIdx;
+      pc.hline(cx - 14, cy, 29, f + 3);
+    },
+  },
+  orange: {
+    width: 40, height: 40,
+    colors: { rind: '#ee8811', pith: '#f0e8d0', flesh: '#ffaa33', membrane: '#f5f0e0' },
+    draw(pc, pal) {
+      const r = pal.groups.rind.startIdx;
+      const p = pal.groups.pith.startIdx;
+      const f = pal.groups.flesh.startIdx;
+      const cx = 20, cy = 20;
+      const outerR = 17;
+      pc.fillCircle(cx, cy, outerR, r + 2);
+      pc.fillCircle(cx - 3, cy - 3, outerR - 1, r + 2);
+      for (let a = 0; a < Math.PI * 0.5; a += 0.1) {
+        const px = Math.round(cx + Math.cos(a + Math.PI) * (outerR - 1));
+        const py = Math.round(cy + Math.sin(a + Math.PI) * (outerR - 1));
+        pc.setPixel(px, py, r + 3);
+      }
+      pc.fillCircle(cx, cy, outerR - 2, p + 2);
+      pc.fillCircle(cx, cy, outerR - 4, f + 2);
+      pc.fillCircle(cx, cy, 2, p + 3);
+      const rng = sf2_seededRNG(77);
+      pc.scatterNoise(cx - 12, cy - 12, 24, 24, f + 3, 0.06, rng);
+      const rng2 = sf2_seededRNG(88);
+      pc.scatterNoise(cx - 10, cy - 10, 20, 20, f + 1, 0.03, rng2);
+    },
+    drawPost(pc, pal) {
+      const m = pal.groups.membrane.startIdx;
+      const p = pal.groups.pith.startIdx;
+      const cx = 20, cy = 20;
+      const segR = 13;
+      const numSegments = 10;
+      for (let i = 0; i < numSegments; i++) {
+        const angle = (i / numSegments) * Math.PI * 2;
+        for (let d = 2; d <= segR; d++) {
+          const px = Math.round(cx + Math.cos(angle) * d);
+          const py = Math.round(cy + Math.sin(angle) * d);
+          pc.setPixel(px, py, m + 2);
+          if (d > 7) {
+            const px2 = Math.round(cx + Math.cos(angle + 0.05) * d);
+            const py2 = Math.round(cy + Math.sin(angle + 0.05) * d);
+            pc.setPixel(px2, py2, m + 1);
+          }
+        }
+      }
+      for (let i = 0; i < numSegments; i++) {
+        const angle = (i / numSegments) * Math.PI * 2;
+        const midAngle = angle + (Math.PI / numSegments);
+        const hx = Math.round(cx + Math.cos(midAngle) * 8);
+        const hy = Math.round(cy + Math.sin(midAngle) * 8);
+        const f = pal.groups.flesh.startIdx;
+        pc.setPixel(hx, hy, f + 3);
+      }
+      pc.fillCircle(cx, cy, 2, p + 2);
+      pc.setPixel(cx, cy, p + 3);
+      const r = pal.groups.rind.startIdx;
+      pc.setPixel(cx - 10, cy - 14, r + 3);
+      pc.setPixel(cx - 12, cy - 11, r + 3);
+      pc.setPixel(cx - 14, cy - 8, r + 3);
+    },
+  },
+  apple: {
+    width: 40, height: 44,
+    colors: { skin: '#cc2233', flesh: '#f5e8c8', pocket: '#c8a870', seed: '#553311' },
+    draw(pc, pal) {
+      const sk = pal.groups.skin.startIdx;
+      const f = pal.groups.flesh.startIdx;
+      const cx = 20, cy = 22;
+      const outerR = 17;
+      pc.fillCircle(cx, cy, outerR, sk + 2);
+      pc.fillCircle(cx, cy - outerR + 1, 3, sk + 0);
+      pc.vline(cx, cy - outerR - 1, 3, sk + 0);
+      pc.setPixel(cx, cy - outerR - 1, sk + 1);
+      for (let row = -outerR; row < -outerR + 6; row++) {
+        const y = cy + row;
+        const halfW = Math.round(Math.sqrt(outerR * outerR - row * row));
+        for (let col = 2; col < halfW - 1; col++) pc.setPixel(cx + col, y, sk + 3);
+      }
+      pc.fillCircle(cx, cy, outerR - 2, f + 2);
+      pc.fillCircle(cx, cy, outerR - 5, f + 3);
+      const rng = sf2_seededRNG(55);
+      pc.scatterNoise(cx - 14, cy - 14, 28, 28, f + 1, 0.03, rng);
+      const rng2 = sf2_seededRNG(66);
+      for (let a = 0; a < Math.PI * 2; a += 0.15) {
+        const edgeR = outerR - 2;
+        const ex = Math.round(cx + Math.cos(a) * edgeR);
+        const ey = Math.round(cy + Math.sin(a) * edgeR);
+        pc.setPixel(ex, ey, f + 0);
+      }
+    },
+    drawPost(pc, pal) {
+      const pk = pal.groups.pocket.startIdx;
+      const s = pal.groups.seed.startIdx;
+      const cx = 20, cy = 22;
+      const numPoints = 5;
+      for (let i = 0; i < numPoints; i++) {
+        const angle = (i / numPoints) * Math.PI * 2 - Math.PI / 2;
+        for (let d = 2; d <= 7; d++) {
+          const px = Math.round(cx + Math.cos(angle) * d);
+          const py = Math.round(cy + Math.sin(angle) * d);
+          pc.setPixel(px, py, pk + 2);
+          if (d >= 4 && d <= 6) {
+            const perpAngle = angle + Math.PI / 2;
+            pc.setPixel(Math.round(cx + Math.cos(angle) * d + Math.cos(perpAngle)), Math.round(cy + Math.sin(angle) * d + Math.sin(perpAngle)), pk + 1);
+            pc.setPixel(Math.round(cx + Math.cos(angle) * d - Math.cos(perpAngle)), Math.round(cy + Math.sin(angle) * d - Math.sin(perpAngle)), pk + 1);
+          }
+        }
+        const seedX = Math.round(cx + Math.cos(angle) * 5);
+        const seedY = Math.round(cy + Math.sin(angle) * 5);
+        pc.setPixel(seedX, seedY, s + 2);
+        pc.setPixel(Math.round(cx + Math.cos(angle) * 6), Math.round(cy + Math.sin(angle) * 6), s + 1);
+      }
+      for (let i = 0; i < numPoints; i++) {
+        const angle = (i / numPoints) * Math.PI * 2 - Math.PI / 2;
+        pc.setPixel(Math.round(cx + Math.cos(angle) * 1), Math.round(cy + Math.sin(angle) * 1), pk + 2);
+      }
+      pc.setPixel(cx, cy, pk + 3);
+    },
+  },
+  pineapple: {
+    width: 40, height: 40,
+    colors: { rind: '#8b6914', flesh: '#f0c030', ring: '#f8dd70', core: '#aa8822' },
+    draw(pc, pal) {
+      const r = pal.groups.rind.startIdx;
+      const f = pal.groups.flesh.startIdx;
+      const cx = 20, cy = 20;
+      const outerR = 17;
+      pc.fillCircle(cx, cy, outerR, r + 2);
+      for (let i = 0; i < 16; i++) {
+        const angle = (i / 16) * Math.PI * 2;
+        const bx = Math.round(cx + Math.cos(angle) * (outerR + 1));
+        const by = Math.round(cy + Math.sin(angle) * (outerR + 1));
+        pc.setPixel(bx, by, r + 1);
+        if (i % 2 === 0) {
+          const bx2 = Math.round(cx + Math.cos(angle) * (outerR + 2));
+          const by2 = Math.round(cy + Math.sin(angle) * (outerR + 2));
+          pc.setPixel(bx2, by2, r + 0);
+        }
+      }
+      for (let a = 0; a < Math.PI * 2; a += 0.12) {
+        pc.setPixel(Math.round(cx + Math.cos(a) * outerR), Math.round(cy + Math.sin(a) * outerR), r + 0);
+        pc.setPixel(Math.round(cx + Math.cos(a) * (outerR - 1)), Math.round(cy + Math.sin(a) * (outerR - 1)), r + 1);
+      }
+      const rng = sf2_seededRNG(99);
+      pc.scatterNoise(cx - outerR, cy - outerR, outerR * 2, outerR * 2, r + 0, 0.05, rng);
+      pc.fillCircle(cx, cy, outerR - 3, f + 2);
+      pc.fillCircle(cx - 2, cy - 2, outerR - 6, f + 3);
+      const rng2 = sf2_seededRNG(111);
+      pc.scatterNoise(cx - 12, cy - 12, 24, 24, f + 1, 0.04, rng2);
+    },
+    drawPost(pc, pal) {
+      const rg = pal.groups.ring.startIdx;
+      const c = pal.groups.core.startIdx;
+      const f = pal.groups.flesh.startIdx;
+      const cx = 20, cy = 20;
+      for (let a = 0; a < Math.PI * 2; a += 0.1) {
+        pc.setPixel(Math.round(cx + Math.cos(a) * 6), Math.round(cy + Math.sin(a) * 6), rg + 2);
+      }
+      for (let a = 0; a < Math.PI * 2; a += 0.08) {
+        pc.setPixel(Math.round(cx + Math.cos(a) * 10), Math.round(cy + Math.sin(a) * 10), rg + 2);
+        pc.setPixel(Math.round(cx + Math.cos(a) * 9), Math.round(cy + Math.sin(a) * 9), rg + 1);
+      }
+      for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2;
+        pc.setPixel(Math.round(cx + Math.cos(angle) * 8), Math.round(cy + Math.sin(angle) * 8), f + 0);
+      }
+      for (let i = 0; i < 6; i++) {
+        const angle = (i / 6) * Math.PI * 2 + 0.3;
+        pc.setPixel(Math.round(cx + Math.cos(angle) * 12), Math.round(cy + Math.sin(angle) * 12), f + 0);
+      }
+      pc.fillCircle(cx, cy, 3, c + 2);
+      pc.fillCircle(cx, cy, 2, c + 1);
+      pc.setPixel(cx, cy, c + 0);
+      pc.setPixel(cx - 1, cy - 2, c + 3);
+      pc.setPixel(cx + 1, cy - 2, c + 3);
+    },
+  },
+  kiwi: {
+    width: 36, height: 36,
+    colors: { skin: '#8B6914', flesh: '#76B947', core: '#F5F5DC', seeds: '#1A1A1A' },
+    draw(pc, pal) {
+      const sk = pal.groups.skin.startIdx;
+      const fl = pal.groups.flesh.startIdx;
+      const co = pal.groups.core.startIdx;
+      const cx = 18, cy = 18;
+      pc.fillCircle(cx, cy, 15, sk + 2);
+      const rng = sf2_seededRNG(77);
+      pc.scatterNoise(cx - 15, cy - 15, 30, 30, sk + 1, 0.08, rng);
+      pc.scatterNoise(cx - 15, cy - 15, 30, 30, sk + 3, 0.05, rng);
+      pc.fillCircle(cx, cy, 13, fl + 1);
+      pc.fillCircle(cx, cy, 12, fl + 2);
+      pc.fillCircle(cx, cy, 10, fl + 3);
+      pc.fillCircle(cx, cy, 8, fl + 2);
+      pc.fillCircle(cx, cy, 3, co + 2);
+      pc.fillCircle(cx, cy, 2, co + 3);
+      const numRays = 12;
+      for (let i = 0; i < numRays; i++) {
+        const angle = (i / numRays) * Math.PI * 2;
+        for (let r = 3; r <= 9; r++) {
+          const px = Math.round(cx + Math.cos(angle) * r);
+          const py = Math.round(cy + Math.sin(angle) * r);
+          pc.setPixel(px, py, r <= 6 ? co + 2 : co + 1);
+        }
+      }
+    },
+    drawPost(pc, pal) {
+      const se = pal.groups.seeds.startIdx;
+      const co = pal.groups.core.startIdx;
+      const fl = pal.groups.flesh.startIdx;
+      const cx = 18, cy = 18;
+      const numSeeds = 16;
+      const seedRadius = 7.5;
+      for (let i = 0; i < numSeeds; i++) {
+        const angle = (i / numSeeds) * Math.PI * 2;
+        pc.setPixel(Math.round(cx + Math.cos(angle) * seedRadius), Math.round(cy + Math.sin(angle) * seedRadius), se + 2);
+        if (i % 3 === 0) {
+          pc.setPixel(Math.round(cx + Math.cos(angle) * (seedRadius + 1)), Math.round(cy + Math.sin(angle) * (seedRadius + 1)), se + 1);
+        }
+      }
+      const numSeeds2 = 12;
+      const seedRadius2 = 9;
+      for (let i = 0; i < numSeeds2; i++) {
+        const angle = (i / numSeeds2) * Math.PI * 2 + 0.15;
+        pc.setPixel(Math.round(cx + Math.cos(angle) * seedRadius2), Math.round(cy + Math.sin(angle) * seedRadius2), se + 2);
+      }
+      pc.setPixel(cx, cy, co + 3);
+      const rng2 = sf2_seededRNG(88);
+      pc.scatterNoise(cx - 10, cy - 10, 20, 20, fl + 3, 0.03, rng2);
+    },
+  },
+  coconut: {
+    width: 44, height: 44,
+    colors: { shell: '#5C3317', meat: '#FFFDD0', cavity: '#3A5F5F' },
+    draw(pc, pal) {
+      const sh = pal.groups.shell.startIdx;
+      const me = pal.groups.meat.startIdx;
+      const ca = pal.groups.cavity.startIdx;
+      const cx = 22, cy = 22;
+      pc.fillCircle(cx, cy, 19, sh + 2);
+      pc.fillEllipse(cx + 3, cy + 3, 17, 17, sh + 0);
+      pc.fillCircle(cx, cy, 18, sh + 2);
+      pc.fillEllipse(cx - 5, cy - 5, 10, 10, sh + 3);
+      pc.fillCircle(cx, cy, 17, sh + 2);
+      const rng = sf2_seededRNG(33);
+      pc.scatterNoise(cx - 19, cy - 19, 38, 38, sh + 0, 0.07, rng);
+      pc.scatterNoise(cx - 19, cy - 19, 38, 38, sh + 3, 0.04, rng);
+      pc.fillCircle(cx, cy, 13, me + 1);
+      pc.fillCircle(cx, cy, 12, me + 2);
+      pc.fillCircle(cx, cy, 11, me + 3);
+      pc.fillCircle(cx, cy, 10, me + 2);
+      pc.fillCircle(cx, cy, 9, ca + 2);
+      pc.fillCircle(cx, cy, 7, ca + 1);
+      pc.fillCircle(cx, cy, 5, ca + 0);
+      pc.fillEllipse(cx - 2, cy - 3, 4, 2, ca + 3);
+      pc.fillEllipse(cx + 1, cy - 2, 2, 1, ca + 3);
+    },
+    drawPost(pc, pal) {
+      const sh = pal.groups.shell.startIdx;
+      const me = pal.groups.meat.startIdx;
+      const ca = pal.groups.cavity.startIdx;
+      const cx = 22, cy = 22;
+      const rng2 = sf2_seededRNG(44);
+      for (let i = 0; i < 20; i++) {
+        const angle = rng2() * Math.PI * 2;
+        const r = 14 + rng2() * 4;
+        const px = Math.round(cx + Math.cos(angle) * r);
+        const py = Math.round(cy + Math.sin(angle) * r);
+        const dx = px - cx, dy = py - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist >= 13 && dist <= 18) {
+          pc.setPixel(px, py, sh + 1);
+          const px2 = Math.round(cx + Math.cos(angle) * (r + 1));
+          const py2 = Math.round(cy + Math.sin(angle) * (r + 1));
+          if (Math.sqrt((px2 - cx) ** 2 + (py2 - cy) ** 2) <= 18) pc.setPixel(px2, py2, sh + 0);
+        }
+      }
+      for (let a = 2.5; a < 4.2; a += 0.15) {
+        pc.setPixel(Math.round(cx + Math.cos(a) * 12), Math.round(cy + Math.sin(a) * 12), me + 3);
+      }
+      pc.setPixel(cx - 1, cy - 4, ca + 3);
+      pc.setPixel(cx, cy - 4, ca + 3);
+    },
+  },
+  grape: {
+    width: 36, height: 36,
+    colors: { skin: '#6B2D8B', flesh: '#D4EDBA', seeds: '#8B7355' },
+    draw(pc, pal) {
+      const sk = pal.groups.skin.startIdx;
+      const fl = pal.groups.flesh.startIdx;
+      const cx = 18, cy = 18;
+      pc.fillCircle(cx, cy, 14, sk + 2);
+      pc.fillEllipse(cx + 3, cy + 3, 12, 12, sk + 0);
+      pc.fillCircle(cx, cy, 13, sk + 2);
+      pc.fillEllipse(cx - 4, cy - 4, 7, 7, sk + 3);
+      pc.fillCircle(cx, cy, 12, sk + 2);
+      pc.fillCircle(cx, cy, 12, fl + 1);
+      pc.fillCircle(cx, cy, 11, fl + 2);
+      pc.fillCircle(cx, cy, 9, fl + 3);
+      pc.fillCircle(cx, cy, 7, fl + 2);
+      pc.fillCircle(cx, cy, 4, fl + 3);
+    },
+    drawPost(pc, pal) {
+      const sk = pal.groups.skin.startIdx;
+      const fl = pal.groups.flesh.startIdx;
+      const se = pal.groups.seeds.startIdx;
+      const cx = 18, cy = 18;
+      pc.fillEllipse(cx - 3, cy - 2, 2, 3, se + 2);
+      pc.setPixel(cx - 3, cy - 5, se + 1); pc.setPixel(cx - 3, cy - 4, se + 2); pc.setPixel(cx - 2, cy - 2, se + 3);
+      pc.fillEllipse(cx + 3, cy + 1, 2, 3, se + 2);
+      pc.setPixel(cx + 3, cy - 2, se + 1); pc.setPixel(cx + 3, cy - 1, se + 2); pc.setPixel(cx + 4, cy + 1, se + 3);
+      pc.fillEllipse(cx - 1, cy + 4, 1, 2, se + 2);
+      pc.setPixel(cx - 1, cy + 2, se + 1); pc.setPixel(cx, cy + 4, se + 3);
+      for (let a = 2.8; a < 4.5; a += 0.12) {
+        pc.setPixel(Math.round(cx + Math.cos(a) * 13), Math.round(cy + Math.sin(a) * 13), sk + 3);
+      }
+      const rng = sf2_seededRNG(55);
+      pc.scatterNoise(cx - 9, cy - 9, 18, 18, fl + 3, 0.04, rng);
+      pc.scatterNoise(cx - 9, cy - 9, 18, 18, fl + 1, 0.02, rng);
+    },
+  },
+  peach: {
+    width: 40, height: 44,
+    colors: { skin: '#E8913A', flesh: '#FFCC66', pit: '#5C3A1E' },
+    draw(pc, pal) {
+      const sk = pal.groups.skin.startIdx;
+      const fl = pal.groups.flesh.startIdx;
+      const pt = pal.groups.pit.startIdx;
+      const cx = 20, cy = 22;
+      pc.fillEllipse(cx, cy, 17, 19, sk + 2);
+      pc.fillEllipse(cx + 3, cy + 4, 15, 17, sk + 0);
+      pc.fillEllipse(cx, cy, 16, 18, sk + 2);
+      pc.fillEllipse(cx - 4, cy - 5, 8, 9, sk + 3);
+      pc.fillEllipse(cx, cy, 15, 17, sk + 2);
+      const rng = sf2_seededRNG(99);
+      pc.scatterNoise(cx - 17, cy - 19, 34, 38, sk + 3, 0.06, rng);
+      pc.scatterNoise(cx - 17, cy - 19, 34, 38, sk + 1, 0.04, rng);
+      pc.fillEllipse(cx, cy, 15, 17, fl + 3);
+      pc.fillEllipse(cx, cy, 13, 15, fl + 2);
+      pc.fillEllipse(cx, cy, 10, 12, fl + 1);
+      pc.fillEllipse(cx, cy, 8, 9, fl + 2);
+      const numStreaks = 10;
+      for (let i = 0; i < numStreaks; i++) {
+        const angle = (i / numStreaks) * Math.PI * 2;
+        for (let r = 6; r <= 14; r++) {
+          const px = Math.round(cx + Math.cos(angle) * r);
+          const py = Math.round(cy + Math.sin(angle) * r * 1.1);
+          const nx = (px - cx) / 15, ny = (py - cy) / 17;
+          if (nx * nx + ny * ny < 0.85 && nx * nx + ny * ny > 0.15) pc.setPixel(px, py, fl + 3);
+        }
+      }
+      pc.fillEllipse(cx, cy, 6, 8, pt + 2);
+      pc.fillEllipse(cx + 1, cy + 1, 5, 7, pt + 0);
+      pc.fillEllipse(cx, cy, 5, 7, pt + 1);
+      pc.fillEllipse(cx - 1, cy - 1, 4, 5, pt + 2);
+      pc.vline(cx, cy - 6, 13, pt + 3);
+      pc.vline(cx + 1, cy - 5, 11, pt + 0);
+      pc.hline(cx - 4, cy - 3, 9, pt + 0);
+      pc.hline(cx - 5, cy, 10, pt + 0);
+      pc.hline(cx - 4, cy + 3, 9, pt + 0);
+    },
+    drawPost(pc, pal) {
+      const sk = pal.groups.skin.startIdx;
+      const fl = pal.groups.flesh.startIdx;
+      const pt = pal.groups.pit.startIdx;
+      const cx = 20, cy = 22;
+      const rng2 = sf2_seededRNG(101);
+      pc.scatterNoise(cx - 5, cy - 7, 10, 14, pt + 0, 0.12, rng2);
+      pc.scatterNoise(cx - 4, cy - 5, 8, 10, pt + 3, 0.06, rng2);
+      pc.setPixel(cx - 2, cy - 4, pt + 3); pc.setPixel(cx - 3, cy - 3, pt + 3); pc.setPixel(cx - 2, cy - 3, pt + 3);
+      for (let a = 2.5; a < 4.5; a += 0.1) {
+        const r = 14;
+        const px = Math.round(cx + Math.cos(a) * r);
+        const py = Math.round(cy + Math.sin(a) * r * 1.1);
+        const nx = (px - cx) / 15, ny = (py - cy) / 17;
+        if (nx * nx + ny * ny < 0.92) pc.setPixel(px, py, fl + 3);
+      }
+      const rng3 = sf2_seededRNG(102);
+      pc.scatterNoise(cx - 12, cy - 14, 24, 28, fl + 3, 0.02, rng3);
+      for (let a = 0; a < Math.PI * 2; a += 0.4) {
+        const px = Math.round(cx + Math.cos(a) * 16.5);
+        const py = Math.round(cy + Math.sin(a) * 18.5);
+        const nx = (px - cx) / 17, ny = (py - cy) / 19;
+        if (nx * nx + ny * ny < 1.05 && nx * nx + ny * ny > 0.85) pc.setPixel(px, py, sk + 3);
+      }
+    },
+  },
+};
+
+// ============================================================
+// PRE-RENDER SPRITES
+// ============================================================
+const FRUIT_SPRITES = {};
+const FRUIT_SLICE_SPRITES = {};
+
+function preRenderSprites() {
+  function renderProp(prop) {
+    const pc = new PixelCanvas(prop.width, prop.height);
+    const pal = ColorRamp.buildPalette(prop.colors);
+    pc.setPalette(pal.palette, pal.groupForIndex);
+    prop.draw(pc, pal);
+    PostProcess.applyShading(pc, pal.groups);
+    PostProcess.applyOutlines(pc, pal.groups, 'tinted');
+    prop.drawPost(pc, pal);
+    return pc.toCanvas();
+  }
+
+  for (const name of Object.keys(FRUIT_PROPS)) {
+    FRUIT_SPRITES[name] = renderProp(FRUIT_PROPS[name]);
+  }
+  for (const name of Object.keys(SLICE_PROPS)) {
+    FRUIT_SLICE_SPRITES[name] = renderProp(SLICE_PROPS[name]);
+  }
+}
+preRenderSprites();
+
+// ============================================================
+// CANVAS SETUP
+// ============================================================
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// GAME STATE
+// ============================================================
+let state = 'title'; // title, playing, gameover
+let score = 0;
+let combo = 0;
+let comboTimer = 0;
+let bestCombo = 0;
+let lives = 3;
+let maxLives = 3;
+let fruits = [];
+let sliceTrail = [];
+let particles = [];
+let floatingTexts = [];
+let spawnTimer = 0;
+let spawnInterval = 1.2;
+let difficulty = 0;
+let gameTime = 0;
+let highScore = parseInt(localStorage.getItem('fruit-slash-hs') || '0');
+
+// ============================================================
+// BLADE TRAIL
+// ============================================================
+let mouseDown = false;
+let mouseX = 0, mouseY = 0;
+let lastMouseX = 0, lastMouseY = 0;
+let mouseSpeed = 0;
+
+function addTrailPoint(x, y) {
+  sliceTrail.push({ x, y, life: 0.3, maxLife: 0.3 });
+  if (sliceTrail.length > 30) sliceTrail.shift();
+}
+
+// ============================================================
+// FRUIT CLASS
+// ============================================================
+class Fruit {
+  constructor() {
+    const type = FRUITS[Math.floor(Math.random() * FRUITS.length)];
+    this.name = type.name;
+    this.r = type.r * (W / 800); // scale to screen
+    this.color = type.color;
+    this.inner = type.inner;
+    this.seeds = type.seeds;
+    this.isBomb = false;
+
+    // Launch from bottom — tuned so apex is 15-70% up the screen
+    this.x = W * 0.15 + Math.random() * W * 0.7;
+    this.y = H + this.r;
+    this.gravity = H * 0.55;
+    // v^2 = 2*g*h → v = sqrt(2*g*h) where h is desired apex height
+    const apexH = H * (0.3 + Math.random() * 0.55); // reach 30-85% of screen height
+    this.vy = -Math.sqrt(2 * this.gravity * apexH);
+    // Horizontal: bias toward center, limit so fruit stays on screen
+    const centerBias = (W / 2 - this.x) * 0.3; // pull toward center
+    this.vx = centerBias + (Math.random() - 0.5) * W * 0.15;
+    this.rotation = Math.random() * Math.PI * 2;
+    this.rotSpeed = (Math.random() - 0.5) * 6;
+    this.sliced = false;
+    this.missed = false;
+
+    // Slice halves
+    this.halfA = null;
+    this.halfB = null;
+  }
+
+  update(dt) {
+    if (this.sliced) {
+      if (this.halfA) { this.halfA.update(dt); this.halfB.update(dt); }
+      return;
+    }
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.vy += this.gravity * dt;
+    this.rotation += this.rotSpeed * dt;
+
+    // Bounce off side walls so fruit stays visible
+    if (this.x < this.r) { this.x = this.r; this.vx = Math.abs(this.vx) * 0.5; }
+    if (this.x > W - this.r) { this.x = W - this.r; this.vx = -Math.abs(this.vx) * 0.5; }
+
+    // Check if fallen off screen
+    if (this.y > H + this.r * 2 && this.vy > 0) {
+      this.missed = true;
+    }
+  }
+
+  draw(ctx) {
+    if (this.sliced) {
+      if (this.halfA) { this.halfA.draw(ctx); this.halfB.draw(ctx); }
+      return;
+    }
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rotation);
+
+    if (this.isBomb) {
+      // Bomb body
+      ctx.fillStyle = '#333';
+      ctx.beginPath(); ctx.arc(0, 0, this.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#222';
+      ctx.beginPath(); ctx.arc(0, 0, this.r * 0.85, 0, Math.PI * 2); ctx.fill();
+      // Fuse
+      ctx.strokeStyle = '#aa8844';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, -this.r);
+      ctx.quadraticCurveTo(this.r * 0.3, -this.r * 1.4, this.r * 0.1, -this.r * 1.6);
+      ctx.stroke();
+      // Spark
+      ctx.fillStyle = '#ff4';
+      ctx.beginPath();
+      ctx.arc(this.r * 0.1, -this.r * 1.6, 4 + Math.random() * 3, 0, Math.PI * 2);
+      ctx.fill();
+      // X mark
+      ctx.strokeStyle = '#c00';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(-8, -8); ctx.lineTo(8, 8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(8, -8); ctx.lineTo(-8, 8); ctx.stroke();
+    } else {
+      // Draw pre-rendered pixel art sprite
+      const sprite = FRUIT_SPRITES[this.name];
+      if (sprite) {
+        const scale = (this.r * 2) / Math.max(sprite.width, sprite.height);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(sprite, -sprite.width * scale / 2, -sprite.height * scale / 2, sprite.width * scale, sprite.height * scale);
+        ctx.imageSmoothingEnabled = true;
+      }
+    }
+    ctx.restore();
+  }
+
+  slice(sliceAngle) {
+    if (this.sliced || this.isBomb) return;
+    this.sliced = true;
+    // Create two halves
+    this.halfA = new FruitHalf(this, sliceAngle, -1);
+    this.halfB = new FruitHalf(this, sliceAngle, 1);
+  }
+}
+
+class FruitHalf {
+  constructor(fruit, angle, side) {
+    this.x = fruit.x;
+    this.y = fruit.y;
+    this.r = fruit.r;
+    this.name = fruit.name;
+    this.color = fruit.color;
+    this.inner = fruit.inner;
+    this.seeds = fruit.seeds;
+    this.angle = angle;
+    this.side = side;
+    this.rotation = fruit.rotation;
+    this.rotSpeed = fruit.rotSpeed + side * 3;
+    // Halves fly apart
+    const perpAngle = angle + Math.PI / 2 * side;
+    this.vx = fruit.vx + Math.cos(perpAngle) * 120;
+    this.vy = fruit.vy + Math.sin(perpAngle) * 80 - 50;
+    this.gravity = fruit.gravity;
+    this.life = 2;
+  }
+
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.vy += this.gravity * dt;
+    this.rotation += this.rotSpeed * dt;
+    this.life -= dt;
+  }
+
+  draw(ctx) {
+    if (this.life <= 0) return;
+    const alpha = Math.min(1, this.life * 2);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rotation);
+
+    // Clip to half
+    ctx.beginPath();
+    ctx.rect(this.side > 0 ? 0 : -this.r * 2, -this.r * 2, this.r * 2, this.r * 4);
+    ctx.clip();
+
+    // Draw pre-rendered pixel art slice sprite
+    const sprite = FRUIT_SLICE_SPRITES[this.name];
+    if (sprite) {
+      const scale = (this.r * 2) / Math.max(sprite.width, sprite.height);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(sprite, -sprite.width * scale / 2, -sprite.height * scale / 2, sprite.width * scale, sprite.height * scale);
+      ctx.imageSmoothingEnabled = true;
+    }
+
+    // Flat slice edge
+    ctx.strokeStyle = '#fff8';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -this.r); ctx.lineTo(0, this.r);
+    ctx.stroke();
+
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+// JUICE PARTICLES
+// ============================================================
+class JuiceParticle {
+  constructor(x, y, color) {
+    this.x = x; this.y = y;
+    this.color = color;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 50 + Math.random() * 200;
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed - 80;
+    this.gravity = H * 0.5;
+    this.life = 0.6 + Math.random() * 0.5;
+    this.maxLife = this.life;
+    this.size = 3 + Math.random() * 5;
+  }
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.vy += this.gravity * dt;
+    this.life -= dt;
+  }
+  draw(ctx) {
+    const a = Math.max(0, this.life / this.maxLife);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = this.color;
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.size * a, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+class FloatingText {
+  constructor(x, y, text, color, size) {
+    this.x = x; this.y = y; this.text = text; this.color = color;
+    this.size = size || 24; this.life = 1; this.maxLife = 1;
+  }
+  update(dt) { this.y -= 60 * dt; this.life -= dt; }
+  draw(ctx) {
+    const a = Math.max(0, this.life / this.maxLife);
+    ctx.globalAlpha = a;
+    ctx.font = `bold ${this.size}px Segoe UI`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#000';
+    ctx.fillText(this.text, this.x + 2, this.y + 2);
+    ctx.fillStyle = this.color;
+    ctx.fillText(this.text, this.x, this.y);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+// BOMB EXPLOSION
+// ============================================================
+class BombExplosion {
+  constructor(x, y) {
+    this.x = x; this.y = y;
+    this.life = 0.6; this.maxLife = 0.6;
+  }
+  update(dt) { this.life -= dt; }
+  draw(ctx) {
+    const t = 1 - this.life / this.maxLife;
+    const r = 60 + t * 120;
+    ctx.globalAlpha = (1 - t) * 0.7;
+    const grd = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r);
+    grd.addColorStop(0, '#ff4');
+    grd.addColorStop(0.3, '#f80');
+    grd.addColorStop(0.7, '#c00');
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(this.x - r, this.y - r, r * 2, r * 2);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+// SPAWNING
+// ============================================================
+function spawnWave() {
+  const count = 2 + Math.floor(Math.random() * (2 + difficulty * 0.5));
+  const bombChance = Math.min(0.15 + difficulty * 0.01, 0.3);
+
+  for (let i = 0; i < count; i++) {
+    setTimeout(() => {
+      const f = new Fruit();
+      // Bomb?
+      if (Math.random() < bombChance && difficulty > 0.5) {
+        f.isBomb = true;
+        f.r = 30 * (W / 800);
+        f.color = '#333';
+      }
+      fruits.push(f);
+    }, i * (100 + Math.random() * 200));
+  }
+}
+
+// ============================================================
+// SLICE DETECTION
+// ============================================================
+function checkSlice(x1, y1, x2, y2) {
+  if (!mouseDown) return;
+  const speed = Math.sqrt((x2-x1)**2 + (y2-y1)**2);
+  if (speed < 5) return; // need actual movement
+
+  const sliceAngle = Math.atan2(y2 - y1, x2 - x1);
+  let slicedAny = false;
+
+  for (const f of fruits) {
+    if (f.sliced || f.missed) continue;
+    // Point-to-line-segment distance
+    const dx = x2 - x1, dy = y2 - y1;
+    const len2 = dx*dx + dy*dy;
+    let t = Math.max(0, Math.min(1, ((f.x-x1)*dx + (f.y-y1)*dy) / len2));
+    const px = x1 + t * dx, py = y1 + t * dy;
+    const dist = Math.sqrt((f.x-px)**2 + (f.y-py)**2);
+
+    if (dist < f.r + 10) {
+      if (f.isBomb) {
+        // Hit bomb — game over
+        SFX.bomb();
+        particles.push(new BombExplosion(f.x, f.y));
+        for (let j = 0; j < 20; j++) {
+          particles.push(new JuiceParticle(f.x, f.y, j % 2 ? '#ff4' : '#f80'));
+        }
+        f.sliced = true;
+        lives = 0;
+        endGame();
+        return;
+      }
+
+      f.slice(sliceAngle);
+      slicedAny = true;
+      SFX.slice();
+
+      // Juice particles
+      for (let j = 0; j < 10; j++) {
+        particles.push(new JuiceParticle(f.x, f.y, f.inner));
+        particles.push(new JuiceParticle(f.x, f.y, f.color));
+      }
+
+      // Score
+      let points = 1;
+      combo++;
+      comboTimer = 0.8;
+      if (combo > 1) {
+        points = combo;
+        SFX.combo();
+        floatingTexts.push(new FloatingText(f.x, f.y - 40, combo + 'x COMBO!', '#ff0', 28 + combo * 2));
+      }
+      if (combo > bestCombo) bestCombo = combo;
+      score += points;
+      floatingTexts.push(new FloatingText(f.x, f.y, '+' + points, '#fff', 22));
+    }
+  }
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+function onPointerDown(x, y) {
+  if (state === 'title') { startGame(); return; }
+  if (state === 'gameover') { startGame(); return; }
+  mouseDown = true;
+  mouseX = lastMouseX = x;
+  mouseY = lastMouseY = y;
+}
+
+function onPointerMove(x, y) {
+  lastMouseX = mouseX; lastMouseY = mouseY;
+  mouseX = x; mouseY = y;
+  mouseSpeed = Math.sqrt((mouseX - lastMouseX)**2 + (mouseY - lastMouseY)**2);
+  if (mouseDown && state === 'playing') {
+    addTrailPoint(x, y);
+    checkSlice(lastMouseX, lastMouseY, mouseX, mouseY);
+  }
+}
+
+function onPointerUp() { mouseDown = false; }
+
+canvas.addEventListener('mousedown', e => { onPointerDown(e.offsetX, e.offsetY); });
+canvas.addEventListener('mousemove', e => { onPointerMove(e.offsetX, e.offsetY); });
+canvas.addEventListener('mouseup', onPointerUp);
+canvas.addEventListener('mouseleave', onPointerUp);
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  const r = canvas.getBoundingClientRect();
+  onPointerDown((t.clientX - r.left) / r.width * W, (t.clientY - r.top) / r.height * H);
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  const r = canvas.getBoundingClientRect();
+  onPointerMove((t.clientX - r.left) / r.width * W, (t.clientY - r.top) / r.height * H);
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => { e.preventDefault(); onPointerUp(); }, { passive: false });
+
+// ============================================================
+// GAME FLOW
+// ============================================================
+function startGame() {
+  state = 'playing';
+  score = 0;
+  combo = 0;
+  comboTimer = 0;
+  bestCombo = 0;
+  lives = 3;
+  fruits = [];
+  particles = [];
+  floatingTexts = [];
+  sliceTrail = [];
+  spawnTimer = 0;
+  spawnInterval = 1.2;
+  difficulty = 0;
+  gameTime = 0;
+}
+
+function endGame() {
+  state = 'gameover';
+  if (score > highScore) {
+    highScore = score;
+    localStorage.setItem('fruit-slash-hs', highScore);
+  }
+  SFX.gameOver();
+  if (score > 0) submitScore(score);
+}
+
+// ============================================================
+// UPDATE
+// ============================================================
+function update(dt) {
+  // Trail decay
+  for (const t of sliceTrail) t.life -= dt;
+  sliceTrail = sliceTrail.filter(t => t.life > 0);
+
+  // Particles
+  for (const p of particles) p.update(dt);
+  particles = particles.filter(p => p.life > 0);
+
+  // Floating texts
+  for (const t of floatingTexts) t.update(dt);
+  floatingTexts = floatingTexts.filter(t => t.life > 0);
+
+  if (state !== 'playing') return;
+
+  gameTime += dt;
+  difficulty = gameTime / 15; // ramps every 15 seconds
+
+  // Combo timer
+  if (comboTimer > 0) {
+    comboTimer -= dt;
+    if (comboTimer <= 0) combo = 0;
+  }
+
+  // Spawn
+  spawnTimer -= dt;
+  spawnInterval = Math.max(0.5, 1.2 - difficulty * 0.06);
+  if (spawnTimer <= 0) {
+    spawnTimer = spawnInterval;
+    spawnWave();
+  }
+
+  // Update fruits
+  for (const f of fruits) {
+    f.update(dt);
+    // Missed fruit (not bomb) costs a life
+    if (f.missed && !f.isBomb && !f.sliced) {
+      f.sliced = true; // prevent double-counting
+      lives--;
+      SFX.miss();
+      floatingTexts.push(new FloatingText(f.x, H - 40, 'MISS!', '#f44', 20));
+      if (lives <= 0) { endGame(); return; }
+    }
+  }
+  // Clean up old fruits
+  fruits = fruits.filter(f => {
+    if (f.sliced && f.halfA) return f.halfA.life > 0;
+    if (f.sliced || f.missed) return false;
+    return f.y < H + 200;
+  });
+}
+
+// ============================================================
+// DRAW
+// ============================================================
+function drawBackground() {
+  // Gradient sky
+  const grd = ctx.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, '#0a0a2a');
+  grd.addColorStop(0.6, '#1a1a3a');
+  grd.addColorStop(1, '#2a1a2a');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle wood pattern at bottom
+  ctx.fillStyle = '#1a1008';
+  ctx.fillRect(0, H - 4, W, 4);
+}
+
+function drawTrail() {
+  if (sliceTrail.length < 2) return;
+  for (let i = 1; i < sliceTrail.length; i++) {
+    const t0 = sliceTrail[i-1], t1 = sliceTrail[i];
+    const a = t1.life / t1.maxLife;
+    const width = a * 6;
+    ctx.strokeStyle = `rgba(220,240,255,${a * 0.8})`;
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(t0.x, t0.y);
+    ctx.lineTo(t1.x, t1.y);
+    ctx.stroke();
+    // Glow
+    ctx.strokeStyle = `rgba(180,200,255,${a * 0.3})`;
+    ctx.lineWidth = width * 3;
+    ctx.beginPath();
+    ctx.moveTo(t0.x, t0.y);
+    ctx.lineTo(t1.x, t1.y);
+    ctx.stroke();
+  }
+}
+
+function drawHUD() {
+  // Score
+  ctx.font = `bold ${Math.min(48, W * 0.06)}px Segoe UI`;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillText(score, 22, 52);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(score, 20, 50);
+
+  // Lives
+  const heartSize = Math.min(28, W * 0.035);
+  for (let i = 0; i < maxLives; i++) {
+    const hx = W - 20 - (maxLives - i) * (heartSize + 6);
+    const hy = 30;
+    ctx.font = `${heartSize}px Segoe UI`;
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = i < lives ? 1 : 0.2;
+    ctx.fillText('\u2764\uFE0F', hx, hy + heartSize * 0.35);
+    ctx.globalAlpha = 1;
+  }
+
+  // Best combo
+  if (bestCombo > 1) {
+    ctx.font = `${Math.min(18, W * 0.025)}px Segoe UI`;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ff8';
+    ctx.fillText('Best combo: ' + bestCombo + 'x', 20, 80);
+  }
+}
+
+function drawTitle() {
+  drawBackground();
+  ctx.textAlign = 'center';
+
+  // Title
+  ctx.font = `bold ${Math.min(72, W * 0.1)}px Segoe UI`;
+  ctx.fillStyle = '#000';
+  ctx.fillText('FRUIT SLASH', W/2 + 3, H * 0.3 + 3);
+  ctx.fillStyle = '#ff4136';
+  ctx.fillText('FRUIT SLASH', W/2, H * 0.3);
+
+  // Subtitle
+  ctx.font = `${Math.min(24, W * 0.035)}px Segoe UI`;
+  ctx.fillStyle = '#aaa';
+  ctx.fillText('Swipe to slice fruit! Avoid the bombs!', W/2, H * 0.38);
+
+  // Decorative fruits
+  const t = performance.now() / 1000;
+  const fruitEmojis = ['\u{1F349}', '\u{1F34A}', '\u{1F34E}', '\u{1F34D}', '\u{1F95D}', '\u{1F351}'];
+  for (let i = 0; i < fruitEmojis.length; i++) {
+    const angle = t * 0.5 + i * Math.PI / 3;
+    const r = Math.min(120, W * 0.15);
+    const fx = W/2 + Math.cos(angle) * r;
+    const fy = H * 0.55 + Math.sin(angle) * r * 0.4;
+    ctx.font = `${Math.min(40, W * 0.06)}px Segoe UI`;
+    ctx.fillText(fruitEmojis[i], fx, fy);
+  }
+
+  // High score
+  if (highScore > 0) {
+    ctx.font = `${Math.min(20, W * 0.03)}px Segoe UI`;
+    ctx.fillStyle = '#ff8';
+    ctx.fillText('High Score: ' + highScore, W/2, H * 0.72);
+  }
+
+  // Start prompt
+  const pulse = 0.6 + Math.sin(t * 3) * 0.4;
+  ctx.globalAlpha = pulse;
+  ctx.font = `bold ${Math.min(28, W * 0.04)}px Segoe UI`;
+  ctx.fillStyle = '#7f7';
+  ctx.fillText('Tap or Click to Start', W/2, H * 0.82);
+  ctx.globalAlpha = 1;
+}
+
+function drawGameOver() {
+  drawBackground();
+
+  // Draw remaining fruits/particles
+  for (const f of fruits) f.draw(ctx);
+  for (const p of particles) p.draw(ctx);
+
+  // Overlay
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+
+  ctx.font = `bold ${Math.min(64, W * 0.09)}px Segoe UI`;
+  ctx.fillStyle = '#f44';
+  ctx.fillText('GAME OVER', W/2, H * 0.3);
+
+  ctx.font = `${Math.min(32, W * 0.045)}px Segoe UI`;
+  ctx.fillStyle = '#fff';
+  ctx.fillText('Score: ' + score, W/2, H * 0.42);
+
+  if (bestCombo > 1) {
+    ctx.fillStyle = '#ff8';
+    ctx.fillText('Best Combo: ' + bestCombo + 'x', W/2, H * 0.50);
+  }
+
+  if (score >= highScore && score > 0) {
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `bold ${Math.min(24, W * 0.035)}px Segoe UI`;
+    ctx.fillText('NEW HIGH SCORE!', W/2, H * 0.58);
+  }
+
+  const pulse = 0.6 + Math.sin(performance.now() / 300) * 0.4;
+  ctx.globalAlpha = pulse;
+  ctx.font = `bold ${Math.min(24, W * 0.035)}px Segoe UI`;
+  ctx.fillStyle = '#7f7';
+  ctx.fillText('Tap or Click to Play Again', W/2, H * 0.75);
+  ctx.globalAlpha = 1;
+}
+
+function draw() {
+  if (state === 'title') { drawTitle(); return; }
+  if (state === 'gameover') { drawGameOver(); return; }
+
+  drawBackground();
+
+  // Fruits
+  for (const f of fruits) f.draw(ctx);
+
+  // Blade trail
+  drawTrail();
+
+  // Particles
+  for (const p of particles) p.draw(ctx);
+
+  // Floating texts
+  for (const t of floatingTexts) t.draw(ctx);
+
+  // HUD
+  drawHUD();
+
+  // Custom cursor (blade dot)
+  if (mouseDown) {
+    ctx.fillStyle = 'rgba(220,240,255,0.8)';
+    ctx.beginPath(); ctx.arc(mouseX, mouseY, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(180,200,255,0.3)';
+    ctx.beginPath(); ctx.arc(mouseX, mouseY, 12, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+// ============================================================
+// LOOP
+// ============================================================
+let lastTime = performance.now();
+function loop() {
+  const now = performance.now();
+  const dt = Math.min((now - lastTime) / 1000, 0.1);
+  lastTime = now;
+
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+
+})();
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px 'Segoe UI',Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px;">
+  <span id="vc-count">...</span> Slicers
+</div>
+<script>
+(function(){
+  var G='fruit-slash',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

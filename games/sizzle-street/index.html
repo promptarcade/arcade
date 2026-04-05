@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Sizzle Street — Cooking Idle</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+body { background: #1a0e08; font-family: 'Segoe UI', Arial, sans-serif; color: #f5e6d3; display: flex; flex-direction: column; }
+
+#top-bar {
+  background: linear-gradient(to bottom, #2a1a0e, #1a0e08);
+  padding: 8px 16px;
+  display: flex; align-items: center; justify-content: center; gap: 24px;
+  border-bottom: 2px solid #4a3020;
+  flex-shrink: 0; min-height: 52px; flex-wrap: wrap;
+}
+.stat { text-align: center; }
+.stat .label { font-size: 11px; color: #a08060; text-transform: uppercase; letter-spacing: 1px; }
+.stat .value { font-size: 20px; font-weight: bold; }
+.stat-coins .value { color: #ffd700; }
+.stat-cps .value { color: #8fdf8f; }
+.stat-cpc .value { color: #88ccff; }
+
+#main { display: flex; flex: 1; min-height: 0; }
+
+#kitchen {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  position: relative; overflow: hidden;
+  background: radial-gradient(ellipse at center bottom, #3a2218 0%, #1a0e08 70%);
+}
+
+#recipe-bar {
+  display: flex; gap: 6px; padding: 10px 8px; flex-wrap: wrap; justify-content: center;
+  width: 100%; flex-shrink: 0; border-bottom: 1px solid #2a1a10;
+}
+.recipe-slot {
+  width: 56px; height: 56px; border: 2px solid #3a2a1a; border-radius: 8px;
+  background: #2a1a0e; cursor: pointer; position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color 0.2s, transform 0.15s;
+}
+.recipe-slot:hover:not(.locked) { border-color: #6a4a2a; transform: scale(1.05); }
+.recipe-slot.active { border-color: #ffd700; box-shadow: 0 0 8px rgba(255,215,0,0.3); }
+.recipe-slot.locked { opacity: 0.3; cursor: not-allowed; }
+.recipe-slot canvas { image-rendering: pixelated; width: 40px; height: 40px; }
+.recipe-slot .cost-tag {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.7); color: #ffd700; font-size: 8px;
+  text-align: center; padding: 1px 0;
+}
+
+#cook-area {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; position: relative; width: 100%;
+}
+#dish-display {
+  width: 192px; height: 160px;
+  margin-bottom: 16px; position: relative;
+}
+#dish-display canvas { image-rendering: pixelated; }
+#surface-canvas { width: 192px; height: 160px; position: absolute; left: 0; top: 16px; }
+#dish-canvas { width: 128px; height: 128px; position: absolute; left: 32px; top: 0; z-index: 1; pointer-events: none; }
+#dish-name { font-size: 16px; color: #cca060; margin-bottom: 8px; font-weight: 600; }
+#dish-value { font-size: 13px; color: #888; margin-bottom: 16px; }
+
+#cook-btn {
+  padding: 14px 48px; border: 2px solid #cc6600; border-radius: 10px;
+  background: linear-gradient(to bottom, #cc6600, #994400);
+  color: #fff; font-size: 18px; font-weight: bold; cursor: pointer;
+  transition: all 0.15s; user-select: none; -webkit-tap-highlight-color: transparent;
+  text-transform: uppercase; letter-spacing: 2px;
+}
+#cook-btn:hover { background: linear-gradient(to bottom, #dd7700, #aa5500); box-shadow: 0 0 16px rgba(204,102,0,0.4); }
+#cook-btn:active { transform: scale(0.95); }
+
+#particles-canvas {
+  position: absolute; inset: 0; pointer-events: none; width: 100%; height: 100%;
+}
+
+#shop {
+  width: 320px; flex-shrink: 0; background: #140a04;
+  border-left: 2px solid #4a3020; overflow-y: auto; overflow-x: hidden;
+}
+#shop::-webkit-scrollbar { width: 6px; }
+#shop::-webkit-scrollbar-track { background: #140a04; }
+#shop::-webkit-scrollbar-thumb { background: #4a3020; border-radius: 3px; }
+
+.shop-header {
+  padding: 12px 16px; font-size: 16px; font-weight: bold; color: #ffd700;
+  border-bottom: 1px solid #2a1a0e; position: sticky; top: 0; background: #140a04; z-index: 1;
+}
+
+#prestige-bar { padding: 10px 14px; border-bottom: 1px solid #2a1a0e; }
+#prestige-btn {
+  width: 100%; padding: 10px; border: 2px solid #cc6600; border-radius: 8px;
+  background: linear-gradient(to bottom, #4a2000, #2a1000);
+  color: #ffaa44; font-size: 13px; font-weight: bold; cursor: pointer; transition: all 0.2s;
+}
+#prestige-btn:hover:not(:disabled) { background: linear-gradient(to bottom, #5a3010, #3a2010); box-shadow: 0 0 12px rgba(204,102,0,0.3); }
+#prestige-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+#prestige-info { font-size: 11px; color: #806040; margin-top: 6px; text-align: center; }
+
+.upgrade-btn {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 10px 14px; border: none; border-bottom: 1px solid #1a0e08;
+  background: #1e0e04; color: #f5e6d3; cursor: pointer; text-align: left;
+  transition: background 0.15s;
+}
+.upgrade-btn:hover:not(.locked) { background: #2a1a0e; }
+.upgrade-btn.locked { opacity: 0.35; cursor: not-allowed; }
+.upgrade-btn .icon { font-size: 22px; width: 36px; text-align: center; flex-shrink: 0; }
+.upgrade-btn .info { flex: 1; min-width: 0; }
+.upgrade-btn .name { font-weight: bold; font-size: 13px; }
+.upgrade-btn .desc { font-size: 11px; color: #806040; }
+.upgrade-btn .cost-line { font-size: 12px; color: #ffd700; margin-top: 2px; }
+.upgrade-btn .count { font-size: 18px; font-weight: bold; color: #8fdf8f; width: 32px; text-align: right; flex-shrink: 0; }
+
+@media (max-width: 700px) {
+  #main { flex-direction: column; }
+  #kitchen { flex: none; height: 55vh; }
+  #shop { width: 100%; flex: 1; border-left: none; border-top: 2px solid #4a3020; }
+  #top-bar { gap: 16px; padding: 6px 10px; min-height: 44px; }
+  .stat .value { font-size: 17px; }
+  #cook-btn { padding: 12px 36px; font-size: 16px; }
+  .recipe-slot { width: 46px; height: 46px; }
+  .recipe-slot canvas { width: 32px; height: 32px; }
+}
+</style>
+</head>
+<body>
+<div id="top-bar">
+  <div class="stat stat-coins"><div class="label">Coins</div><div class="value" id="coins-display">0</div></div>
+  <div class="stat stat-cps"><div class="label">Per Second</div><div class="value" id="cps-display">0</div></div>
+  <div class="stat stat-cpc"><div class="label">Per Cook</div><div class="value" id="cpc-display">1</div></div>
+</div>
+<div id="main">
+  <div id="kitchen">
+    <div id="recipe-bar"></div>
+    <div id="cook-area">
+      <canvas id="particles-canvas"></canvas>
+      <div id="dish-display"><canvas id="surface-canvas" width="48" height="40"></canvas><canvas id="dish-canvas" width="32" height="32"></canvas></div>
+      <div id="dish-name">Fried Egg</div>
+      <div id="dish-value">+1 coin</div>
+      <button id="cook-btn">Cook!</button>
+    </div>
+  </div>
+  <div id="shop">
+    <div class="shop-header">Upgrades</div>
+    <div id="prestige-bar">
+      <button id="prestige-btn" disabled>Grand Opening (need 1M coins)</button>
+      <div id="prestige-info">Prestige multiplier: x1.00</div>
+    </div>
+    <div id="upgrade-list"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+'use strict';
+
+// ============================================================
+// ANTI-TAMPER
+// ============================================================
+var _SALT = 'szl-str-2026';
+function _checksum(obj) {
+  var s = JSON.stringify(obj);
+  var h = 0;
+  for (var i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  for (var j = 0; j < _SALT.length; j++) {
+    h = ((h << 5) - h + _SALT.charCodeAt(j)) | 0;
+  }
+  return h;
+}
+
+// ============================================================
+// SUPABASE
+// ============================================================
+var _SU = 'https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+var _SK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+function submitScore(g, s) {
+  var n = prompt('Score: ' + formatNum(s) + ' coins! Enter initials (max 5):');
+  if (!n) return;
+  n = n.trim().slice(0, 5).toUpperCase();
+  if (!n) return;
+  try {
+    fetch(_SU + '/rest/v1/high_scores', {
+      method: 'POST',
+      headers: { 'apikey': _SK, 'Authorization': 'Bearer ' + _SK, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ game: g, initials: n, score: s })
+    });
+  } catch (e) {}
+}
+
+// ============================================================
+// AUDIO
+// ============================================================
+var audioCtx = null;
+function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+function playTone(freq, dur, vol, type) {
+  if (!audioCtx) return;
+  var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type || 'sine';
+  o.frequency.value = freq;
+  g.gain.value = vol || 0.08;
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfxSizzle() {
+  if (!audioCtx) return;
+  var buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.08, audioCtx.sampleRate);
+  var d = buf.getChannelData(0);
+  for (var i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+  var src = audioCtx.createBufferSource();
+  var g = audioCtx.createGain();
+  src.buffer = buf; g.gain.value = 0.06;
+  var f = audioCtx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 3000;
+  src.connect(f); f.connect(g); g.connect(audioCtx.destination);
+  src.start();
+}
+function sfxChop() {
+  // sharp percussive chop
+  if (!audioCtx) return;
+  var buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.04, audioCtx.sampleRate);
+  var d = buf.getChannelData(0);
+  for (var i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
+  var src = audioCtx.createBufferSource();
+  var g = audioCtx.createGain();
+  src.buffer = buf; g.gain.value = 0.08;
+  var f = audioCtx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1200;
+  src.connect(f); f.connect(g); g.connect(audioCtx.destination);
+  src.start();
+}
+function sfxPlate() {
+  // ceramic clink
+  playTone(2400, 0.06, 0.05); setTimeout(function() { playTone(3200, 0.04, 0.03); }, 30);
+}
+function sfxCook() {
+  var r = state.selectedRecipe;
+  if (r === 4) sfxChop();           // sushi — knife on cutting board
+  else if (r === 6) sfxPlate();     // chef's special — plating
+  else sfxSizzle();                 // everything else — hot surface
+}
+function sfxCoin() { playTone(880, 0.1, 0.06); setTimeout(function() { playTone(1100, 0.08, 0.04); }, 60); }
+function sfxBuy() { playTone(600, 0.05, 0.06, 'square'); playTone(800, 0.08, 0.04, 'square'); }
+function sfxUnlock() {
+  playTone(523, 0.12, 0.07); setTimeout(function() { playTone(659, 0.12, 0.07); }, 100);
+  setTimeout(function() { playTone(784, 0.15, 0.08); }, 200);
+}
+function sfxPrestige() {
+  playTone(523, 0.2, 0.1); setTimeout(function() { playTone(659, 0.2, 0.1); }, 150);
+  setTimeout(function() { playTone(784, 0.2, 0.1); }, 300);
+  setTimeout(function() { playTone(1047, 0.4, 0.12); }, 450);
+}
+
+// ============================================================
+// RECIPES
+// ============================================================
+var RECIPES = [
+  { name: 'Fried Egg',       baseValue: 1,    unlockCost: 0,       draw: drawFriedEgg,       surface: drawSurfaceGriddle },
+  { name: 'Grilled Cheese',  baseValue: 5,    unlockCost: 50,      draw: drawGrilledCheese,  surface: drawSurfacePan },
+  { name: 'Stir Fry',        baseValue: 15,   unlockCost: 300,     draw: drawStirFry,        surface: drawSurfaceWokFlame },
+  { name: 'Ramen Bowl',      baseValue: 50,   unlockCost: 1500,    draw: drawRamen,          surface: drawSurfacePot },
+  { name: 'Sushi Platter',   baseValue: 150,  unlockCost: 8000,    draw: drawSushi,          surface: drawSurfaceCuttingBoard },
+  { name: 'Steak Dinner',    baseValue: 500,  unlockCost: 50000,   draw: drawSteak,          surface: drawSurfaceGrill },
+  { name: "Chef's Special",  baseValue: 2000, unlockCost: 500000,  draw: drawChefsSpecial,   surface: drawSurfacePrepStation },
+];
+
+// ============================================================
+// UPGRADES
+// ============================================================
+var UPGRADES = [
+  { name: 'Sharp Knife',   desc: '+1 coin per cook',         icon: '\uD83D\uDD2A', baseCost: 10,       type: 'bonus', value: 1 },
+  { name: 'Better Stove',  desc: '+15% all earnings',        icon: '\uD83D\uDD25', baseCost: 25,       type: 'mult',  value: 0.15 },
+  { name: 'Sous Chef',     desc: 'Auto-cook Fried Egg',      icon: '\uD83D\uDC68\u200D\uD83C\uDF73', baseCost: 100,      type: 'auto', recipe: 0 },
+  { name: 'Tip Jar',       desc: '+10% all earnings',        icon: '\uD83C\uDFA9', baseCost: 200,      type: 'mult',  value: 0.10 },
+  { name: 'Line Cook',     desc: 'Auto-cook Grilled Cheese', icon: '\uD83D\uDC69\u200D\uD83C\uDF73', baseCost: 500,      type: 'auto', recipe: 1 },
+  { name: 'Wok Master',    desc: 'Auto-cook Stir Fry',       icon: '\uD83E\uDD62', baseCost: 2000,     type: 'auto', recipe: 2 },
+  { name: 'Food Truck',    desc: '+25% all earnings',        icon: '\uD83D\uDE9A', baseCost: 5000,     type: 'mult',  value: 0.25 },
+  { name: 'Noodle Chef',   desc: 'Auto-cook Ramen',          icon: '\uD83C\uDF5C', baseCost: 10000,    type: 'auto', recipe: 3 },
+  { name: 'Sushi Master',  desc: 'Auto-cook Sushi',          icon: '\uD83C\uDF63', baseCost: 60000,    type: 'auto', recipe: 4 },
+  { name: 'TV Appearance', desc: '+50% all earnings',        icon: '\uD83D\uDCFA', baseCost: 100000,   type: 'mult',  value: 0.50 },
+  { name: 'Grill Master',  desc: 'Auto-cook Steak',          icon: '\uD83E\uDD69', baseCost: 400000,   type: 'auto', recipe: 5 },
+  { name: 'Head Chef',     desc: "Auto-cook Chef's Special", icon: '\u2B50', baseCost: 3000000,  type: 'auto', recipe: 6 },
+];
+
+// ============================================================
+// GAME STATE
+// ============================================================
+var state = {
+  coins: 0,
+  totalCoins: 0,
+  selectedRecipe: 0,
+  unlockedRecipes: [true, false, false, false, false, false, false],
+  upgradeLevels: [],
+  prestigeCount: 0,
+  cookCooldown: 0,
+  autoTimers: [0, 0, 0, 0, 0, 0, 0],
+  lastSave: Date.now(),
+};
+for (var i = 0; i < UPGRADES.length; i++) state.upgradeLevels.push(0);
+
+// ============================================================
+// DERIVED VALUES
+// ============================================================
+function getPrestigeMult() { return 1 + 0.1 * state.prestigeCount; }
+function getBonusPerCook() {
+  var bonus = 0;
+  for (var i = 0; i < UPGRADES.length; i++) {
+    if (UPGRADES[i].type === 'bonus') bonus += UPGRADES[i].value * state.upgradeLevels[i];
+  }
+  return bonus;
+}
+function getEarningsMult() {
+  var m = 1;
+  for (var i = 0; i < UPGRADES.length; i++) {
+    if (UPGRADES[i].type === 'mult') m += UPGRADES[i].value * state.upgradeLevels[i];
+  }
+  return m * getPrestigeMult();
+}
+function getDishValue(recipeIdx) {
+  return Math.floor((RECIPES[recipeIdx].baseValue + getBonusPerCook()) * getEarningsMult());
+}
+function getAutoLevel(recipeIdx) {
+  for (var i = 0; i < UPGRADES.length; i++) {
+    if (UPGRADES[i].type === 'auto' && UPGRADES[i].recipe === recipeIdx) return state.upgradeLevels[i];
+  }
+  return 0;
+}
+function getUpgradeCost(idx) {
+  return Math.floor(UPGRADES[idx].baseCost * Math.pow(1.15, state.upgradeLevels[idx]));
+}
+function getCoinsPerSecond() {
+  var total = 0;
+  for (var r = 0; r < RECIPES.length; r++) {
+    var lvl = getAutoLevel(r);
+    if (lvl > 0 && state.unlockedRecipes[r]) {
+      total += getDishValue(r) * lvl / 3;
+    }
+  }
+  return Math.floor(total);
+}
+
+// ============================================================
+// SPRITE DRAWING (inlined from props)
+// ============================================================
+function drawFriedEgg(ctx) {
+  ctx.fillStyle = '#c0b8a8'; ctx.beginPath(); ctx.ellipse(16,18,14,10,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#e8e4dc'; ctx.beginPath(); ctx.ellipse(16,18,12,8,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#f0ece4'; ctx.beginPath(); ctx.ellipse(16,17,11,7,0,0,Math.PI*2); ctx.fill();
+  // egg white
+  ctx.fillStyle = '#f5f0e8'; ctx.beginPath(); ctx.ellipse(16,16,9,7,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(13,14,4,3,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(20,15,3,4,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(14,19,3,2,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#ffffffcc'; ctx.beginPath(); ctx.ellipse(14,14,3,2,0,0,Math.PI*2); ctx.fill();
+  // yolk
+  ctx.fillStyle = '#ffd700'; ctx.beginPath(); ctx.arc(16,16,4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#ffe44d'; ctx.beginPath(); ctx.arc(15,15,2,0,Math.PI*2); ctx.fill();
+}
+
+function drawGrilledCheese(ctx) {
+  // plate
+  ctx.fillStyle = '#b8b0a0'; ctx.beginPath(); ctx.ellipse(16,26,12,4,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#e0dcd4'; ctx.beginPath(); ctx.ellipse(16,26,11,3,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#eae6de'; ctx.fillRect(5,25,22,1);
+  // front half
+  ctx.fillStyle = '#d4a030';
+  ctx.beginPath(); ctx.moveTo(8,24); ctx.lineTo(20,10); ctx.lineTo(20,24); ctx.closePath(); ctx.fill();
+  // cheese layer
+  ctx.fillStyle = '#ffcc00';
+  ctx.beginPath(); ctx.moveTo(8,23); ctx.lineTo(19,11); ctx.lineTo(19,12); ctx.lineTo(8,24); ctx.closePath(); ctx.fill();
+  // grill marks
+  ctx.fillStyle = '#8b6914';
+  ctx.fillRect(11,15,6,1); ctx.fillRect(10,18,7,1); ctx.fillRect(9,21,8,1);
+  // highlight
+  ctx.fillStyle = '#e0b840';
+  ctx.fillRect(13,13,4,1); ctx.fillRect(12,16,4,1);
+  // back half
+  ctx.fillStyle = '#b89028';
+  ctx.beginPath(); ctx.moveTo(20,24); ctx.lineTo(20,12); ctx.lineTo(28,20); ctx.lineTo(28,24); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#8b6914'; ctx.fillRect(22,16,4,1); ctx.fillRect(22,19,4,1);
+  // cheese drip
+  ctx.fillStyle = '#ffcc00'; ctx.fillRect(9,24,2,2); ctx.fillRect(20,23,1,2);
+}
+
+function drawStirFry(ctx) {
+  // wok
+  ctx.fillStyle = '#333'; ctx.beginPath(); ctx.ellipse(16,17,14,11,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#444'; ctx.beginPath(); ctx.ellipse(16,16,12,9,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#555'; ctx.beginPath(); ctx.ellipse(16,10,12,2,0,0,Math.PI*2); ctx.fill();
+  // rice base
+  ctx.fillStyle = '#ffffcc'; ctx.beginPath(); ctx.ellipse(16,16,9,6,0,0,Math.PI*2); ctx.fill();
+  // veggies
+  ctx.fillStyle = '#44aa44'; ctx.fillRect(10,13,3,2); ctx.fillRect(18,14,3,2); ctx.fillRect(13,17,2,3); ctx.fillRect(14,11,2,2);
+  ctx.fillStyle = '#ff8c00'; ctx.fillRect(11,15,2,2); ctx.fillRect(17,12,3,2); ctx.fillRect(19,18,2,2);
+  ctx.fillStyle = '#dd3333'; ctx.fillRect(15,14,2,2); ctx.fillRect(12,18,2,2);
+  // handles
+  ctx.fillStyle = '#555'; ctx.fillRect(1,15,3,2); ctx.fillRect(28,15,3,2);
+}
+
+function drawRamen(ctx) {
+  // bowl
+  ctx.fillStyle = '#d0c0a8'; ctx.beginPath(); ctx.ellipse(16,18,14,11,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#e8ddd0'; ctx.beginPath(); ctx.ellipse(16,17,12,9,0,0,Math.PI*2); ctx.fill();
+  // rim
+  ctx.fillStyle = '#cc8844'; ctx.beginPath(); ctx.ellipse(16,11,12,2,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#e8ddd0'; ctx.beginPath(); ctx.ellipse(16,11,10,1,0,0,Math.PI*2); ctx.fill();
+  // broth
+  ctx.fillStyle = '#d4a030'; ctx.beginPath(); ctx.ellipse(16,17,10,7,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#ddb040'; ctx.beginPath(); ctx.ellipse(16,16,8,5,0,0,Math.PI*2); ctx.fill();
+  // noodles
+  ctx.strokeStyle = '#ffffaa'; ctx.lineWidth = 1;
+  for (var i = 0; i < 5; i++) {
+    ctx.beginPath();
+    for (var x = 9; x < 24; x++) {
+      var y = 14 + i * 2 + Math.sin((x + i * 3) * 0.8) * 0.8;
+      if (x === 9) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  // egg half
+  ctx.fillStyle = '#f5e0a0'; ctx.beginPath(); ctx.ellipse(20,14,3,2,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#ffcc44'; ctx.beginPath(); ctx.arc(20,14,1,0,Math.PI*2); ctx.fill();
+  // green onion
+  ctx.fillStyle = '#44aa44';
+  ctx.beginPath(); ctx.arc(11,14,1.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(13,18,1.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(18,19,1.5,0,Math.PI*2); ctx.fill();
+  // chopsticks
+  ctx.strokeStyle = '#a09080'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(22,8); ctx.lineTo(30,16); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(24,8); ctx.lineTo(31,15); ctx.stroke();
+}
+
+function drawSushi(ctx) {
+  // wooden board
+  ctx.fillStyle = '#7a5b3a'; ctx.fillRect(2,9,28,18);
+  ctx.fillStyle = '#8b6b4a'; ctx.fillRect(3,8,26,18);
+  // wood grain
+  ctx.fillStyle = '#9a7b5a';
+  ctx.fillRect(4,12,24,1); ctx.fillRect(4,16,24,1); ctx.fillRect(4,20,24,1); ctx.fillRect(4,24,24,1);
+  // salmon nigiri
+  ctx.fillStyle = '#f5f5e8'; ctx.fillRect(4,16,7,5); ctx.fillRect(5,15,5,7);
+  ctx.fillStyle = '#fa8072'; ctx.fillRect(4,13,7,4); ctx.fillRect(5,12,5,4);
+  ctx.fillStyle = '#ff9988'; ctx.fillRect(5,12,5,1);
+  ctx.fillStyle = '#fa7062'; ctx.fillRect(5,15,5,1);
+  ctx.fillStyle = '#2d4a2d'; ctx.fillRect(6,14,3,7);
+  // tuna nigiri
+  ctx.fillStyle = '#f5f5e8'; ctx.fillRect(13,16,7,5); ctx.fillRect(14,15,5,7);
+  ctx.fillStyle = '#cc3333'; ctx.fillRect(13,13,7,4); ctx.fillRect(14,12,5,4);
+  ctx.fillStyle = '#dd4444'; ctx.fillRect(14,12,5,1);
+  ctx.fillStyle = '#2d4a2d'; ctx.fillRect(15,14,3,7);
+  // maki rolls
+  ctx.fillStyle = '#2d4a2d';
+  ctx.beginPath(); ctx.arc(24,14,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#f5f5e8'; ctx.beginPath(); ctx.arc(24,14,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#6b8e23'; ctx.beginPath(); ctx.arc(24,14,1,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#2d4a2d';
+  ctx.beginPath(); ctx.arc(24,20,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#f5f5e8'; ctx.beginPath(); ctx.arc(24,20,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#fa8072'; ctx.beginPath(); ctx.arc(24,20,1,0,Math.PI*2); ctx.fill();
+  // soy dish
+  ctx.fillStyle = '#3a2010'; ctx.beginPath(); ctx.arc(6,25,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#4a3020'; ctx.beginPath(); ctx.arc(6,25,1.5,0,Math.PI*2); ctx.fill();
+  // wasabi
+  ctx.fillStyle = '#6b8e23'; ctx.fillRect(10,24,2,2);
+}
+
+function drawSteak(ctx) {
+  // plate
+  ctx.fillStyle = '#c0b8a8'; ctx.beginPath(); ctx.ellipse(16,18,14,11,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#e8e4dc'; ctx.beginPath(); ctx.ellipse(16,18,12,9,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#f0ece4'; ctx.beginPath(); ctx.ellipse(16,17,11,8,0,0,Math.PI*2); ctx.fill();
+  // steak
+  ctx.fillStyle = '#6b3410'; ctx.beginPath(); ctx.ellipse(14,16,8,5,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#8b4513'; ctx.beginPath(); ctx.ellipse(14,15,7,4,0,0,Math.PI*2); ctx.fill();
+  // grill marks
+  ctx.fillStyle = '#4a2008';
+  for (var i = 0; i < 5; i++) { ctx.fillRect(9 + i * 3, 14, 1, 1); ctx.fillRect(9 + i * 3, 16, 1, 1); }
+  // sear highlight
+  ctx.fillStyle = '#a06030'; ctx.beginPath(); ctx.ellipse(12,14,3,2,0,0,Math.PI*2); ctx.fill();
+  // butter
+  ctx.fillStyle = '#ffd700'; ctx.fillRect(13,13,3,2);
+  // broccoli
+  ctx.fillStyle = '#228b22';
+  ctx.beginPath(); ctx.arc(22,14,2.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(24,16,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#33aa33';
+  ctx.beginPath(); ctx.arc(23,13,1.5,0,Math.PI*2); ctx.fill();
+  // potato
+  ctx.fillStyle = '#daa520'; ctx.beginPath(); ctx.ellipse(21,21,3,2,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#c49520'; ctx.beginPath(); ctx.ellipse(19,22,2,1.5,0,0,Math.PI*2); ctx.fill();
+}
+
+function drawChefsSpecial(ctx) {
+  // gold rim plate
+  ctx.fillStyle = '#daa520'; ctx.beginPath(); ctx.ellipse(16,18,14,11,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#f5f0e8'; ctx.beginPath(); ctx.ellipse(16,18,13,10,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#faf5ed'; ctx.beginPath(); ctx.ellipse(16,17,12,9,0,0,Math.PI*2); ctx.fill();
+  // gold rim dots
+  for (var a = 0; a < 12; a++) {
+    var angle = (a / 12) * Math.PI * 2;
+    ctx.fillStyle = '#daa520';
+    ctx.fillRect(Math.round(16 + 13 * Math.cos(angle)), Math.round(18 + 10 * Math.sin(angle)), 1, 1);
+  }
+  // sauce swirl
+  ctx.strokeStyle = '#cc2222'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (var t = 0; t < 20; t++) {
+    var tt = t / 20;
+    var sx = 16 + (8 - tt * 6) * Math.cos(tt * Math.PI * 3);
+    var sy = 18 + (6 - tt * 4) * Math.sin(tt * Math.PI * 3);
+    if (t === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+  }
+  ctx.stroke();
+  // protein
+  ctx.fillStyle = '#8b4513'; ctx.beginPath(); ctx.ellipse(15,16,5,3,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#a06030'; ctx.beginPath(); ctx.ellipse(15,15,4,2,0,0,Math.PI*2); ctx.fill();
+  // cream
+  ctx.fillStyle = '#fff8dc'; ctx.beginPath(); ctx.arc(20,15,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#fffff0'; ctx.fillRect(20,14,1,1);
+  // herbs
+  ctx.fillStyle = '#338833';
+  ctx.fillRect(12,14,1,1); ctx.fillRect(11,15,1,1); ctx.fillRect(13,13,1,1);
+  ctx.fillRect(19,20,1,1); ctx.fillRect(18,19,1,1);
+  ctx.fillStyle = '#44aa44';
+  ctx.fillRect(14,14,1,1); ctx.fillRect(16,14,1,1); ctx.fillRect(15,13,1,1);
+}
+
+// ============================================================
+// COOKING SURFACES (48x40 canvases)
+// ============================================================
+function drawSurfaceGriddle(ctx) {
+  // Flat top griddle — steel surface with heat glow underneath
+  ctx.fillStyle = '#666'; ctx.fillRect(4, 18, 40, 14);
+  ctx.fillStyle = '#777'; ctx.fillRect(5, 18, 38, 2); // top shine
+  ctx.fillStyle = '#555'; ctx.fillRect(4, 30, 40, 3); // front edge
+  // Grill lines
+  ctx.fillStyle = '#5a5a5a';
+  for (var i = 0; i < 6; i++) ctx.fillRect(8 + i * 6, 20, 1, 10);
+  // Grease spots
+  ctx.fillStyle = '#88774480'; ctx.beginPath(); ctx.ellipse(18, 25, 3, 2, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(34, 23, 2, 1.5, 0, 0, Math.PI*2); ctx.fill();
+  // Heat glow below
+  ctx.fillStyle = '#ff440030'; ctx.fillRect(6, 33, 36, 4);
+  ctx.fillStyle = '#ff660020'; ctx.fillRect(8, 35, 32, 4);
+  // Knobs
+  ctx.fillStyle = '#444'; ctx.beginPath(); ctx.arc(8, 36, 2, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(40, 36, 2, 0, Math.PI*2); ctx.fill();
+}
+
+function drawSurfacePan(ctx) {
+  // Frying pan — circle with handle
+  ctx.fillStyle = '#555'; ctx.beginPath(); ctx.ellipse(22, 22, 16, 14, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#666'; ctx.beginPath(); ctx.ellipse(22, 21, 14, 12, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#5a5a5a'; ctx.beginPath(); ctx.ellipse(22, 20, 12, 10, 0, 0, Math.PI*2); ctx.fill();
+  // Handle
+  ctx.fillStyle = '#443322'; ctx.fillRect(38, 19, 8, 4);
+  ctx.fillStyle = '#554433'; ctx.fillRect(38, 19, 8, 2);
+  // Oil sheen
+  ctx.fillStyle = '#77770020'; ctx.beginPath(); ctx.ellipse(20, 19, 8, 6, 0, 0, Math.PI*2); ctx.fill();
+}
+
+function drawSurfaceWokFlame(ctx) {
+  // Wok ring with flames underneath
+  ctx.fillStyle = '#444'; ctx.beginPath(); ctx.ellipse(24, 18, 16, 4, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#555'; ctx.beginPath(); ctx.ellipse(24, 18, 14, 3, 0, 0, Math.PI*2); ctx.fill();
+  // Flames
+  var flames = [[14,28],[18,30],[22,29],[26,30],[30,28],[34,29]];
+  for (var i = 0; i < flames.length; i++) {
+    var fx = flames[i][0], fy = flames[i][1];
+    ctx.fillStyle = '#ff4400'; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.quadraticCurveTo(fx-2, fy-6, fx, fy-8); ctx.quadraticCurveTo(fx+2, fy-6, fx, fy); ctx.fill();
+    ctx.fillStyle = '#ffaa00'; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.quadraticCurveTo(fx-1, fy-4, fx, fy-5); ctx.quadraticCurveTo(fx+1, fy-4, fx, fy); ctx.fill();
+  }
+  // Burner ring
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(24, 28, 12, 3, 0, 0, Math.PI*2); ctx.stroke();
+}
+
+function drawSurfacePot(ctx) {
+  // Large pot on burner — for boiling ramen
+  ctx.fillStyle = '#888'; ctx.beginPath(); ctx.ellipse(24, 24, 14, 10, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#999'; ctx.beginPath(); ctx.ellipse(24, 24, 14, 10, 0, Math.PI, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#aaa'; ctx.beginPath(); ctx.ellipse(24, 16, 14, 4, 0, 0, Math.PI*2); ctx.fill();
+  // Rim
+  ctx.fillStyle = '#bbb'; ctx.beginPath(); ctx.ellipse(24, 16, 13, 3, 0, 0, Math.PI*2); ctx.fill();
+  // Broth inside
+  ctx.fillStyle = '#c89830'; ctx.beginPath(); ctx.ellipse(24, 17, 11, 2.5, 0, 0, Math.PI*2); ctx.fill();
+  // Steam wisps
+  ctx.strokeStyle = '#ffffff30'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(18, 14); ctx.quadraticCurveTo(16, 8, 18, 4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(24, 13); ctx.quadraticCurveTo(26, 7, 24, 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(30, 14); ctx.quadraticCurveTo(32, 9, 30, 5); ctx.stroke();
+  // Handles
+  ctx.fillStyle = '#666'; ctx.fillRect(8, 22, 3, 3); ctx.fillRect(37, 22, 3, 3);
+}
+
+function drawSurfaceCuttingBoard(ctx) {
+  // Wooden cutting board with knife
+  ctx.fillStyle = '#8b6b4a'; ctx.fillRect(6, 16, 36, 20);
+  ctx.fillStyle = '#9a7b5a'; ctx.fillRect(7, 16, 34, 18);
+  // Wood grain
+  ctx.fillStyle = '#a08860'; ctx.fillRect(8, 19, 32, 1); ctx.fillRect(8, 23, 32, 1); ctx.fillRect(8, 27, 32, 1); ctx.fillRect(8, 31, 32, 1);
+  // Knife to the right
+  ctx.fillStyle = '#ccc'; ctx.fillRect(42, 20, 2, 12); // blade
+  ctx.fillStyle = '#ddd'; ctx.fillRect(42, 20, 1, 12);  // shine edge
+  ctx.fillStyle = '#554433'; ctx.fillRect(42, 32, 2, 5); // handle
+  ctx.fillStyle = '#665544'; ctx.fillRect(42, 32, 1, 5);
+}
+
+function drawSurfaceGrill(ctx) {
+  // Charcoal grill grate
+  ctx.fillStyle = '#333'; ctx.fillRect(4, 18, 40, 16);
+  ctx.fillStyle = '#444'; ctx.fillRect(5, 18, 38, 2);
+  // Grill bars
+  ctx.fillStyle = '#555';
+  for (var i = 0; i < 8; i++) ctx.fillRect(6, 20 + i * 2, 36, 1);
+  // Glowing coals underneath
+  ctx.fillStyle = '#cc330040'; ctx.fillRect(6, 34, 36, 4);
+  ctx.fillStyle = '#ff440030';
+  for (var j = 0; j < 6; j++) {
+    ctx.beginPath(); ctx.arc(10 + j * 6, 36, 2 + Math.random(), 0, Math.PI*2); ctx.fill();
+  }
+  // Smoke wisps
+  ctx.strokeStyle = '#ffffff18'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(15, 18); ctx.quadraticCurveTo(13, 10, 16, 4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(33, 18); ctx.quadraticCurveTo(35, 11, 32, 5); ctx.stroke();
+}
+
+function drawSurfacePrepStation(ctx) {
+  // Stainless steel prep station with garnish tools
+  ctx.fillStyle = '#aaa'; ctx.fillRect(4, 18, 40, 16);
+  ctx.fillStyle = '#bbb'; ctx.fillRect(5, 18, 38, 2);
+  ctx.fillStyle = '#999'; ctx.fillRect(4, 32, 40, 3);
+  // Sauce bottles
+  ctx.fillStyle = '#cc2222'; ctx.fillRect(6, 10, 4, 8); ctx.fillStyle = '#dd3333'; ctx.fillRect(7, 8, 2, 3);
+  ctx.fillStyle = '#228822'; ctx.fillRect(12, 11, 4, 7); ctx.fillStyle = '#33aa33'; ctx.fillRect(13, 9, 2, 3);
+  // Small herb bowl
+  ctx.fillStyle = '#ddd'; ctx.beginPath(); ctx.ellipse(40, 14, 4, 3, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#44aa44'; ctx.beginPath(); ctx.ellipse(40, 13, 3, 2, 0, 0, Math.PI*2); ctx.fill();
+  // Tweezers
+  ctx.strokeStyle = '#888'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(34, 8); ctx.lineTo(32, 16); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(36, 8); ctx.lineTo(34, 16); ctx.stroke();
+}
+
+// ============================================================
+// PARTICLE SYSTEM
+// ============================================================
+var particles = [];
+var particleCanvas, particleCtx;
+
+function spawnCoinParticle(x, y) {
+  // Small sparkles that pop outward and arc down — not upward fire
+  for (var i = 0; i < 4; i++) {
+    var angle = -Math.PI * 0.2 - Math.random() * Math.PI * 0.6; // mostly upward arc
+    var speed = 1.5 + Math.random() * 2;
+    particles.push({
+      x: x + (Math.random() - 0.5) * 20,
+      y: y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1,
+      decay: 0.03 + Math.random() * 0.02,
+      size: 2 + Math.random() * 2,
+      color: ['#ffd700', '#ffffff', '#ffffaa'][Math.floor(Math.random() * 3)],
+      gravity: true,
+    });
+  }
+}
+
+function spawnSteamParticle(x, y) {
+  for (var i = 0; i < 3; i++) {
+    particles.push({
+      x: x + (Math.random() - 0.5) * 20,
+      y: y,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: -1 - Math.random() * 1.5,
+      life: 1,
+      decay: 0.02 + Math.random() * 0.01,
+      size: 4 + Math.random() * 4,
+      color: '#ffffff',
+    });
+  }
+}
+
+function spawnSliceParticle(x, y) {
+  // quick white/silver streaks — knife glint
+  for (var i = 0; i < 4; i++) {
+    var angle = (Math.random() - 0.5) * 1.5 - 0.8; // mostly left-to-right slash
+    particles.push({
+      x: x + (Math.random() - 0.5) * 20,
+      y: y + (Math.random() - 0.5) * 10,
+      vx: Math.cos(angle) * (3 + Math.random() * 2),
+      vy: Math.sin(angle) * (2 + Math.random()),
+      life: 1,
+      decay: 0.06 + Math.random() * 0.02,
+      size: 2 + Math.random() * 2,
+      color: Math.random() > 0.5 ? '#ffffff' : '#ccddee',
+    });
+  }
+}
+
+function spawnShimmerParticle(x, y) {
+  // gentle golden sparkles — plating garnish
+  for (var i = 0; i < 4; i++) {
+    particles.push({
+      x: x + (Math.random() - 0.5) * 30,
+      y: y + (Math.random() - 0.5) * 15,
+      vx: (Math.random() - 0.5) * 1,
+      vy: -0.5 - Math.random() * 0.5,
+      life: 1,
+      decay: 0.015 + Math.random() * 0.01,
+      size: 2 + Math.random() * 3,
+      color: ['#ffd700', '#ffaa44', '#ffffcc'][Math.floor(Math.random() * 3)],
+    });
+  }
+}
+
+function spawnCookParticle(x, y) {
+  var r = state.selectedRecipe;
+  if (r === 4) spawnSliceParticle(x, y);        // sushi — knife slash
+  else if (r === 6) spawnShimmerParticle(x, y);  // chef's special — plating sparkle
+  else spawnSteamParticle(x, y);                 // hot dishes — steam
+}
+
+// Add gravity to particles so coins fall instead of float up
+var PARTICLE_GRAVITY = 0.05;
+
+function updateParticles(dt) {
+  for (var i = particles.length - 1; i >= 0; i--) {
+    var p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    if (p.gravity) p.vy += PARTICLE_GRAVITY;
+    p.life -= p.decay;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  if (!particleCtx) return;
+  particleCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+  for (var i = 0; i < particles.length; i++) {
+    var p = particles[i];
+    particleCtx.globalAlpha = p.life;
+    particleCtx.fillStyle = p.color;
+    particleCtx.beginPath();
+    particleCtx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    particleCtx.fill();
+  }
+  particleCtx.globalAlpha = 1;
+}
+
+// ============================================================
+// FLOATING TEXT
+// ============================================================
+var floatingTexts = [];
+function spawnFloatingText(x, y, text, color) {
+  floatingTexts.push({ x: x, y: y, text: text, color: color || '#ffd700', life: 1, vy: -1.5 });
+}
+function updateFloatingTexts() {
+  for (var i = floatingTexts.length - 1; i >= 0; i--) {
+    var ft = floatingTexts[i];
+    ft.y += ft.vy;
+    ft.life -= 0.02;
+    if (ft.life <= 0) floatingTexts.splice(i, 1);
+  }
+}
+function drawFloatingTexts() {
+  if (!particleCtx) return;
+  for (var i = 0; i < floatingTexts.length; i++) {
+    var ft = floatingTexts[i];
+    particleCtx.globalAlpha = ft.life;
+    particleCtx.fillStyle = ft.color;
+    particleCtx.font = 'bold 16px Segoe UI, Arial, sans-serif';
+    particleCtx.textAlign = 'center';
+    particleCtx.fillText(ft.text, ft.x, ft.y);
+  }
+  particleCtx.globalAlpha = 1;
+}
+
+// ============================================================
+// FORMAT
+// ============================================================
+function formatNum(n) {
+  if (n < 1000) return String(Math.floor(n));
+  if (n < 1e6) return (n / 1000).toFixed(1) + 'K';
+  if (n < 1e9) return (n / 1e6).toFixed(2) + 'M';
+  if (n < 1e12) return (n / 1e9).toFixed(2) + 'B';
+  return (n / 1e12).toFixed(2) + 'T';
+}
+
+// ============================================================
+// RENDER RECIPE THUMBNAILS
+// ============================================================
+var recipeCanvases = [];
+function renderRecipeSlots() {
+  var bar = document.getElementById('recipe-bar');
+  bar.innerHTML = '';
+  for (var i = 0; i < RECIPES.length; i++) {
+    var slot = document.createElement('div');
+    slot.className = 'recipe-slot' + (state.unlockedRecipes[i] ? '' : ' locked') + (i === state.selectedRecipe ? ' active' : '');
+    var c = document.createElement('canvas');
+    c.width = 32; c.height = 32;
+    var ctx = c.getContext('2d');
+    RECIPES[i].draw(ctx);
+    recipeCanvases[i] = c;
+    slot.appendChild(c);
+    if (!state.unlockedRecipes[i]) {
+      var tag = document.createElement('div');
+      tag.className = 'cost-tag';
+      tag.textContent = formatNum(RECIPES[i].unlockCost);
+      slot.appendChild(tag);
+    }
+    slot.dataset.idx = i;
+    slot.addEventListener('click', onRecipeClick);
+    bar.appendChild(slot);
+  }
+}
+
+function onRecipeClick(e) {
+  var slot = e.currentTarget;
+  var idx = parseInt(slot.dataset.idx);
+  if (state.unlockedRecipes[idx]) {
+    state.selectedRecipe = idx;
+    renderRecipeSlots();
+    renderDish();
+    sfxCoin();
+  } else if (state.coins >= RECIPES[idx].unlockCost) {
+    state.coins -= RECIPES[idx].unlockCost;
+    state.unlockedRecipes[idx] = true;
+    state.selectedRecipe = idx;
+    sfxUnlock();
+    renderRecipeSlots();
+    renderDish();
+    renderUpgrades();
+  }
+}
+
+// ============================================================
+// RENDER MAIN DISH
+// ============================================================
+function renderDish() {
+  var recipe = RECIPES[state.selectedRecipe];
+  // Draw dish
+  var c = document.getElementById('dish-canvas');
+  var ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 32, 32);
+  recipe.draw(ctx);
+  // Draw surface
+  var sc = document.getElementById('surface-canvas');
+  var sctx = sc.getContext('2d');
+  sctx.clearRect(0, 0, 48, 40);
+  recipe.surface(sctx);
+  document.getElementById('dish-name').textContent = recipe.name;
+  document.getElementById('dish-value').textContent = '+' + formatNum(getDishValue(state.selectedRecipe)) + ' coins';
+}
+
+// ============================================================
+// RENDER UPGRADES
+// ============================================================
+function renderUpgrades() {
+  var list = document.getElementById('upgrade-list');
+  list.innerHTML = '';
+  for (var i = 0; i < UPGRADES.length; i++) {
+    var u = UPGRADES[i];
+    var cost = getUpgradeCost(i);
+    var locked = state.coins < cost;
+    // Hide auto-cook upgrades for locked recipes
+    if (u.type === 'auto' && !state.unlockedRecipes[u.recipe]) continue;
+    var btn = document.createElement('button');
+    btn.className = 'upgrade-btn' + (locked ? ' locked' : '');
+    btn.innerHTML =
+      '<div class="icon">' + u.icon + '</div>' +
+      '<div class="info"><div class="name">' + u.name + '</div>' +
+      '<div class="desc">' + u.desc + '</div>' +
+      '<div class="cost-line">' + formatNum(cost) + ' coins</div></div>' +
+      '<div class="count">' + state.upgradeLevels[i] + '</div>';
+    btn.dataset.idx = i;
+    btn.addEventListener('click', onUpgradeClick);
+    list.appendChild(btn);
+  }
+}
+
+function onUpgradeClick(e) {
+  var btn = e.currentTarget;
+  var idx = parseInt(btn.dataset.idx);
+  var cost = getUpgradeCost(idx);
+  if (state.coins >= cost) {
+    state.coins -= cost;
+    state.upgradeLevels[idx]++;
+    sfxBuy();
+    renderUpgrades();
+    renderDish();
+    updateDisplay();
+  }
+}
+
+// ============================================================
+// PRESTIGE
+// ============================================================
+function updatePrestige() {
+  var btn = document.getElementById('prestige-btn');
+  var info = document.getElementById('prestige-info');
+  var canPrestige = state.totalCoins >= 1000000;
+  btn.disabled = !canPrestige;
+  if (canPrestige) {
+    var nextMult = (1 + 0.1 * (state.prestigeCount + 1)).toFixed(2);
+    btn.textContent = 'Grand Opening! (x' + nextMult + ' earnings)';
+  } else {
+    btn.textContent = 'Grand Opening (need ' + formatNum(1000000 - state.totalCoins) + ' more total coins)';
+  }
+  info.textContent = 'Prestige multiplier: x' + getPrestigeMult().toFixed(2) + ' | Prestiges: ' + state.prestigeCount;
+}
+
+document.getElementById('prestige-btn').addEventListener('click', function() {
+  if (state.totalCoins < 1000000) return;
+  if (!confirm('Reset all progress for a permanent x' + (1 + 0.1 * (state.prestigeCount + 1)).toFixed(2) + ' earnings multiplier?')) return;
+  state.prestigeCount++;
+  state.coins = 0;
+  state.totalCoins = 0;
+  state.selectedRecipe = 0;
+  state.unlockedRecipes = [true, false, false, false, false, false, false];
+  for (var i = 0; i < UPGRADES.length; i++) state.upgradeLevels[i] = 0;
+  state.autoTimers = [0, 0, 0, 0, 0, 0, 0];
+  sfxPrestige();
+  renderRecipeSlots();
+  renderDish();
+  renderUpgrades();
+  updateDisplay();
+  saveGame();
+  submitScore('sizzle-street', state.prestigeCount * 1000000);
+});
+
+// ============================================================
+// COOK ACTION
+// ============================================================
+var cookBtn = document.getElementById('cook-btn');
+
+function doCook(recipeIdx) {
+  if (recipeIdx === undefined) recipeIdx = state.selectedRecipe;
+  if (!state.unlockedRecipes[recipeIdx]) return;
+  var value = getDishValue(recipeIdx);
+  state.coins += value;
+  state.totalCoins += value;
+  return value;
+}
+
+function onCookClick() {
+  initAudio();
+  var value = doCook();
+  sfxCook();
+
+  // Particles
+  var cx = particleCanvas.width / 2;
+  var cy = particleCanvas.height * 0.35;
+  spawnCookParticle(cx, cy);
+  spawnCoinParticle(cx, cy + 30);
+  spawnFloatingText(cx, cy + 20, '+' + formatNum(value));
+
+  updateDisplay();
+  renderUpgrades();
+}
+
+cookBtn.addEventListener('click', onCookClick);
+
+// Touch hold — rapid-fire cooking (matches spacebar hold behavior)
+var touchCookInterval = null;
+var touchCookStarted = false;
+cookBtn.addEventListener('touchstart', function(e) {
+  e.preventDefault(); // prevent click + ghost click
+  initAudio();
+  touchCookStarted = true;
+  onCookClick(); // immediate first cook
+  touchCookInterval = setInterval(onCookClick, 80);
+}, { passive: false });
+function stopTouchCook() {
+  if (touchCookInterval) { clearInterval(touchCookInterval); touchCookInterval = null; }
+  touchCookStarted = false;
+}
+cookBtn.addEventListener('touchend', stopTouchCook);
+cookBtn.addEventListener('touchcancel', stopTouchCook);
+// Prevent click from double-firing after touchstart
+cookBtn.addEventListener('click', function(e) {
+  if (touchCookStarted) { e.preventDefault(); return; }
+});
+
+// Keyboard
+document.addEventListener('keydown', function(e) {
+  if (e.code === 'Space') { e.preventDefault(); onCookClick(); }
+  var num = parseInt(e.key);
+  if (num >= 1 && num <= 7) {
+    var idx = num - 1;
+    if (state.unlockedRecipes[idx]) {
+      state.selectedRecipe = idx;
+      renderRecipeSlots();
+      renderDish();
+    }
+  }
+});
+
+// ============================================================
+// DISPLAY UPDATE
+// ============================================================
+function updateDisplay() {
+  document.getElementById('coins-display').textContent = formatNum(state.coins);
+  document.getElementById('cps-display').textContent = formatNum(getCoinsPerSecond());
+  document.getElementById('cpc-display').textContent = formatNum(getDishValue(state.selectedRecipe));
+  document.getElementById('dish-value').textContent = '+' + formatNum(getDishValue(state.selectedRecipe)) + ' coins';
+  updatePrestige();
+}
+
+// ============================================================
+// AUTO-COOK LOOP
+// ============================================================
+function autoTick(dt) {
+  var anyAuto = false;
+  for (var r = 0; r < RECIPES.length; r++) {
+    var lvl = getAutoLevel(r);
+    if (lvl <= 0 || !state.unlockedRecipes[r]) continue;
+    anyAuto = true;
+    state.autoTimers[r] += dt;
+    var interval = 3000 / lvl; // faster with more levels
+    while (state.autoTimers[r] >= interval) {
+      state.autoTimers[r] -= interval;
+      doCook(r);
+    }
+  }
+  return anyAuto;
+}
+
+// ============================================================
+// SAVE / LOAD
+// ============================================================
+var SAVE_KEY = 'sizzle-street-save';
+function saveGame() {
+  var data = {
+    coins: state.coins,
+    totalCoins: state.totalCoins,
+    selectedRecipe: state.selectedRecipe,
+    unlockedRecipes: state.unlockedRecipes,
+    upgradeLevels: state.upgradeLevels,
+    prestigeCount: state.prestigeCount,
+    lastSave: Date.now(),
+  };
+  var payload = { data: data, checksum: _checksum(data) };
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(payload)); } catch (e) {}
+}
+
+function loadGame() {
+  try {
+    var raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return false;
+    var payload = JSON.parse(raw);
+    if (_checksum(payload.data) !== payload.checksum) return false;
+    var d = payload.data;
+    state.coins = d.coins || 0;
+    state.totalCoins = d.totalCoins || 0;
+    state.selectedRecipe = d.selectedRecipe || 0;
+    state.unlockedRecipes = d.unlockedRecipes || [true, false, false, false, false, false, false];
+    state.upgradeLevels = d.upgradeLevels || [];
+    state.prestigeCount = d.prestigeCount || 0;
+    // Ensure array lengths
+    while (state.upgradeLevels.length < UPGRADES.length) state.upgradeLevels.push(0);
+    while (state.unlockedRecipes.length < RECIPES.length) state.unlockedRecipes.push(false);
+    // Offline earnings (capped at 8 hours)
+    var elapsed = Math.min(Date.now() - (d.lastSave || Date.now()), 8 * 3600 * 1000);
+    if (elapsed > 5000) {
+      var cps = getCoinsPerSecond();
+      if (cps > 0) {
+        var offline = Math.floor(cps * elapsed / 1000);
+        state.coins += offline;
+        state.totalCoins += offline;
+        setTimeout(function() {
+          alert('Welcome back! You earned ' + formatNum(offline) + ' coins while away.');
+        }, 100);
+      }
+    }
+    return true;
+  } catch (e) { return false; }
+}
+
+// Auto-save every 30s
+setInterval(saveGame, 30000);
+window.addEventListener('beforeunload', saveGame);
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+var lastTime = performance.now();
+var saveTimer = 0;
+var displayTimer = 0;
+var upgradeTimer = 0;
+
+function gameLoop(now) {
+  var dt = now - lastTime;
+  lastTime = now;
+  if (dt > 1000) dt = 1000; // clamp
+
+  // Auto-cook
+  var hadAuto = autoTick(dt);
+
+  // Update particles
+  updateParticles(dt);
+  updateFloatingTexts();
+  drawParticles();
+  drawFloatingTexts();
+
+  // Periodic display refresh
+  displayTimer += dt;
+  if (displayTimer > 250) {
+    displayTimer = 0;
+    updateDisplay();
+  }
+
+  // Periodic upgrade refresh
+  upgradeTimer += dt;
+  if (upgradeTimer > 1000) {
+    upgradeTimer = 0;
+    renderUpgrades();
+    renderRecipeSlots();
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// INIT
+// ============================================================
+function init() {
+  particleCanvas = document.getElementById('particles-canvas');
+  particleCtx = particleCanvas.getContext('2d');
+
+  function resizeParticles() {
+    var area = document.getElementById('cook-area');
+    particleCanvas.width = area.clientWidth;
+    particleCanvas.height = area.clientHeight;
+  }
+  resizeParticles();
+  window.addEventListener('resize', resizeParticles);
+
+  loadGame();
+  renderRecipeSlots();
+  renderDish();
+  renderUpgrades();
+  updateDisplay();
+  requestAnimationFrame(gameLoop);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+
+})();
+</script>
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px Segoe UI,Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px"><span id="vc-count">...</span> Chefs</div>
+<script>
+(function(){var G="sizzle-street",SU="https://ivhpqkqnfqcgrfrsvszf.supabase.co",SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM";function hdr(){return{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json"}}async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("").slice(0,32)}catch(e){return"anon-"+Math.random().toString(36).slice(2,10)}}async function run(){var h=await vh();try{await fetch(SU+"/rest/v1/game_visits",{method:"POST",headers:Object.assign(hdr(),{"Prefer":"resolution=merge-duplicates,return=minimal"}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}try{var r=await fetch(SU+"/rest/v1/game_visits?game=eq."+G+"&select=id",{headers:Object.assign(hdr(),{"Prefer":"count=exact"})});var c=r.headers.get("content-range");if(c){var n=c.split("/")[1];if(n&&n!=="*")document.getElementById("vc-count").textContent=Number(n).toLocaleString()}}catch(e){}}run()})();
+</script>
+</body>
+</html>

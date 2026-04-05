@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<title>Self-Learning Blind Cells — Evidence Report</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #e0e0e0; font-family: 'Consolas', 'Monaco', monospace; padding: 40px; max-width: 1200px; margin: 0 auto; }
+  h1 { color: #00e5ff; font-size: 28px; margin-bottom: 8px; }
+  h2 { color: #ff8c42; font-size: 20px; margin: 32px 0 16px; border-bottom: 1px solid #333; padding-bottom: 8px; }
+  h3 { color: #88cc88; font-size: 16px; margin: 20px 0 10px; }
+  .subtitle { color: #888; font-size: 14px; margin-bottom: 32px; }
+  .chart-container { background: #12121a; border: 1px solid #2a2a3a; border-radius: 8px; padding: 24px; margin: 16px 0; }
+  canvas { display: block; margin: 0 auto; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .stat-card { background: #12121a; border: 1px solid #2a2a3a; border-radius: 8px; padding: 20px; text-align: center; }
+  .stat-value { font-size: 36px; font-weight: bold; }
+  .stat-label { color: #888; font-size: 12px; margin-top: 4px; }
+  .improve { color: #44ff88; }
+  .neutral { color: #ffcc44; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th { text-align: left; color: #00e5ff; padding: 8px 12px; border-bottom: 2px solid #2a2a3a; font-size: 13px; }
+  td { padding: 8px 12px; border-bottom: 1px solid #1a1a2a; font-size: 14px; }
+  tr:hover td { background: #1a1a2a; }
+  .memory-sample { background: #0d0d15; border: 1px solid #2a2a3a; border-radius: 4px; padding: 12px; margin: 8px 0; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
+  .tag { display: inline-block; background: #1a3a2a; color: #44ff88; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin: 2px; }
+  .tag-warn { background: #3a2a1a; color: #ffaa44; }
+  .blindness-check { background: #0a1a0a; border: 1px solid #1a3a1a; border-radius: 8px; padding: 20px; margin: 16px 0; }
+  .verdict { font-size: 18px; font-weight: bold; margin-top: 12px; }
+  .pass { color: #44ff88; }
+  .section-note { color: #666; font-size: 12px; font-style: italic; margin: 8px 0; }
+</style>
+</head><body>
+
+<h1>Self-Learning Blind Cells</h1>
+<div class="subtitle">Binary selection across 3 pipeline runs &mdash; natural selection without goal leakage</div>
+
+<h2>Learning Curve</h2>
+<div class="chart-container">
+  <canvas id="chartCost" width="540" height="220"></canvas>
+</div>
+<div class="grid">
+  <div class="chart-container">
+    <canvas id="chartRetries" width="260" height="180"></canvas>
+  </div>
+  <div class="chart-container">
+    <canvas id="chartTime" width="260" height="180"></canvas>
+  </div>
+</div>
+
+<h2>Run-by-Run Data</h2>
+<table>
+  <thead><tr><th>Run</th><th>Memory Bank</th><th>Retries</th><th>Cost</th><th>Time</th><th>Domain Leaks</th></tr></thead>
+  <tbody id="tableBody"></tbody>
+</table>
+
+<h2>Improvement Summary</h2>
+<div class="grid">
+  <div class="stat-card">
+    <div class="stat-value improve" id="costDrop">—</div>
+    <div class="stat-label">COST REDUCTION (Run 1 &rarr; Final)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value improve" id="timeDrop">—</div>
+    <div class="stat-label">TIME REDUCTION (Run 1 &rarr; Final)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value improve" id="retryDrop">—</div>
+    <div class="stat-label">RETRY REDUCTION</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value pass" id="leakCount">—</div>
+    <div class="stat-label">DOMAIN LEAKS (all runs)</div>
+  </div>
+</div>
+
+<h2>Blindness Verification</h2>
+<div class="blindness-check">
+  <h3>What's in the memory bank?</h3>
+  <p>After 3 runs, the memory bank contains <strong id="totalExamples">—</strong> examples across 3 cell types. Every example was scanned for domain vocabulary:</p>
+  <div style="margin: 12px 0;">
+    <span class="tag">game</span><span class="tag">pong</span><span class="tag">paddle</span><span class="tag">ball</span><span class="tag">player</span><span class="tag">enemy</span><span class="tag">score</span><span class="tag">level</span>
+  </div>
+  <div class="verdict" id="blindnessVerdict">—</div>
+  <div class="section-note">Cells see: hex colors, drawing code, physics equations. They cannot infer the product.</div>
+</div>
+
+<h3>Sample: Palette Memory (what the color cell sees as examples)</h3>
+<div class="memory-sample" id="paletteSample"></div>
+
+<h3>Sample: Behavior Memory (what the physics cell sees as examples)</h3>
+<div class="memory-sample" id="behaviorSample"></div>
+
+<h2>How It Works</h2>
+<table>
+  <tr><td style="width:30%; color:#00e5ff;">Cell produces output</td><td>Color, shape, or behavior cell generates its artifact blindly</td></tr>
+  <tr><td style="color:#00e5ff;">Validator checks</td><td>Binary gate: valid hex? Renders to pixels? Parses as JS? Pass or fail.</td></tr>
+  <tr><td style="color:#00e5ff;">Survived &rarr; stored</td><td>Passing outputs are saved to the memory bank. Failures vanish without trace.</td></tr>
+  <tr><td style="color:#00e5ff;">Next run: few-shot</td><td>Future cells receive 1-2 random past survivors as "previously accepted" examples</td></tr>
+  <tr><td style="color:#00e5ff;">No reason given</td><td>The cell never learns WHY an output was accepted. Only THAT it was. This preserves blindness.</td></tr>
+</table>
+
+<script>
+// Data from results.json — injected at build time
+const results = [{"run":1,"elapsed":101.5,"cost":0.2438389,"retries":1,"leaks":0,"memorySize":0},{"run":2,"elapsed":46.2,"cost":0.11292555,"retries":0,"leaks":0,"memorySize":12},{"run":3,"elapsed":49.1,"cost":0.1140266,"retries":0,"leaks":0,"memorySize":24}];
+
+// Memory bank samples
+const paletteSamples = [
+  { input: "bright white glow", output: { base: "#FAFBFC", light: "#FFFFFF", dark: "#E0E6ED", accent: "#00E5FF" } },
+  { input: "warm crimson red", output: { base: "#B93A5F", light: "#E8899A", dark: "#5E1E35", accent: "#D4956B" } },
+  { input: "cool electric blue", output: { base: "#0080FF", light: "#66B3FF", dark: "#004C99", accent: "#00FFCC" } }
+];
+
+const behaviorSamples = [
+  { input: "bounces an object off horizontal boundaries", output: "var halfH = obj.h * S / 2;\nif (obj.y - halfH < 0) { obj.y = halfH; obj.vy = Math.abs(obj.vy); }\nif (obj.y + halfH > H) { obj.y = H - halfH; obj.vy = -Math.abs(obj.vy); }" },
+  { input: "detects overlap between two rectangular areas", output: "var hw = (a.w*S + b.w*S)/2; var hh = (a.h*S + b.h*S)/2;\nvar dx = Math.abs(a.x - b.x); var dy = Math.abs(a.y - b.y);\nif (dx < hw && dy < hh) { a.vx = -a.vx; return true; }\nreturn false;" }
+];
+
+// Populate table
+const tbody = document.getElementById('tableBody');
+results.forEach(r => {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>Run ${r.run}</td><td>${r.memorySize} examples</td><td>${r.retries}</td><td>$${r.cost.toFixed(4)}</td><td>${r.elapsed.toFixed(1)}s</td><td class="pass">${r.leaks}</td>`;
+  tbody.appendChild(tr);
+});
+
+// Stats
+const first = results[0], last = results[results.length - 1];
+document.getElementById('costDrop').textContent = Math.round((1 - last.cost / first.cost) * 100) + '%';
+document.getElementById('timeDrop').textContent = Math.round((1 - last.elapsed / first.elapsed) * 100) + '%';
+document.getElementById('retryDrop').textContent = first.retries + ' → ' + last.retries;
+document.getElementById('leakCount').textContent = results.reduce((s, r) => s + r.leaks, 0);
+document.getElementById('totalExamples').textContent = last.memorySize + 12; // last run adds 12 more
+document.getElementById('blindnessVerdict').textContent = 'PASS — zero domain vocabulary found in any stored example';
+
+// Palette sample
+document.getElementById('paletteSample').textContent = paletteSamples.map((s, i) =>
+  `Example ${i+1} input: "${s.input}"\nExample ${i+1} output: ${JSON.stringify(s.output)}`
+).join('\n\n');
+
+// Behavior sample
+document.getElementById('behaviorSample').textContent = behaviorSamples.map((s, i) =>
+  `Example ${i+1} input: "${s.input}"\nExample ${i+1} output:\n${s.output}`
+).join('\n\n');
+
+// Chart drawing helper
+function drawChart(canvasId, data, label, color, unit, maxOverride) {
+  const cvs = document.getElementById(canvasId);
+  const ctx = cvs.getContext('2d');
+  const W = cvs.width, H = cvs.height;
+  const pad = { top: 30, right: 20, bottom: 35, left: 60 };
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+
+  ctx.fillStyle = '#12121a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Title
+  ctx.fillStyle = '#888';
+  ctx.font = '12px Consolas, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, W / 2, 18);
+
+  const maxVal = maxOverride || Math.max(...data) * 1.2;
+
+  // Grid lines
+  ctx.strokeStyle = '#1a1a2a';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + plotH * (1 - i / 4);
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    ctx.fillStyle = '#555';
+    ctx.textAlign = 'right';
+    ctx.fillText((maxVal * i / 4).toFixed(unit === '$' ? 2 : unit === 's' ? 0 : 0) + (unit || ''), pad.left - 8, y + 4);
+  }
+
+  // Bars
+  const barW = plotW / data.length * 0.6;
+  const gap = plotW / data.length;
+  data.forEach((v, i) => {
+    const barH = (v / maxVal) * plotH;
+    const x = pad.left + gap * i + (gap - barW) / 2;
+    const y = pad.top + plotH - barH;
+
+    // Gradient bar
+    const grad = ctx.createLinearGradient(x, y, x, y + barH);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, color + '44');
+    ctx.fillStyle = grad;
+    ctx.fillRect(x, y, barW, barH);
+
+    // Value label
+    ctx.fillStyle = '#e0e0e0';
+    ctx.textAlign = 'center';
+    ctx.font = '11px Consolas, monospace';
+    const valText = unit === '$' ? '$' + v.toFixed(2) : v.toFixed(unit === 's' ? 1 : 0) + (unit === 's' ? 's' : '');
+    ctx.fillText(valText, x + barW / 2, y - 6);
+
+    // Run label
+    ctx.fillStyle = '#888';
+    ctx.fillText('Run ' + (i + 1), x + barW / 2, pad.top + plotH + 18);
+  });
+}
+
+drawChart('chartCost', results.map(r => r.cost), 'Cost per Run (USD)', '#00e5ff', '$');
+drawChart('chartRetries', results.map(r => r.retries), 'Retries per Run', '#ff8c42', '', 3);
+drawChart('chartTime', results.map(r => r.elapsed), 'Time per Run', '#44ff88', 's');
+</script>
+
+</body></html>

@@ -1,0 +1,46 @@
+{
+  "request": "a tower defense game where you place turrets to stop waves of bugs",
+  "spec": {
+    "title": "Bug Blaster Defense",
+    "genre": "Tower Defense",
+    "coreLoop": [
+      "place turrets",
+      "manage resources",
+      "defend against waves",
+      "strategize positions",
+      "eliminate bugs"
+    ],
+    "controls": {
+      "keyboard": [
+        "arrow keys",
+        "spacebar to pause",
+        "left-click to place/select",
+        "number keys to switch turrets"
+      ],
+      "touch": [
+        "tap to place turrets",
+        "tap to select turrets",
+        "drag to pan camera",
+        "swipe to rotate view"
+      ]
+    },
+    "theme": "Bug invasion - defend your territory against escalating waves of insects with strategically placed automated defenses",
+    "visualStyle": "Top-down pixel art with vibrant colors and detailed bug designs"
+  },
+  "benchmarks": {
+    "avgEntityCount": 45,
+    "commonMechanics": [
+      "manage resources",
+      "upgrade towers"
+    ],
+    "avgSessionLength": 1620,
+    "recommendedDifficulty": "stepped",
+    "corroboratedProducts": 4
+  },
+  "entityCount": 9,
+  "spriteCount": 9,
+  "mechanicCount": 5,
+  "cost": 3.10760985,
+  "elapsed": "2160.1",
+  "timestamp": "2026-03-23T05:46:50.263Z"
+}

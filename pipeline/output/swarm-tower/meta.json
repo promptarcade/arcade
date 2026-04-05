@@ -1,0 +1,44 @@
+{
+  "request": "a tower defense game where you place turrets to stop waves of bugs",
+  "spec": {
+    "title": "Swarm Tower",
+    "genre": "Tower Defense",
+    "coreLoop": [
+      "turret-placement",
+      "wave-spawning",
+      "resource-management"
+    ],
+    "controls": {
+      "keyboard": [
+        "arrow keys",
+        "spacebar",
+        "numeric keys"
+      ],
+      "touch": [
+        "tap",
+        "drag",
+        "pinch"
+      ]
+    },
+    "theme": "Bug invasion defense scenario",
+    "visualStyle": "Cartoony with whimsical bug characters"
+  },
+  "benchmarks": {
+    "avgEntityCount": 41,
+    "commonMechanics": [
+      "turret-placement",
+      "resource-management",
+      "wave-spawning",
+      "tower-upgrades"
+    ],
+    "avgSessionLength": 1260,
+    "recommendedDifficulty": "stepped",
+    "corroboratedProducts": 3
+  },
+  "entityCount": 9,
+  "spriteCount": 9,
+  "mechanicCount": 3,
+  "cost": 2.1133175,
+  "elapsed": "1030.0",
+  "timestamp": "2026-03-23T09:34:20.781Z"
+}

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}}</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1e; display: flex; flex-direction: column; align-items: center; min-height: 100vh; font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden; }
+canvas { display: block; touch-action: none; width: 100vw; height: 100vh; background: #0a0a1e; image-rendering: pixelated; }
+#touch-controls {
+  display: none; position: fixed; bottom: 10px; left: 0; right: 0;
+  justify-content: space-around; align-items: flex-end; padding: 0 20px; pointer-events: none; z-index: 100;
+}
+@media (pointer: coarse) { #touch-controls { display: flex; } }
+.tc-btn {
+  background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 8px; color: #fff; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  user-select: none; display: flex; align-items: center; justify-content: center; pointer-events: auto;
+}
+.tc-btn:active { background: rgba(255,255,255,0.35); }
+.dpad { display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: auto; }
+.dpad-mid { display: flex; gap: 4px; }
+.dpad .tc-btn { width: 52px; height: 52px; font-size: 20px; }
+.action-btns { display: flex; gap: 6px; pointer-events: auto; flex-wrap: wrap; max-width: 220px; }
+.action-btns .tc-btn { height: 44px; padding: 4px 10px; font-size: 11px; }
+.tc-yes { background: rgba(255,200,50,0.25); border-color: rgba(255,200,50,0.5); color: #fc4; }
+.tc-no { background: rgba(255,80,80,0.2); border-color: rgba(255,80,80,0.4); color: #f66; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="touch-controls">
+  <div class="dpad">
+    <button class="tc-btn" data-key="ArrowUp">&#9650;</button>
+    <div class="dpad-mid">
+      <button class="tc-btn" data-key="ArrowLeft">&#9664;</button>
+      <button class="tc-btn" data-key=" ">&#x23F8;</button>
+      <button class="tc-btn" data-key="ArrowRight">&#9654;</button>
+    </div>
+    <button class="tc-btn" data-key="ArrowDown">&#9660;</button>
+  </div>
+  <div class="action-btns">
+    <button class="tc-btn tc-yes" data-key="Enter">YES</button>
+    <button class="tc-btn tc-no" data-key="Escape">NO</button>
+    <button class="tc-btn" data-key="e">Act</button>
+    <button class="tc-btn" data-key="1">1</button>
+    <button class="tc-btn" data-key="2">2</button>
+    <button class="tc-btn" data-key="3">3</button>
+  </div>
+</div>
+<script>
+// ============================================================
+// {{TITLE_UPPER}}
+// ============================================================
+
+// Canvas setup
+var canvas = document.getElementById('gameCanvas');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+var ctx = canvas.getContext('2d');
+
+// Score submission
+var _SUPA_URL='https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+var _SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(game,score){
+  var initials=prompt('Score: '+score+'! Enter name (max 5 chars):');
+  if(!initials)return;initials=initials.trim().slice(0,5).toUpperCase();if(!initials)return;
+  try{var hash='';var data=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();
+  var buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(data));
+  hash=Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,'0');}).join('').slice(0,32);
+  await fetch(_SUPA_URL+'/rest/v1/high_scores',{method:'POST',
+  headers:{'apikey':_SUPA_KEY,'Authorization':'Bearer '+_SUPA_KEY,'Content-Type':'application/json'},
+  body:JSON.stringify({game:game,initials:initials,score:score,player_hash:hash})});}catch(e){}
+}
+
+// SFX
+var SFX = (function() {
+  var ctx=null, muted=false;
+  function getCtx(){if(!ctx)try{ctx=new(window.AudioContext||window.webkitAudioContext)();}catch(e){return null;}if(ctx.state==='suspended')ctx.resume();return ctx;}
+  function play(fn){if(muted)return;var c=getCtx();if(c)fn(c);}
+  return {
+    get muted(){return muted;}, set muted(v){muted=v;},
+    // Add game-specific sounds here
+  };
+})();
+document.addEventListener('keydown',function(e){if(e.key==='m'||e.key==='M')SFX.muted=!SFX.muted;});
+
+// Touch controls
+document.querySelectorAll('.tc-btn').forEach(function(btn){
+  btn.addEventListener('touchstart',function(e){e.preventDefault();document.dispatchEvent(new KeyboardEvent('keydown',{key:btn.dataset.key}));});
+  btn.addEventListener('touchend',function(e){document.dispatchEvent(new KeyboardEvent('keyup',{key:btn.dataset.key}));});
+});
+canvas.addEventListener('click',function(){
+  // Handle tap-to-start or tap-to-restart here
+});
+
+// ============================================================
+// YOUR GAME CODE HERE
+// ============================================================
+
+</script>
+</body>
+</html>

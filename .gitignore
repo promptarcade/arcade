@@ -1,0 +1,16 @@
+# Design docs (internal)
+GAME_FACTORY_DESIGN.md
+VISUAL_ENGINE_DESIGN.md
+
+# Old visual engine source (inlined into games)
+engine/visual/
+
+# Sprite engine is loaded at runtime — must be in repo
+!engine/sprite/
+
+# Dependencies
+node_modules/
+
+# Claude memory
+.claude/
+.env

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Remnants</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #040410; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: Segoe UI, Arial, sans-serif; overflow: hidden; }
+canvas { display: block; touch-action: none; width: 100vw; height: 100vh; background: #040410; }
+#touch-controls { display: none; position: fixed; bottom: 8px; left: 0; right: 0; justify-content: space-around; align-items: flex-end; padding: 0 10px; pointer-events: none; z-index: 100; }
+@media (pointer: coarse) { #touch-controls { display: flex; } }
+.dpad { display: flex; flex-direction: column; align-items: center; gap: 3px; pointer-events: auto; }
+.dpad-mid { display: flex; gap: 3px; }
+.tc { border-radius: 8px; cursor: pointer; -webkit-tap-highlight-color: transparent; user-select: none; display: flex; align-items: center; justify-content: center; pointer-events: auto; }
+.tc:active { opacity: 0.7; }
+.tc-dir { width: 48px; height: 48px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); color: #fff; font-size: 18px; }
+.tc-act { height: 38px; padding: 2px 8px; font-size: 10px; font-weight: bold; }
+.tc-grp { display: flex; gap: 4px; pointer-events: auto; flex-wrap: wrap; max-width: 280px; justify-content: center; }
+.tc-green { background: rgba(100,200,100,0.2); border: 1px solid rgba(100,200,100,0.4); color: #8d8; }
+.tc-blue { background: rgba(100,100,255,0.2); border: 1px solid rgba(100,100,255,0.4); color: #aaf; }
+.tc-gold { background: rgba(255,200,50,0.25); border: 1px solid rgba(255,200,50,0.5); color: #fc4; }
+.tc-red { background: rgba(255,80,80,0.2); border: 1px solid rgba(255,80,80,0.4); color: #f88; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="800" height="640"></canvas>
+<div id="touch-controls">
+  <div class="dpad">
+    <button class="tc tc-dir" data-key="ArrowUp">&#9650;</button>
+    <div class="dpad-mid">
+      <button class="tc tc-dir" data-key="ArrowLeft">&#9664;</button>
+      <button class="tc tc-dir" data-key=" " style="font-size:11px;">WAIT</button>
+      <button class="tc tc-dir" data-key="ArrowRight">&#9654;</button>
+    </div>
+    <button class="tc tc-dir" data-key="ArrowDown">&#9660;</button>
+  </div>
+  <div class="tc-grp">
+    <button class="tc tc-act tc-green" data-key="e">ACT</button>
+    <button class="tc tc-act tc-gold" data-key="Enter">YES</button>
+    <button class="tc tc-act tc-red" data-key="Escape">NO</button>
+    <button class="tc tc-act tc-blue" data-key="i">INV</button>
+    <button class="tc tc-act tc-blue" data-key="c">CRAFT</button>
+    <button class="tc tc-act tc-blue" data-key="b">BUILD</button>
+    <button class="tc tc-act tc-blue" data-key="h">HELP</button>
+    <button class="tc tc-act tc-blue" data-key="p">POT</button>
+    <button class="tc tc-act tc-blue" data-key="1">1</button>
+    <button class="tc tc-act tc-blue" data-key="2">2</button>
+    <button class="tc tc-act tc-blue" data-key="3">3</button>
+    <button class="tc tc-act tc-blue" data-key="4">4</button>
+  </div>
+</div>
+<script>

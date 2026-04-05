@@ -1,0 +1,1293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Living Blocks</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a1a;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  overflow: hidden;
+  font-family: 'Segoe UI', Arial, sans-serif;
+}
+canvas { display: block; touch-action: none; width: 100vw; height: 100vh; background: #0a0a1a; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+
+// ============================================================
+// CANVAS SETUP
+// ============================================================
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// SUPABASE SCORE SUBMISSION
+// ============================================================
+const _SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+const _SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+async function submitScore(g,s){var n=prompt('Score: '+s+'! Enter initials (max 5):');if(!n)return;n=n.trim().slice(0,5).toUpperCase();if(!n)return;try{await fetch(_SU+'/rest/v1/high_scores',{method:'POST',headers:{'apikey':_SK,'Authorization':'Bearer '+_SK,'Content-Type':'application/json'},body:JSON.stringify({game:g,initials:n,score:s})})}catch(e){}}
+
+// ============================================================
+// SOUND ENGINE
+// ============================================================
+var SFX = (function() {
+  var actx = null, muted = false;
+  function getCtx() {
+    if (!actx) try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return null; }
+    if (actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  function play(fn) { if (muted) return; var c = getCtx(); if (c) fn(c); }
+  function osc(c, type, freq, freq2, dur, vol) {
+    var o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, c.currentTime);
+    if (freq2) o.frequency.linearRampToValueAtTime(freq2, c.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.08, c.currentTime);
+    g.gain.linearRampToValueAtTime(0, c.currentTime + dur);
+    o.connect(g); g.connect(c.destination);
+    o.start(); o.stop(c.currentTime + dur);
+  }
+  return {
+    get muted() { return muted; }, set muted(v) { muted = v; },
+    move()    { play(c => osc(c, 'sine', 200, 180, 0.05, 0.04)); },
+    rotate()  { play(c => osc(c, 'sine', 400, 500, 0.06, 0.05)); },
+    drop()    { play(c => osc(c, 'triangle', 150, 80, 0.12, 0.08)); },
+    lock()    { play(c => osc(c, 'square', 300, 200, 0.08, 0.05)); },
+    clear()   { play(c => { osc(c, 'sine', 600, 1200, 0.2, 0.1); osc(c, 'sine', 800, 1400, 0.15, 0.08); }); },
+    quad()    { play(c => { for(var i=0;i<4;i++) setTimeout(()=>osc(c,'sine',800+i*200,1200+i*200,0.15,0.1),i*60); }); },
+    ability() { play(c => { osc(c, 'sawtooth', 300, 600, 0.15, 0.06); osc(c, 'sine', 500, 800, 0.1, 0.05); }); },
+    gameOver(){ play(c => { for(var i=0;i<4;i++) setTimeout(()=>osc(c,'sawtooth',400-i*80,200-i*40,0.2,0.08),i*150); }); },
+    levelUp() { play(c => { for(var i=0;i<4;i++) setTimeout(()=>osc(c,'sine',600+i*150,700+i*150,0.1,0.08),i*80); }); },
+    select()  { play(c => osc(c, 'sine', 800, 600, 0.06, 0.05)); },
+  };
+})();
+
+// ============================================================
+// GAME CONSTANTS
+// ============================================================
+const COLS = 10;
+const ROWS = 20;
+const HIDDEN_ROWS = 2; // rows above visible area
+const TOTAL_ROWS = ROWS + HIDDEN_ROWS;
+
+// ============================================================
+// CREATURE DEFINITIONS
+// ============================================================
+// Each creature has: name, shape (relative cell positions for each rotation), color, hint, behavior
+const CREATURES = {
+  sluggo: {
+    name: 'Sluggo',
+    hint: 'Slides',
+    color: '#44cc66',
+    colorDark: '#2a8840',
+    colorLight: '#77ee99',
+    eyeColor: '#fff',
+    pupilColor: '#222',
+    shapes: [
+      [[0,0],[1,0],[2,0],[3,0]],
+      [[0,0],[0,1],[0,2],[0,3]],
+    ],
+  },
+  rocko: {
+    name: 'Rocko',
+    hint: 'Crushes',
+    color: '#888899',
+    colorDark: '#555566',
+    colorLight: '#aaaacc',
+    eyeColor: '#ddd',
+    pupilColor: '#333',
+    shapes: [
+      [[0,0],[1,0],[0,1],[1,1]],
+    ],
+  },
+  crawler: {
+    name: 'Crawler',
+    hint: 'Crawls',
+    color: '#ee8833',
+    colorDark: '#aa5511',
+    colorLight: '#ffaa55',
+    eyeColor: '#fff',
+    pupilColor: '#411',
+    shapes: [
+      [[1,0],[2,0],[0,1],[1,1]],
+      [[0,0],[0,1],[1,1],[1,2]],
+    ],
+  },
+  jelly: {
+    name: 'Jelly',
+    hint: 'Fills gaps',
+    color: '#ee55aa',
+    colorDark: '#aa2277',
+    colorLight: '#ff88cc',
+    eyeColor: '#fff',
+    pupilColor: '#311',
+    shapes: [
+      [[0,0],[1,0],[1,1],[2,1]],
+      [[1,0],[0,1],[1,1],[0,2]],
+    ],
+  },
+  spike: {
+    name: 'Spike',
+    hint: 'Explodes',
+    color: '#9944ee',
+    colorDark: '#6622aa',
+    colorLight: '#bb77ff',
+    eyeColor: '#ff8',
+    pupilColor: '#311',
+    shapes: [
+      [[0,0],[1,0],[2,0],[1,1]],
+      [[0,0],[0,1],[1,1],[0,2]],
+      [[1,0],[0,1],[1,1],[2,1]],
+      [[1,0],[0,1],[1,1],[1,2]],
+    ],
+  },
+  twinkie: {
+    name: 'Twinkie',
+    hint: 'Reliable',
+    color: '#eebb33',
+    colorDark: '#aa8811',
+    colorLight: '#ffdd66',
+    eyeColor: '#fff',
+    pupilColor: '#321',
+    shapes: [
+      [[0,0],[0,1],[1,1],[2,1]],
+      [[0,0],[1,0],[0,1],[0,2]],
+      [[0,0],[1,0],[2,0],[2,1]],
+      [[1,0],[1,1],[0,2],[1,2]],
+    ],
+  },
+  mimic: {
+    name: 'Mimic',
+    hint: 'Copies',
+    color: '#33ccdd',
+    colorDark: '#1199aa',
+    colorLight: '#66eeff',
+    eyeColor: '#fff',
+    pupilColor: '#133',
+    shapes: [
+      [[2,0],[0,1],[1,1],[2,1]],
+      [[0,0],[0,1],[0,2],[1,2]],
+      [[0,0],[1,0],[2,0],[0,1]],
+      [[0,0],[1,0],[1,1],[1,2]],
+    ],
+  },
+};
+
+const CREATURE_KEYS = Object.keys(CREATURES);
+
+// ============================================================
+// PARTICLES
+// ============================================================
+let particles = [];
+
+function spawnParticles(x, y, color, count, speed) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const spd = speed * (0.3 + Math.random() * 0.7);
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * spd,
+      vy: Math.sin(angle) * spd - speed * 0.3,
+      life: 1,
+      decay: 0.02 + Math.random() * 0.03,
+      r: 1.5 + Math.random() * 2.5,
+      color,
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.15;
+    p.life -= p.decay;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles(ctx) {
+  for (const p of particles) {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ============================================================
+// GRID & GAME STATE
+// ============================================================
+const STATE = { TITLE: 0, PLAYING: 1, ABILITY: 2, CLEARING: 3, GAMEOVER: 4 };
+
+let grid = []; // grid[row][col] = null or { type: creatureKey, abilityDone: bool }
+let state = STATE.TITLE;
+let score = 0;
+let level = 1;
+let lines = 0;
+let linesForLevel = 0;
+let highScore = parseInt(localStorage.getItem('lb_high') || '0');
+
+// Current & next piece
+let current = null; // { type, rotation, x, y, lastMoveDir }
+let nextType = null;
+let bag = []; // 7-bag randomizer
+
+// Timing
+let dropInterval = 1.0; // seconds per drop
+let dropTimer = 0;
+let lockDelay = 0;
+let lockTimer = 0;
+const LOCK_DELAY = 0.5;
+const ABILITY_DELAY = 0.4; // seconds before ability triggers after lock
+
+let abilityTimer = 0;
+let abilityPieces = []; // pieces waiting to trigger ability
+let clearTimer = 0;
+let clearingRows = [];
+let gameTime = 0;
+
+// ============================================================
+// 7-BAG RANDOMIZER
+// ============================================================
+function refillBag() {
+  bag = [...CREATURE_KEYS];
+  // Fisher-Yates shuffle
+  for (let i = bag.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [bag[i], bag[j]] = [bag[j], bag[i]];
+  }
+}
+
+function nextFromBag() {
+  if (bag.length === 0) refillBag();
+  return bag.pop();
+}
+
+// ============================================================
+// GRID HELPERS
+// ============================================================
+function initGrid() {
+  grid = [];
+  for (let r = 0; r < TOTAL_ROWS; r++) {
+    grid.push(new Array(COLS).fill(null));
+  }
+}
+
+function getCells(type, rotation, x, y) {
+  const def = CREATURES[type];
+  const shape = def.shapes[rotation % def.shapes.length];
+  return shape.map(([dx, dy]) => [x + dx, y + dy]);
+}
+
+function isValid(type, rotation, x, y) {
+  const cells = getCells(type, rotation, x, y);
+  for (const [cx, cy] of cells) {
+    if (cx < 0 || cx >= COLS || cy < 0 || cy >= TOTAL_ROWS) return false;
+    if (grid[cy][cx] !== null) return false;
+  }
+  return true;
+}
+
+// Wall kick offsets to try (SRS-lite)
+const KICKS = [[0,0],[-1,0],[1,0],[0,-1],[-1,-1],[1,-1],[0,-2]];
+
+function tryRotate() {
+  if (!current) return false;
+  const def = CREATURES[current.type];
+  const newRot = (current.rotation + 1) % def.shapes.length;
+  for (const [kx, ky] of KICKS) {
+    if (isValid(current.type, newRot, current.x + kx, current.y + ky)) {
+      current.rotation = newRot;
+      current.x += kx;
+      current.y += ky;
+      return true;
+    }
+  }
+  return false;
+}
+
+function tryMove(dx, dy) {
+  if (!current) return false;
+  if (isValid(current.type, current.rotation, current.x + dx, current.y + dy)) {
+    current.x += dx;
+    current.y += dy;
+    if (dx !== 0) current.lastMoveDir = dx;
+    return true;
+  }
+  return false;
+}
+
+function hardDrop() {
+  if (!current) return;
+  let dropped = 0;
+  while (isValid(current.type, current.rotation, current.x, current.y + 1)) {
+    current.y++;
+    dropped++;
+  }
+  score += dropped * 2;
+  lockPiece();
+  SFX.drop();
+}
+
+function getGhostY() {
+  if (!current) return 0;
+  let gy = current.y;
+  while (isValid(current.type, current.rotation, current.x, gy + 1)) gy++;
+  return gy;
+}
+
+// ============================================================
+// LOCK PIECE & ABILITIES
+// ============================================================
+function lockPiece() {
+  if (!current) return;
+  const cells = getCells(current.type, current.rotation, current.x, current.y);
+  const type = current.type;
+  const lastDir = current.lastMoveDir;
+
+  for (const [cx, cy] of cells) {
+    if (cy >= 0 && cy < TOTAL_ROWS && cx >= 0 && cx < COLS) {
+      grid[cy][cx] = { type, abilityDone: false };
+    }
+  }
+
+  current = null;
+  SFX.lock();
+
+  // Check if piece is above visible area = game over
+  for (const [, cy] of cells) {
+    if (cy < HIDDEN_ROWS) {
+      gameOver();
+      return;
+    }
+  }
+
+  // Queue ability
+  abilityPieces.push({ type, cells: cells.slice(), lastDir });
+  abilityTimer = ABILITY_DELAY;
+  state = STATE.ABILITY;
+}
+
+function triggerAbilities() {
+  let anyTriggered = false;
+  for (const ap of abilityPieces) {
+    const result = executeAbility(ap.type, ap.cells, ap.lastDir);
+    if (result) anyTriggered = true;
+  }
+  abilityPieces = [];
+
+  if (anyTriggered) SFX.ability();
+
+  // Now check for line clears
+  checkLineClears();
+}
+
+function executeAbility(type, cells, lastDir) {
+  switch (type) {
+    case 'sluggo': {
+      // Slide 1 cell in last move direction
+      const dir = lastDir || 1;
+      // Sort cells so we move in correct order to avoid collisions
+      const sorted = [...cells].sort((a, b) => dir > 0 ? b[0] - a[0] : a[0] - b[0]);
+      let moved = false;
+      for (const [cx, cy] of sorted) {
+        if (cy < 0 || cy >= TOTAL_ROWS || cx < 0 || cx >= COLS) continue;
+        const nx = cx + dir;
+        if (nx >= 0 && nx < COLS && grid[cy][cx] && !grid[cy][cx].abilityDone) {
+          if (grid[cy][nx] === null) {
+            grid[cy][nx] = grid[cy][cx];
+            grid[cy][cx] = null;
+            grid[cy][nx].abilityDone = true;
+            moved = true;
+          }
+        }
+      }
+      if (moved) {
+        const avgX = cells.reduce((s, c) => s + c[0], 0) / cells.length;
+        const avgY = cells.reduce((s, c) => s + c[1], 0) / cells.length;
+        spawnParticles(gridToScreenX(avgX), gridToScreenY(avgY - HIDDEN_ROWS), CREATURES.sluggo.colorLight, 6, 40);
+      }
+      return moved;
+    }
+    case 'rocko': {
+      // Crush single blocks directly below
+      let crushed = false;
+      // Find the bottom-most cells of this piece
+      const bottomCells = new Map(); // col -> max row
+      for (const [cx, cy] of cells) {
+        if (!bottomCells.has(cx) || cy > bottomCells.get(cx)) {
+          bottomCells.set(cx, cy);
+        }
+      }
+      for (const [col, row] of bottomCells) {
+        const below = row + 1;
+        if (below < TOTAL_ROWS && grid[below][col] !== null) {
+          // Only crush if it's from a different piece
+          const belowCell = grid[below][col];
+          if (belowCell) {
+            spawnParticles(gridToScreenX(col + 0.5), gridToScreenY(below - HIDDEN_ROWS + 0.5), CREATURES.rocko.colorLight, 8, 60);
+            grid[below][col] = null;
+            crushed = true;
+          }
+        }
+      }
+      // After crushing, drop any floating blocks
+      if (crushed) applyGravity();
+      return crushed;
+    }
+    case 'crawler': {
+      // Crawl 1 cell: left on even rows, right on odd rows
+      let moved = false;
+      for (const [cx, cy] of cells) {
+        if (cy < 0 || cy >= TOTAL_ROWS || cx < 0 || cx >= COLS) continue;
+        const dir = cy % 2 === 0 ? -1 : 1;
+        const nx = cx + dir;
+        if (nx >= 0 && nx < COLS && grid[cy][cx] && !grid[cy][cx].abilityDone) {
+          if (grid[cy][nx] === null) {
+            grid[cy][nx] = grid[cy][cx];
+            grid[cy][cx] = null;
+            grid[cy][nx].abilityDone = true;
+            moved = true;
+          }
+        }
+      }
+      if (moved) {
+        const avgX = cells.reduce((s, c) => s + c[0], 0) / cells.length;
+        const avgY = cells.reduce((s, c) => s + c[1], 0) / cells.length;
+        spawnParticles(gridToScreenX(avgX), gridToScreenY(avgY - HIDDEN_ROWS), CREATURES.crawler.colorLight, 6, 40);
+      }
+      return moved;
+    }
+    case 'jelly': {
+      // Each cell with a gap below drops down to fill it
+      let filled = false;
+      // Process from bottom up
+      const sortedCells = [...cells].sort((a, b) => b[1] - a[1]);
+      for (const [cx, cy] of sortedCells) {
+        if (cy < 0 || cy >= TOTAL_ROWS || cx < 0 || cx >= COLS) continue;
+        if (!grid[cy][cx]) continue;
+        let ny = cy;
+        while (ny + 1 < TOTAL_ROWS && grid[ny + 1][cx] === null) ny++;
+        if (ny !== cy) {
+          grid[ny][cx] = grid[cy][cx];
+          grid[cy][cx] = null;
+          grid[ny][cx].abilityDone = true;
+          filled = true;
+          spawnParticles(gridToScreenX(cx + 0.5), gridToScreenY(ny - HIDDEN_ROWS + 0.5), CREATURES.jelly.colorLight, 4, 30);
+        }
+      }
+      return filled;
+    }
+    case 'spike': {
+      // Destroy blocks adjacent left and right of the base (bottom row of the piece)
+      let destroyed = false;
+      for (const [cx, cy] of cells) {
+        if (cy < 0 || cy >= TOTAL_ROWS) continue;
+        for (const dx of [-1, 1]) {
+          const nx = cx + dx;
+          if (nx >= 0 && nx < COLS && grid[cy][nx] !== null) {
+            // Don't destroy own cells
+            const isOwn = cells.some(([ox, oy]) => ox === nx && oy === cy);
+            if (!isOwn) {
+              spawnParticles(gridToScreenX(nx + 0.5), gridToScreenY(cy - HIDDEN_ROWS + 0.5), CREATURES.spike.colorLight, 8, 70);
+              grid[cy][nx] = null;
+              destroyed = true;
+            }
+          }
+        }
+      }
+      if (destroyed) applyGravity();
+      return destroyed;
+    }
+    case 'twinkie':
+      return false; // no ability
+    case 'mimic': {
+      // Copy the behavior of whatever creature it lands on top of
+      // Find blocks directly below the piece
+      let copyType = null;
+      for (const [cx, cy] of cells) {
+        const below = cy + 1;
+        if (below < TOTAL_ROWS && grid[below][cx] !== null) {
+          const isOwn = cells.some(([ox, oy]) => ox === cx && oy === below);
+          if (!isOwn && grid[below][cx].type !== 'mimic') {
+            copyType = grid[below][cx].type;
+            break;
+          }
+        }
+      }
+      if (copyType && copyType !== 'twinkie') {
+        // Flash the mimic cells to the copied color
+        for (const [cx, cy] of cells) {
+          if (cy >= 0 && cy < TOTAL_ROWS && grid[cy][cx]) {
+            grid[cy][cx].mimicOf = copyType;
+          }
+        }
+        spawnParticles(
+          gridToScreenX(cells[0][0] + 1), gridToScreenY(cells[0][1] - HIDDEN_ROWS),
+          CREATURES[copyType].colorLight, 10, 50
+        );
+        return executeAbility(copyType, cells, lastDir);
+      }
+      return false;
+    }
+    default:
+      return false;
+  }
+}
+
+function applyGravity() {
+  // Drop any floating blocks down
+  for (let col = 0; col < COLS; col++) {
+    let writeRow = TOTAL_ROWS - 1;
+    for (let row = TOTAL_ROWS - 1; row >= 0; row--) {
+      if (grid[row][col] !== null) {
+        if (row !== writeRow) {
+          grid[writeRow][col] = grid[row][col];
+          grid[row][col] = null;
+        }
+        writeRow--;
+      }
+    }
+  }
+}
+
+// ============================================================
+// LINE CLEARING
+// ============================================================
+function checkLineClears() {
+  clearingRows = [];
+  for (let r = HIDDEN_ROWS; r < TOTAL_ROWS; r++) {
+    if (grid[r].every(cell => cell !== null)) {
+      clearingRows.push(r);
+    }
+  }
+  if (clearingRows.length > 0) {
+    state = STATE.CLEARING;
+    clearTimer = 0.35;
+    if (clearingRows.length >= 4) SFX.quad();
+    else SFX.clear();
+  } else {
+    spawnNextPiece();
+    state = STATE.PLAYING;
+  }
+}
+
+function finishClearing() {
+  const count = clearingRows.length;
+  // Score
+  const lineScores = [0, 100, 300, 500, 800];
+  score += (lineScores[Math.min(count, 4)] || count * 200) * level;
+  lines += count;
+  linesForLevel += count;
+
+  // Particles for each cleared row
+  for (const r of clearingRows) {
+    for (let c = 0; c < COLS; c++) {
+      if (grid[r][c]) {
+        const cr = CREATURES[grid[r][c].type];
+        spawnParticles(gridToScreenX(c + 0.5), gridToScreenY(r - HIDDEN_ROWS + 0.5), cr.colorLight, 3, 50);
+      }
+    }
+  }
+
+  // Remove rows (splice from bottom up so indices stay valid)
+  const sorted = [...clearingRows].sort((a, b) => b - a);
+  for (const r of sorted) {
+    grid.splice(r, 1);
+    grid.unshift(new Array(COLS).fill(null));
+  }
+  clearingRows = [];
+
+  // Level up
+  if (linesForLevel >= 10) {
+    linesForLevel -= 10;
+    level++;
+    dropInterval = Math.max(0.05, 1.0 - (level - 1) * 0.08);
+    SFX.levelUp();
+  }
+
+  spawnNextPiece();
+  state = STATE.PLAYING;
+}
+
+// ============================================================
+// SPAWNING
+// ============================================================
+function spawnNextPiece() {
+  const type = nextType || nextFromBag();
+  nextType = nextFromBag();
+  const def = CREATURES[type];
+  const shape = def.shapes[0];
+  // Center horizontally
+  const minX = Math.min(...shape.map(s => s[0]));
+  const maxX = Math.max(...shape.map(s => s[0]));
+  const w = maxX - minX + 1;
+  const x = Math.floor((COLS - w) / 2) - minX;
+  const y = 0; // start at top of hidden area
+
+  current = { type, rotation: 0, x, y, lastMoveDir: 0 };
+
+  if (!isValid(type, 0, x, y)) {
+    // Can't spawn — game over
+    current = null;
+    gameOver();
+  }
+
+  dropTimer = 0;
+  lockTimer = 0;
+}
+
+function startGame() {
+  initGrid();
+  score = 0;
+  level = 1;
+  lines = 0;
+  linesForLevel = 0;
+  dropInterval = 1.0;
+  bag = [];
+  nextType = null;
+  abilityPieces = [];
+  clearingRows = [];
+  particles = [];
+  state = STATE.PLAYING;
+  spawnNextPiece();
+}
+
+function gameOver() {
+  state = STATE.GAMEOVER;
+  SFX.gameOver();
+  if (score > highScore) {
+    highScore = score;
+    localStorage.setItem('lb_high', String(highScore));
+  }
+  if (score > 0) submitScore('living-blocks', score);
+}
+
+// ============================================================
+// COORDINATE HELPERS
+// ============================================================
+function getCellSize() {
+  const W = canvas.width;
+  const H = canvas.height;
+  return Math.floor(Math.min((H - 40) / ROWS, (W * 0.45) / COLS));
+}
+
+function getGridOrigin() {
+  const cs = getCellSize();
+  const gridW = cs * COLS;
+  const gridH = cs * ROWS;
+  const W = canvas.width;
+  const H = canvas.height;
+  // Center grid slightly left to leave room for sidebar
+  const gx = Math.floor((W - gridW) / 2 - W * 0.08);
+  const gy = Math.floor((H - gridH) / 2);
+  return { gx: Math.max(10, gx), gy: Math.max(10, gy) };
+}
+
+function gridToScreenX(col) {
+  const cs = getCellSize();
+  const { gx } = getGridOrigin();
+  return gx + col * cs;
+}
+
+function gridToScreenY(visRow) {
+  const cs = getCellSize();
+  const { gy } = getGridOrigin();
+  return gy + visRow * cs;
+}
+
+// ============================================================
+// DRAWING
+// ============================================================
+function drawBlock(ctx, sx, sy, size, creatureType, time, isGhost) {
+  const cr = CREATURES[creatureType];
+  if (!cr) return;
+  const pad = 1;
+
+  if (isGhost) {
+    ctx.strokeStyle = cr.color;
+    ctx.globalAlpha = 0.3;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx + pad, sy + pad, size - pad * 2, size - pad * 2);
+    ctx.globalAlpha = 1;
+    return;
+  }
+
+  const x = sx + pad;
+  const y = sy + pad;
+  const s = size - pad * 2;
+
+  // Block body with gradient
+  const grad = ctx.createLinearGradient(x, y, x, y + s);
+  grad.addColorStop(0, cr.colorLight);
+  grad.addColorStop(0.4, cr.color);
+  grad.addColorStop(1, cr.colorDark);
+  ctx.fillStyle = grad;
+  ctx.fillRect(x, y, s, s);
+
+  // Inner bevel
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillRect(x + 1, y + 1, s - 2, 2);
+  ctx.fillRect(x + 1, y + 1, 2, s - 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.fillRect(x + 1, y + s - 3, s - 2, 2);
+  ctx.fillRect(x + s - 3, y + 1, 2, s - 2);
+
+  // Eyes (only if block is big enough)
+  if (s >= 12) {
+    const eyeR = Math.max(2, s * 0.12);
+    const pupilR = eyeR * 0.55;
+    const eyeY = y + s * 0.4;
+    const eyeSpacing = s * 0.14;
+    const cx = x + s / 2;
+
+    // Blink occasionally
+    const blink = Math.sin(time * 3 + creatureType.charCodeAt(0)) > 0.92;
+
+    // Left eye
+    ctx.fillStyle = cr.eyeColor;
+    ctx.beginPath();
+    if (blink) {
+      ctx.fillRect(cx - eyeSpacing - eyeR, eyeY - 0.5, eyeR * 2, 1);
+    } else {
+      ctx.arc(cx - eyeSpacing, eyeY, eyeR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = cr.pupilColor;
+      ctx.beginPath();
+      ctx.arc(cx - eyeSpacing + Math.sin(time) * pupilR * 0.3, eyeY, pupilR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Right eye
+    ctx.fillStyle = cr.eyeColor;
+    ctx.beginPath();
+    if (blink) {
+      ctx.fillRect(cx + eyeSpacing - eyeR, eyeY - 0.5, eyeR * 2, 1);
+    } else {
+      ctx.arc(cx + eyeSpacing, eyeY, eyeR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = cr.pupilColor;
+      ctx.beginPath();
+      ctx.arc(cx + eyeSpacing + Math.sin(time) * pupilR * 0.3, eyeY, pupilR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Mouth — tiny smile
+    if (!blink && s >= 18) {
+      ctx.strokeStyle = cr.pupilColor;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const mouthY = y + s * 0.62;
+      ctx.arc(cx, mouthY - s * 0.05, s * 0.08, 0.2, Math.PI - 0.2);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawGrid(ctx, time) {
+  const cs = getCellSize();
+  const { gx, gy } = getGridOrigin();
+
+  // Grid background
+  ctx.fillStyle = '#111122';
+  ctx.fillRect(gx - 2, gy - 2, cs * COLS + 4, cs * ROWS + 4);
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  for (let r = 0; r <= ROWS; r++) {
+    ctx.beginPath();
+    ctx.moveTo(gx, gy + r * cs);
+    ctx.lineTo(gx + COLS * cs, gy + r * cs);
+    ctx.stroke();
+  }
+  for (let c = 0; c <= COLS; c++) {
+    ctx.beginPath();
+    ctx.moveTo(gx + c * cs, gy);
+    ctx.lineTo(gx + c * cs, gy + ROWS * cs);
+    ctx.stroke();
+  }
+
+  // Border
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(gx - 2, gy - 2, cs * COLS + 4, cs * ROWS + 4);
+
+  // Draw placed blocks
+  for (let r = HIDDEN_ROWS; r < TOTAL_ROWS; r++) {
+    const visR = r - HIDDEN_ROWS;
+    const isClearingRow = clearingRows.includes(r);
+    for (let c = 0; c < COLS; c++) {
+      const cell = grid[r][c];
+      if (cell) {
+        if (isClearingRow) {
+          // Flash effect during clear
+          ctx.globalAlpha = 0.3 + Math.sin(time * 20) * 0.7;
+          drawBlock(ctx, gx + c * cs, gy + visR * cs, cs, cell.mimicOf || cell.type, time, false);
+          ctx.globalAlpha = 1;
+        } else {
+          drawBlock(ctx, gx + c * cs, gy + visR * cs, cs, cell.mimicOf || cell.type, time, false);
+        }
+      }
+    }
+  }
+
+  // Draw ghost piece
+  if (current && state === STATE.PLAYING) {
+    const ghostY = getGhostY();
+    if (ghostY !== current.y) {
+      const ghostCells = getCells(current.type, current.rotation, current.x, ghostY);
+      for (const [cx, cy] of ghostCells) {
+        const visR = cy - HIDDEN_ROWS;
+        if (visR >= 0 && visR < ROWS) {
+          drawBlock(ctx, gx + cx * cs, gy + visR * cs, cs, current.type, time, true);
+        }
+      }
+    }
+  }
+
+  // Draw current piece
+  if (current && (state === STATE.PLAYING || state === STATE.ABILITY)) {
+    const cells = getCells(current.type, current.rotation, current.x, current.y);
+    for (const [cx, cy] of cells) {
+      const visR = cy - HIDDEN_ROWS;
+      if (visR >= 0 && visR < ROWS) {
+        drawBlock(ctx, gx + cx * cs, gy + visR * cs, cs, current.type, time, false);
+      }
+    }
+  }
+}
+
+function drawSidebar(ctx, time) {
+  const cs = getCellSize();
+  const { gx, gy } = getGridOrigin();
+  const sideX = gx + COLS * cs + 20;
+  const W = canvas.width;
+
+  const titleSize = Math.max(12, Math.min(20, cs * 0.6));
+  const valSize = Math.max(16, Math.min(28, cs * 0.8));
+  const availW = W - sideX - 10;
+  if (availW < 40) return; // too narrow
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+
+  let y = gy;
+
+  // NEXT piece
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = `bold ${titleSize}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillText('NEXT', sideX, y);
+  y += titleSize + 8;
+
+  if (nextType) {
+    const def = CREATURES[nextType];
+    const shape = def.shapes[0];
+    const previewCS = Math.min(cs * 0.7, availW / 5);
+    // Draw preview
+    for (const [dx, dy] of shape) {
+      drawBlock(ctx, sideX + dx * previewCS, y + dy * previewCS, previewCS, nextType, time, false);
+    }
+    const maxDY = Math.max(...shape.map(s => s[1]));
+    y += (maxDY + 1) * previewCS + 8;
+
+    // Creature name and hint
+    ctx.fillStyle = def.color;
+    ctx.font = `bold ${Math.max(11, titleSize * 0.8)}px 'Segoe UI', Arial, sans-serif`;
+    ctx.fillText(def.name, sideX, y);
+    y += titleSize * 0.8 + 2;
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.font = `italic ${Math.max(10, titleSize * 0.7)}px 'Segoe UI', Arial, sans-serif`;
+    ctx.fillText(def.hint, sideX, y);
+    y += titleSize + 16;
+  }
+
+  // Score
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = `bold ${titleSize}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillText('SCORE', sideX, y);
+  y += titleSize + 2;
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${valSize}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillText(String(score), sideX, y);
+  y += valSize + 12;
+
+  // Level
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = `bold ${titleSize}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillText('LEVEL', sideX, y);
+  y += titleSize + 2;
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${valSize}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillText(String(level), sideX, y);
+  y += valSize + 12;
+
+  // Lines
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = `bold ${titleSize}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillText('LINES', sideX, y);
+  y += titleSize + 2;
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${valSize}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillText(String(lines), sideX, y);
+  y += valSize + 12;
+
+  // High score
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = `${Math.max(10, titleSize * 0.8)}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillText('HIGH: ' + highScore, sideX, y);
+}
+
+function drawTitle(ctx, time) {
+  const W = canvas.width;
+  const H = canvas.height;
+  const cx = W / 2;
+  const cy = H / 2;
+
+  // Title
+  const titleSize = Math.max(36, Math.min(72, W * 0.07));
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `bold ${titleSize}px 'Segoe UI', Arial, sans-serif`;
+
+  // Rainbow color cycle per letter
+  const title = 'LIVING BLOCKS';
+  const totalW = ctx.measureText(title).width;
+  let tx = cx - totalW / 2;
+  for (let i = 0; i < title.length; i++) {
+    const hue = (time * 40 + i * 28) % 360;
+    ctx.fillStyle = `hsl(${hue}, 80%, 65%)`;
+    ctx.textAlign = 'left';
+    ctx.fillText(title[i], tx, cy - titleSize);
+    tx += ctx.measureText(title[i]).width;
+  }
+  ctx.textAlign = 'center';
+
+  // Subtitle
+  const subSize = Math.max(14, Math.min(24, W * 0.025));
+  ctx.font = `${subSize}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.fillText('Each piece has a personality', cx, cy - titleSize * 0.2);
+
+  // Creature showcase
+  const previewCS = Math.max(16, Math.min(28, W * 0.025));
+  const crKeys = CREATURE_KEYS;
+  const showcaseY = cy + subSize;
+  const totalShowW = crKeys.length * (previewCS * 4 + 10);
+  let showX = cx - totalShowW / 2;
+  for (const key of crKeys) {
+    const def = CREATURES[key];
+    const shape = def.shapes[0];
+    for (const [dx, dy] of shape) {
+      drawBlock(ctx, showX + dx * previewCS, showcaseY + dy * previewCS, previewCS, key, time, false);
+    }
+    showX += previewCS * 4 + 10;
+  }
+
+  // Start hint
+  const hintSize = Math.max(14, Math.min(22, W * 0.022));
+  ctx.font = `${hintSize}px 'Segoe UI', Arial, sans-serif`;
+  const alpha = 0.4 + Math.sin(time * 3) * 0.3;
+  ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+  ctx.fillText('Press ENTER or tap to start', cx, showcaseY + previewCS * 3 + 30);
+
+  // Controls
+  const ctrlSize = Math.max(10, Math.min(14, W * 0.014));
+  ctx.font = `${ctrlSize}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  let ctrlY = showcaseY + previewCS * 3 + 60;
+  ctx.fillText('Arrow keys: Move/Rotate  |  Space: Hard drop  |  M: Mute', cx, ctrlY);
+}
+
+function drawGameOver(ctx, time) {
+  const W = canvas.width;
+  const H = canvas.height;
+  const cx = W / 2;
+  const cy = H / 2;
+
+  // Dim overlay
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, W, H);
+
+  const titleSize = Math.max(30, Math.min(60, W * 0.06));
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `bold ${titleSize}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillStyle = '#ff4466';
+  ctx.fillText('GAME OVER', cx, cy - titleSize);
+
+  const scoreSize = titleSize * 0.6;
+  ctx.font = `${scoreSize}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillStyle = '#fff';
+  ctx.fillText(`Score: ${score}  |  Level: ${level}  |  Lines: ${lines}`, cx, cy);
+
+  if (score >= highScore && score > 0) {
+    ctx.fillStyle = '#ffdd44';
+    ctx.font = `bold ${scoreSize}px 'Segoe UI', Arial, sans-serif`;
+    ctx.fillText('NEW HIGH SCORE!', cx, cy + scoreSize * 1.5);
+  }
+
+  const hintSize = scoreSize * 0.7;
+  ctx.font = `${hintSize}px 'Segoe UI', Arial, sans-serif`;
+  const alpha = 0.4 + Math.sin(time * 3) * 0.3;
+  ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+  ctx.fillText('Press ENTER or tap to play again', cx, cy + titleSize * 1.8);
+}
+
+// ============================================================
+// UPDATE
+// ============================================================
+function update(dt) {
+  gameTime += dt;
+  updateParticles();
+
+  if (state === STATE.PLAYING && current) {
+    dropTimer += dt;
+
+    // Check if piece can drop
+    const canDrop = isValid(current.type, current.rotation, current.x, current.y + 1);
+
+    if (canDrop) {
+      lockTimer = 0;
+      if (dropTimer >= dropInterval) {
+        current.y++;
+        dropTimer = 0;
+      }
+    } else {
+      // Piece is resting — lock delay
+      lockTimer += dt;
+      if (lockTimer >= LOCK_DELAY) {
+        lockPiece();
+      }
+    }
+  }
+
+  if (state === STATE.ABILITY) {
+    abilityTimer -= dt;
+    if (abilityTimer <= 0) {
+      triggerAbilities();
+    }
+  }
+
+  if (state === STATE.CLEARING) {
+    clearTimer -= dt;
+    if (clearTimer <= 0) {
+      finishClearing();
+    }
+  }
+}
+
+// ============================================================
+// DRAW
+// ============================================================
+function draw() {
+  const W = canvas.width;
+  const H = canvas.height;
+
+  ctx.fillStyle = '#0a0a1a';
+  ctx.fillRect(0, 0, W, H);
+
+  if (state === STATE.TITLE) {
+    drawTitle(ctx, gameTime);
+  } else {
+    drawGrid(ctx, gameTime);
+    drawSidebar(ctx, gameTime);
+    drawParticles(ctx);
+    if (state === STATE.GAMEOVER) {
+      drawGameOver(ctx, gameTime);
+    }
+  }
+
+  // Mute indicator
+  if (SFX.muted) {
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.font = '12px sans-serif';
+    ctx.fillText('MUTED [M]', W - 10, 10);
+  }
+}
+
+// ============================================================
+// INPUT — KEYBOARD
+// ============================================================
+const keys = {};
+const keyRepeat = {};
+
+window.addEventListener('keydown', e => {
+  if (e.repeat && (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'ArrowDown')) {
+    // Allow natural repeat for movement keys
+  }
+
+  if (state === STATE.TITLE) {
+    if (e.code === 'Enter' || e.code === 'Space') {
+      startGame();
+      return;
+    }
+  }
+
+  if (state === STATE.GAMEOVER) {
+    if (e.code === 'Enter' || e.code === 'Space') {
+      state = STATE.TITLE;
+      return;
+    }
+  }
+
+  if (e.code === 'KeyM') {
+    SFX.muted = !SFX.muted;
+    return;
+  }
+
+  if (state !== STATE.PLAYING || !current) return;
+
+  switch (e.code) {
+    case 'ArrowLeft':
+      if (tryMove(-1, 0)) { SFX.move(); lockTimer = 0; }
+      break;
+    case 'ArrowRight':
+      if (tryMove(1, 0)) { SFX.move(); lockTimer = 0; }
+      break;
+    case 'ArrowDown':
+      if (tryMove(0, 1)) { score++; dropTimer = 0; }
+      break;
+    case 'ArrowUp':
+    case 'KeyX':
+      if (tryRotate()) { SFX.rotate(); lockTimer = 0; }
+      break;
+    case 'Space':
+      e.preventDefault();
+      hardDrop();
+      break;
+  }
+});
+
+// ============================================================
+// INPUT — TOUCH
+// ============================================================
+let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+let touchMoved = false;
+let lastSwipeTime = 0;
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  touchStartX = t.clientX;
+  touchStartY = t.clientY;
+  touchStartTime = Date.now();
+  touchMoved = false;
+
+  if (state === STATE.TITLE) {
+    startGame();
+    return;
+  }
+  if (state === STATE.GAMEOVER) {
+    state = STATE.TITLE;
+    return;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (state !== STATE.PLAYING || !current) return;
+
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+  const cs = getCellSize();
+  const threshold = cs * 0.6;
+
+  if (Math.abs(dx) > threshold) {
+    const dir = dx > 0 ? 1 : -1;
+    if (tryMove(dir, 0)) {
+      SFX.move();
+      lockTimer = 0;
+    }
+    touchStartX = t.clientX;
+    touchMoved = true;
+  }
+
+  if (dy > threshold * 1.5) {
+    if (tryMove(0, 1)) {
+      score++;
+      dropTimer = 0;
+    }
+    touchStartY = t.clientY;
+    touchMoved = true;
+  }
+
+  // Fast swipe down = hard drop
+  const elapsed = Date.now() - touchStartTime;
+  if (dy > cs * 3 && elapsed < 200 && Date.now() - lastSwipeTime > 300) {
+    hardDrop();
+    lastSwipeTime = Date.now();
+    touchMoved = true;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (state !== STATE.PLAYING || !current) return;
+
+  // Tap = rotate
+  if (!touchMoved && Date.now() - touchStartTime < 200) {
+    if (tryRotate()) {
+      SFX.rotate();
+      lockTimer = 0;
+    }
+  }
+}, { passive: false });
+
+// Mouse click for title/gameover
+canvas.addEventListener('click', () => {
+  if (state === STATE.TITLE) startGame();
+  else if (state === STATE.GAMEOVER) state = STATE.TITLE;
+});
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+let lastTime = 0;
+
+function loop(timestamp) {
+  if (!lastTime) lastTime = timestamp;
+  const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
+  lastTime = timestamp;
+
+  if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+    resize();
+  }
+
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+
+</script>
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px Segoe UI,Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px"><span id="vc-count">...</span> Stackers</div>
+<script>
+(function(){var G="living-blocks",SU="https://ivhpqkqnfqcgrfrsvszf.supabase.co",SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM";function hdr(){return{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json"}}async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("").slice(0,32)}catch(e){return"anon-"+Math.random().toString(36).slice(2,10)}}async function run(){var h=await vh();try{await fetch(SU+"/rest/v1/game_visits",{method:"POST",headers:Object.assign(hdr(),{"Prefer":"resolution=merge-duplicates,return=minimal"}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}try{var r=await fetch(SU+"/rest/v1/game_visits?game=eq."+G+"&select=id",{headers:Object.assign(hdr(),{"Prefer":"count=exact"})});var c=r.headers.get("content-range");if(c){var n=c.split("/")[1];if(n&&n!=="*")document.getElementById("vc-count").textContent=Number(n).toLocaleString()}}catch(e){}}run()})();
+</script>
+</body>
+</html>

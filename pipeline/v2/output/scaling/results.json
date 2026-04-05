@@ -1,0 +1,46 @@
+{
+  "results": [
+    {
+      "name": "Breakout",
+      "domain": "game",
+      "atomsReused": 0,
+      "atomsBuilt": 10,
+      "atomsTotal": 10,
+      "reuseRate": 0,
+      "shapes": 3,
+      "cost": 0.14282455,
+      "elapsed": 127,
+      "librarySize": 10,
+      "failures": 0
+    },
+    {
+      "name": "SortViz",
+      "domain": "algorithm",
+      "atomsReused": 1,
+      "atomsBuilt": 5,
+      "atomsTotal": 6,
+      "reuseRate": 0.16666666666666666,
+      "shapes": 0,
+      "cost": 0.02229735,
+      "elapsed": 9.8,
+      "librarySize": 15,
+      "failures": 0
+    },
+    {
+      "name": "DrawTool",
+      "domain": "creative",
+      "atomsReused": 2,
+      "atomsBuilt": 3,
+      "atomsTotal": 5,
+      "reuseRate": 0.4,
+      "shapes": 0,
+      "cost": 0.01507485,
+      "elapsed": 11.9,
+      "librarySize": 18,
+      "failures": 0
+    }
+  ],
+  "librarySize": 18,
+  "totalCost": 0.18019675,
+  "totalElapsed": "148.8"
+}

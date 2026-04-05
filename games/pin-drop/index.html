@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Pin Drop - Geography Guessing Game</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&family=Inter:wght@400;600;700&display=swap');
+body { background: #0f1923; overflow: hidden; font-family: 'Inter', sans-serif; color: #e0d8c8; width: 100vw; height: 100vh; }
+#game { width: 100vw; height: 100vh; position: relative; }
+canvas { display: block; position: absolute; top: 0; left: 0; }
+
+/* Postcard panel */
+#postcard {
+  position: absolute; z-index: 10;
+  background: #f5eed6; color: #3d2b1f; border-radius: 6px;
+  box-shadow: 4px 6px 20px rgba(0,0,0,0.5);
+  display: none; overflow: hidden;
+}
+/* Desktop */
+@media (min-width: 769px) {
+  #postcard { right: 20px; top: 60px; width: 380px; max-height: calc(100vh - 80px); }
+}
+/* Mobile */
+@media (max-width: 768px) {
+  #postcard { left: 10px; right: 10px; top: 50px; max-height: 40vh; }
+}
+
+#postcard-header {
+  background: #c0392b; color: white; padding: 10px 16px;
+  font-weight: 700; font-size: 14px; display: flex; justify-content: space-between; align-items: center;
+}
+#postcard-stamp {
+  background: rgba(255,255,255,0.2); border-radius: 4px; padding: 2px 10px;
+  font-size: 12px;
+}
+#postcard-body { padding: 16px; overflow-y: auto; max-height: calc(100vh - 200px); }
+.clue-tier { margin-bottom: 14px; }
+.clue-tier-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #8a7a6a; margin-bottom: 4px; font-weight: 700; }
+.clue-text { font-family: 'Caveat', cursive; font-size: 20px; line-height: 1.3; color: #3d2b1f; }
+.clue-hidden { display: none; }
+#reveal-btn {
+  display: block; margin: 10px auto 0; padding: 8px 24px;
+  background: #c0392b; color: white; border: none; border-radius: 20px;
+  font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background 0.2s;
+}
+#reveal-btn:hover { background: #e74c3c; }
+#reveal-btn:disabled { background: #999; cursor: default; }
+
+#postcard-multiplier {
+  text-align: center; padding: 8px; font-size: 13px; font-weight: 700;
+  color: #c0392b; border-top: 1px dashed #ccc3a8;
+}
+
+/* HUD */
+#hud {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 15;
+  background: linear-gradient(180deg, rgba(15,25,35,0.95), rgba(15,25,35,0));
+  padding: 12px 20px; display: flex; justify-content: space-between; align-items: center;
+  pointer-events: none;
+}
+#hud > div { pointer-events: auto; }
+.hud-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #6a8a9a; }
+.hud-value { font-size: 22px; font-weight: 700; color: #e0d8c8; }
+.hud-value.score { color: #d4a017; }
+
+/* Confirm button */
+#confirm-btn {
+  position: absolute; z-index: 20; bottom: 30px; left: 50%; transform: translateX(-50%);
+  padding: 14px 40px; background: #c0392b; color: white; border: none; border-radius: 30px;
+  font-family: 'Inter', sans-serif; font-size: 16px; font-weight: 700;
+  cursor: pointer; display: none; box-shadow: 0 4px 15px rgba(192,57,43,0.5);
+  transition: all 0.2s;
+}
+#confirm-btn:hover { background: #e74c3c; transform: translateX(-50%) scale(1.05); }
+
+/* Next round button */
+#next-btn {
+  position: absolute; z-index: 20; bottom: 30px; left: 50%; transform: translateX(-50%);
+  padding: 14px 40px; background: #27ae60; color: white; border: none; border-radius: 30px;
+  font-family: 'Inter', sans-serif; font-size: 16px; font-weight: 700;
+  cursor: pointer; display: none; box-shadow: 0 4px 15px rgba(39,174,96,0.5);
+  transition: all 0.2s;
+}
+#next-btn:hover { background: #2ecc71; transform: translateX(-50%) scale(1.05); }
+
+/* Result overlay */
+#result-popup {
+  position: absolute; z-index: 25; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: rgba(15,25,35,0.95); border: 2px solid #d4a017; border-radius: 12px;
+  padding: 30px 40px; text-align: center; display: none; min-width: 280px;
+}
+#result-popup h2 { font-size: 28px; color: #d4a017; margin-bottom: 8px; }
+#result-popup .result-location { font-size: 18px; color: #e0d8c8; margin-bottom: 12px; }
+#result-popup .result-distance { font-size: 15px; color: #6a8a9a; margin-bottom: 6px; }
+#result-popup .result-score { font-size: 36px; font-weight: 700; color: #27ae60; }
+#result-popup .result-multiplier { font-size: 14px; color: #d4a017; margin-top: 4px; }
+
+/* Start / End screens */
+#start-screen, #end-screen {
+  position: absolute; z-index: 30; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(10,18,28,0.97); display: flex; flex-direction: column;
+  justify-content: center; align-items: center; text-align: center; padding: 20px;
+}
+#start-screen h1, #end-screen h1 {
+  font-size: clamp(32px, 6vw, 56px); color: #d4a017; margin-bottom: 10px;
+}
+#start-screen p, #end-screen p { font-size: 16px; color: #8a9aaa; max-width: 500px; margin-bottom: 20px; line-height: 1.5; }
+.big-btn {
+  padding: 16px 50px; font-size: 18px; font-weight: 700; border: none; border-radius: 30px;
+  cursor: pointer; font-family: 'Inter', sans-serif; transition: all 0.2s; margin: 6px;
+}
+.big-btn.primary { background: #c0392b; color: white; box-shadow: 0 4px 15px rgba(192,57,43,0.4); }
+.big-btn.primary:hover { background: #e74c3c; transform: scale(1.05); }
+.big-btn.secondary { background: #2c3e50; color: #e0d8c8; }
+.big-btn.secondary:hover { background: #34495e; }
+
+/* End screen details */
+#end-rounds { margin: 16px 0; width: 100%; max-width: 600px; }
+.end-round-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 16px; border-bottom: 1px solid rgba(255,255,255,0.1);
+  font-size: 14px;
+}
+.end-round-row .loc-name { color: #e0d8c8; text-align: left; flex: 1; }
+.end-round-row .loc-dist { color: #6a8a9a; width: 100px; text-align: right; }
+.end-round-row .loc-score { color: #d4a017; width: 80px; text-align: right; font-weight: 700; }
+#end-rank { font-size: 22px; color: #d4a017; margin: 10px 0; font-weight: 700; }
+#end-total { font-size: 40px; color: #27ae60; font-weight: 700; }
+
+/* Coords display */
+#coords {
+  position: absolute; bottom: 8px; left: 8px; z-index: 10;
+  font-size: 11px; color: rgba(200,220,240,0.4); pointer-events: none;
+}
+
+/* Back link */
+#back-link {
+  position: absolute; top: 12px; left: 16px; z-index: 20;
+  color: rgba(200,220,240,0.5); text-decoration: none; font-size: 13px;
+  pointer-events: auto;
+}
+#back-link:hover { color: #e0d8c8; }
+</style>
+</head>
+<body>
+<div id="game">
+  <canvas id="map-canvas"></canvas>
+  <div id="hud">
+    <div><a id="back-link" href="../../index.html">Back to Arcade</a></div>
+    <div><span class="hud-label">Round</span><div class="hud-value" id="hud-round">1 / 5</div></div>
+    <div><span class="hud-label">Score</span><div class="hud-value score" id="hud-score">0</div></div>
+  </div>
+  <div id="postcard">
+    <div id="postcard-header">
+      <span>Mystery Location</span>
+      <span id="postcard-stamp">Round 1</span>
+    </div>
+    <div id="postcard-body">
+      <div class="clue-tier" id="clue-1">
+        <div class="clue-tier-label">First Impression</div>
+        <div class="clue-text" id="clue-text-1"></div>
+      </div>
+      <div class="clue-tier clue-hidden" id="clue-2">
+        <div class="clue-tier-label">Closer Look</div>
+        <div class="clue-text" id="clue-text-2"></div>
+      </div>
+      <div class="clue-tier clue-hidden" id="clue-3">
+        <div class="clue-tier-label">The Giveaway</div>
+        <div class="clue-text" id="clue-text-3"></div>
+      </div>
+      <button id="reveal-btn">Reveal Next Clue</button>
+      <div id="postcard-multiplier">Score Multiplier: x3</div>
+    </div>
+  </div>
+  <button id="confirm-btn">Drop Pin!</button>
+  <button id="next-btn">Next Round</button>
+  <div id="result-popup">
+    <h2 id="result-title">Nice!</h2>
+    <div class="result-location" id="result-location"></div>
+    <div class="result-distance" id="result-distance"></div>
+    <div class="result-score" id="result-score-val"></div>
+    <div class="result-multiplier" id="result-mult"></div>
+  </div>
+  <div id="coords"></div>
+
+  <div id="start-screen">
+    <h1>Pin Drop</h1>
+    <p>You'll be given clues about a mystery location. Drop a pin on the world map to guess where it is. Guess early with fewer clues for bonus points!</p>
+    <button class="big-btn primary" id="start-btn">Start Game</button>
+  </div>
+
+  <div id="end-screen" style="display:none">
+    <h1>Journey Complete</h1>
+    <div id="end-total"></div>
+    <div id="end-rank"></div>
+    <div id="end-rounds"></div>
+    <button class="big-btn primary" id="replay-btn">Play Again</button>
+    <button class="big-btn secondary" onclick="location.href='../../index.html'">Back to Arcade</button>
+  </div>
+</div>
+
+<script>
+// ==================== LOCATION DATABASE ====================
+const LOCATIONS = [
+  // --- Major Cities ---
+  { name: "Paris, France", lat: 48.8566, lng: 2.3522,
+    clues: [
+      "A temperate European city on a gentle river, known worldwide for art and romance.",
+      "Café culture thrives here. The language of love echoes through grand boulevards lined with cream-stone buildings.",
+      "An iron lattice tower built for a world's fair in 1889 dominates the skyline — the Eiffel Tower."
+    ]},
+  { name: "Tokyo, Japan", lat: 35.6762, lng: 139.6503,
+    clues: [
+      "A vast East Asian metropolis where ancient traditions coexist with cutting-edge technology.",
+      "Neon-lit streets, vending machines on every corner, and trains that run to the second. Cherry blossoms bloom each spring.",
+      "Shibuya Crossing, the busiest pedestrian intersection on Earth, is here — in Japan's capital."
+    ]},
+  { name: "Cairo, Egypt", lat: 30.0444, lng: 31.2357,
+    clues: [
+      "A sprawling North African city on the banks of the world's longest river, baking under desert sun.",
+      "Minarets punctuate the skyline. The call to prayer echoes across markets selling spices and perfumes.",
+      "The Great Pyramids of Giza stand at the city's western edge — this is Egypt's capital."
+    ]},
+  { name: "Rio de Janeiro, Brazil", lat: -22.9068, lng: -43.1729,
+    clues: [
+      "A tropical South American city squeezed between lush green mountains and golden beaches.",
+      "Samba rhythms fill the streets during carnival. The locals speak Portuguese and play football on the sand.",
+      "A colossal statue of Christ stands atop Corcovado mountain, arms outstretched — Cristo Redentor."
+    ]},
+  { name: "Sydney, Australia", lat: -33.8688, lng: 151.2093,
+    clues: [
+      "A Southern Hemisphere coastal city with a sparkling harbor, warm climate, and laid-back culture.",
+      "Surfers, barbecues, and a massive steel arch bridge. The accent is unmistakable.",
+      "White sail-shaped shells form its iconic Opera House on Bennelong Point."
+    ]},
+  { name: "New York City, USA", lat: 40.7128, lng: -74.0060,
+    clues: [
+      "A dense North American island city of towering skyscrapers, diverse neighborhoods, and yellow cabs.",
+      "Broadway shows, bagels, and a massive green park in the middle of it all. The city that never sleeps.",
+      "The Statue of Liberty watches over the harbor — this is the Big Apple."
+    ]},
+  { name: "Istanbul, Turkey", lat: 41.0082, lng: 28.9784,
+    clues: [
+      "A transcontinental city straddling a narrow strait, with one foot in Europe and one in Asia.",
+      "Domed mosques and minarets rise above bazaars selling carpets, ceramics, and Turkish delight.",
+      "The Hagia Sophia, once a church, then a mosque, now a museum — in the city once called Constantinople."
+    ]},
+  { name: "Moscow, Russia", lat: 55.7558, lng: 37.6173,
+    clues: [
+      "A vast Northern European capital with brutal winters, wide boulevards, and ornate architecture.",
+      "An underground metro system doubles as an art gallery. Onion domes dot the skyline.",
+      "The colorful swirling domes of St. Basil's Cathedral stand in Red Square — Russia's capital."
+    ]},
+  { name: "Marrakech, Morocco", lat: 31.6295, lng: -7.9811,
+    clues: [
+      "A North African city at the edge of the Sahara, with a warm, arid climate year-round.",
+      "Labyrinthine souks sell leather, spices, and lanterns. Riads with tiled courtyards hide behind plain walls.",
+      "The Jemaa el-Fnaa square comes alive at dusk with snake charmers and food stalls — the Red City."
+    ]},
+  { name: "Bangkok, Thailand", lat: 13.7563, lng: 100.5018,
+    clues: [
+      "A humid Southeast Asian capital crisscrossed by canals, known for street food and golden temples.",
+      "Tuk-tuks weave through traffic. Pad thai sizzles at roadside stalls. Monks in orange robes walk at dawn.",
+      "The Grand Palace and Wat Phra Kaew (Temple of the Emerald Buddha) are here — Krung Thep."
+    ]},
+  { name: "Buenos Aires, Argentina", lat: -34.6037, lng: -58.3816,
+    clues: [
+      "A South American capital with European-style architecture and a passionate love for football and beef.",
+      "Tango music drifts from milongas. Colorful houses line the La Boca waterfront.",
+      "The widest avenue in the world — Avenida 9 de Julio — runs through Argentina's capital."
+    ]},
+  { name: "Reykjavik, Iceland", lat: 64.1466, lng: -21.9426,
+    clues: [
+      "The world's most northerly capital, small and colorful, surrounded by volcanic landscapes.",
+      "Geothermal pools, the Northern Lights in winter, and midnight sun in summer. Population under 140,000.",
+      "Hallgrimskirkja church's rocket-like spire dominates the skyline — this is Iceland's capital."
+    ]},
+  { name: "Dubai, UAE", lat: 25.2048, lng: 55.2708,
+    clues: [
+      "A Middle Eastern desert city that transformed from a fishing village to a futuristic metropolis in decades.",
+      "Artificial islands, indoor ski slopes, and extreme heat. Gold souks and luxury malls coexist.",
+      "The Burj Khalifa, the world's tallest building at 828 meters, pierces the sky here."
+    ]},
+  { name: "Havana, Cuba", lat: 23.1136, lng: -82.3666,
+    clues: [
+      "A Caribbean capital with a tropical climate, frozen in time with crumbling colonial grandeur.",
+      "Classic American cars from the 1950s cruise the Malecon seawall. Salsa and rum flow freely.",
+      "This is Cuba's capital — cigars, revolution murals, and the spirit of Hemingway."
+    ]},
+  { name: "Kyoto, Japan", lat: 35.0116, lng: 135.7681,
+    clues: [
+      "An East Asian city of traditional wooden architecture, nestled in a mountain-ringed basin.",
+      "Geisha in the Gion district, bamboo groves, and over 2,000 temples and shrines.",
+      "Japan's imperial capital for over a thousand years — home of the Golden Pavilion, Kinkaku-ji."
+    ]},
+  { name: "Lisbon, Portugal", lat: 38.7223, lng: -9.1393,
+    clues: [
+      "A hilly Western European capital on the Atlantic coast, bathed in golden light.",
+      "Yellow trams climb steep streets past tiled facades. Fado music echoes from tiny taverns.",
+      "The Belem Tower guards the Tagus River estuary — explorers once set sail from here."
+    ]},
+  { name: "Nairobi, Kenya", lat: -1.2921, lng: 36.8219,
+    clues: [
+      "An East African city near the equator with a surprisingly mild climate due to its elevation.",
+      "A national park with lions and giraffes sits within the city limits — the only one of its kind.",
+      "Kenya's capital, gateway to safari country and home to the Karen Blixen Museum."
+    ]},
+  { name: "Kathmandu, Nepal", lat: 27.7172, lng: 85.3240,
+    clues: [
+      "A South Asian city in a high valley, surrounded by some of the tallest peaks on Earth.",
+      "Prayer flags flutter from rooftops. Hindu and Buddhist temples crowd narrow medieval streets.",
+      "Gateway to Mount Everest — Nepal's capital in the Himalayan foothills."
+    ]},
+  { name: "Lima, Peru", lat: -12.0464, lng: -77.0428,
+    clues: [
+      "A South American capital on the Pacific coast, under a persistent coastal fog called garua.",
+      "Ceviche is the national dish. Pre-Columbian pyramids sit alongside colonial churches.",
+      "Peru's capital — the historic center is a UNESCO World Heritage Site from the Spanish conquest era."
+    ]},
+  { name: "Vancouver, Canada", lat: 49.2827, lng: -123.1207,
+    clues: [
+      "A Pacific Northwest city backed by snow-capped mountains, with mild, rainy winters.",
+      "Glass towers reflect ocean and forest. Totem poles in Stanley Park honor Indigenous heritage.",
+      "Canada's western jewel — you can ski and sail on the same day here in British Columbia."
+    ]},
+
+  // --- Natural Wonders ---
+  { name: "Grand Canyon, USA", lat: 36.1069, lng: -112.1129,
+    clues: [
+      "A massive geological formation in an arid region of western North America, carved over millions of years.",
+      "Layer upon layer of red, orange, and tan rock reveal nearly 2 billion years of Earth's history.",
+      "The Colorado River carved this mile-deep, 277-mile-long gorge in Arizona."
+    ]},
+  { name: "Great Barrier Reef, Australia", lat: -18.2871, lng: 147.6992,
+    clues: [
+      "The world's largest living structure, visible from space, in warm tropical waters.",
+      "Over 1,500 species of fish and 400 types of coral. Snorkelers and divers come from around the world.",
+      "Stretching 2,300 km along Queensland's coast — the Great Barrier Reef."
+    ]},
+  { name: "Victoria Falls, Zambia/Zimbabwe", lat: -17.9243, lng: 25.8572,
+    clues: [
+      "A thundering curtain of water on a river in southern Africa, creating a permanent rain cloud.",
+      "The locals call it 'Mosi-oa-Tunya' — The Smoke That Thunders. It's twice the height of Niagara.",
+      "The Zambezi River plunges 108 meters at the border of Zambia and Zimbabwe — Victoria Falls."
+    ]},
+  { name: "Northern Lights, Tromso, Norway", lat: 69.6492, lng: 18.9553,
+    clues: [
+      "A city above the Arctic Circle where the sun doesn't rise for two months in winter.",
+      "Despite its latitude, the harbor never freezes thanks to the Gulf Stream. A striking Arctic cathedral stands here.",
+      "One of the best places on Earth to see the Aurora Borealis — Tromso, the Gateway to the Arctic."
+    ]},
+  { name: "Sahara Desert, Algeria", lat: 27.1260, lng: 2.6326,
+    clues: [
+      "The world's largest hot desert, a vast sea of sand dunes and rocky plateaus in northern Africa.",
+      "Temperatures can swing 30°C between day and night. Nomadic Tuareg people traverse the dunes.",
+      "Covering nearly the entire width of North Africa — the Sahara, larger than the continental US."
+    ]},
+  { name: "Amazon Rainforest, Brazil", lat: -3.4653, lng: -62.2159,
+    clues: [
+      "The planet's largest tropical rainforest, spanning most of a massive South American river basin.",
+      "Home to one in ten known species. The canopy is so dense that rain takes 10 minutes to reach the ground.",
+      "The Amazon River, carrying more water than any other, winds through this vast green lung of the Earth."
+    ]},
+  { name: "Mount Fuji, Japan", lat: 35.3606, lng: 138.7274,
+    clues: [
+      "A near-perfect symmetrical volcanic cone, snow-capped for much of the year, sacred in local culture.",
+      "Artists and poets have revered this peak for centuries. It last erupted in 1707.",
+      "Japan's tallest mountain at 3,776 meters — Fuji-san, often framed by cherry blossoms and pagodas."
+    ]},
+  { name: "Iguazu Falls, Argentina/Brazil", lat: -25.6953, lng: -54.4367,
+    clues: [
+      "A massive waterfall system in a subtropical setting, surrounded by lush jungle in South America.",
+      "275 individual cascades spread across nearly 3 km. Toucans and butterflies abound.",
+      "The Devil's Throat is the most dramatic section — Iguazu Falls on the Argentina-Brazil border."
+    ]},
+  { name: "Dead Sea, Jordan/Israel", lat: 31.5, lng: 35.5,
+    clues: [
+      "The lowest point on Earth's surface, a hypersaline lake in a rift valley desert.",
+      "Swimmers float effortlessly. Mineral-rich mud is said to have healing properties. The shore is 430m below sea level.",
+      "Bordered by Jordan and Israel — the Dead Sea, nearly ten times saltier than the ocean."
+    ]},
+  { name: "Galapagos Islands, Ecuador", lat: -0.9538, lng: -90.9656,
+    clues: [
+      "A volcanic archipelago on the equator in the Pacific, famous for unique wildlife found nowhere else.",
+      "Giant tortoises, marine iguanas, and blue-footed boobies. A naturalist's visit here changed biology forever.",
+      "Darwin's inspiration — the Galapagos Islands, 1,000 km off Ecuador's coast."
+    ]},
+
+  // --- Cultural Landmarks ---
+  { name: "Machu Picchu, Peru", lat: -13.1631, lng: -72.5450,
+    clues: [
+      "A ruined stone citadel perched high on a misty mountain ridge in South America.",
+      "Terraced fields cling to impossibly steep slopes. Llamas graze among ancient walls. Built in the 15th century.",
+      "The Lost City of the Incas, rediscovered in 1911 — Machu Picchu in the Peruvian Andes."
+    ]},
+  { name: "Angkor Wat, Cambodia", lat: 13.4125, lng: 103.8670,
+    clues: [
+      "The world's largest religious monument, a vast temple complex reclaimed from the jungle in Southeast Asia.",
+      "Intricate bas-reliefs depict Hindu epics. The iconic five towers represent Mount Meru, home of the gods.",
+      "Built in the 12th century by the Khmer Empire — Angkor Wat, Cambodia's national symbol."
+    ]},
+  { name: "Stonehenge, England", lat: 51.1789, lng: -1.8262,
+    clues: [
+      "A prehistoric monument on a windswept plain in northern Europe, its purpose still debated.",
+      "Massive stones, some weighing 25 tonnes, were transported hundreds of miles around 2500 BC.",
+      "On Salisbury Plain in Wiltshire — Stonehenge, Britain's most famous ancient monument."
+    ]},
+  { name: "Petra, Jordan", lat: 30.3285, lng: 35.4444,
+    clues: [
+      "An ancient city carved directly into rose-red cliff faces in a Middle Eastern desert canyon.",
+      "A narrow gorge called the Siq leads to an elaborate facade. It was a major trading hub 2,000 years ago.",
+      "The Treasury (Al-Khazneh) glows pink at sunrise — Petra, the Rose City of the Nabataeans."
+    ]},
+  { name: "Taj Mahal, India", lat: 27.1751, lng: 78.0421,
+    clues: [
+      "A white marble mausoleum on a riverbank in South Asia, considered the finest example of Mughal architecture.",
+      "Built by a grieving emperor for his beloved wife. Its symmetry is perfect down to the millimeter.",
+      "Shah Jahan's monument to love, completed in 1653 — the Taj Mahal in Agra, India."
+    ]},
+  { name: "Great Wall, China", lat: 40.4319, lng: 116.5704,
+    clues: [
+      "A massive defensive fortification snaking across mountains and valleys in East Asia.",
+      "Construction spanned over 2,000 years across multiple dynasties. It stretches over 20,000 km in total.",
+      "The Great Wall of China, near the Badaling section north of Beijing."
+    ]},
+  { name: "Chichen Itza, Mexico", lat: 20.6843, lng: -88.5678,
+    clues: [
+      "A pre-Columbian city in the tropical lowlands of Central America, once a major Mesoamerican center.",
+      "During equinoxes, a shadow serpent slithers down the pyramid's staircase. A sacred cenote lies nearby.",
+      "El Castillo, the pyramid of Kukulcan — Chichen Itza, jewel of the Maya civilization in Yucatan."
+    ]},
+  { name: "Colosseum, Rome, Italy", lat: 41.8902, lng: 12.4922,
+    clues: [
+      "A massive oval amphitheater in a southern European capital, once the stage for gladiatorial combat.",
+      "It could hold 80,000 spectators. Despite earthquakes and stone-robbers, much of it still stands after 2,000 years.",
+      "The Flavian Amphitheatre — the Colosseum in Rome, Italy's most visited landmark."
+    ]},
+
+  // --- Hidden Gems ---
+  { name: "Cappadocia, Turkey", lat: 38.6431, lng: 34.8289,
+    clues: [
+      "A surreal landscape of cone-shaped rock formations in a semi-arid region of western Asia.",
+      "Underground cities carved into soft volcanic rock sheltered early Christians. Hot air balloons fill the dawn sky.",
+      "Fairy chimneys and cave hotels — Cappadocia in central Turkey."
+    ]},
+  { name: "Salar de Uyuni, Bolivia", lat: -20.1338, lng: -67.4891,
+    clues: [
+      "The world's largest salt flat, a blinding white expanse at over 3,600 meters altitude in South America.",
+      "When a thin layer of water covers it, the surface becomes a perfect mirror reflecting the sky.",
+      "10,582 square kilometers of salt crust — Salar de Uyuni in southwest Bolivia."
+    ]},
+  { name: "Plitvice Lakes, Croatia", lat: 44.8654, lng: 15.5820,
+    clues: [
+      "A chain of 16 terraced lakes connected by waterfalls, in a dense European forest.",
+      "The water shifts between azure, green, and grey depending on minerals and light. Wooden boardwalks wind through.",
+      "Croatia's oldest national park — Plitvice Lakes, a UNESCO World Heritage Site."
+    ]},
+  { name: "Zhangjiajie, China", lat: 29.3249, lng: 110.4343,
+    clues: [
+      "Towering sandstone pillars rise from subtropical forest in East Asia, often shrouded in mist.",
+      "These formations inspired the floating mountains in a famous sci-fi film. Glass bridges span the chasms.",
+      "Zhangjiajie National Forest Park in Hunan, China — the Avatar Mountains."
+    ]},
+  { name: "Santorini, Greece", lat: 36.3932, lng: 25.4615,
+    clues: [
+      "A crescent-shaped volcanic island in the Mediterranean with whitewashed buildings and blue-domed churches.",
+      "Dramatic cliffs drop to a flooded caldera. Sunsets here are legendary. Wine grows in volcanic soil.",
+      "Santorini in the Aegean Sea — some believe it inspired the legend of Atlantis."
+    ]},
+  { name: "Banff, Canada", lat: 51.1784, lng: -115.5708,
+    clues: [
+      "A mountain town in the Canadian Rockies surrounded by turquoise lakes and towering peaks.",
+      "Elk roam the streets. Lake Louise glows an unreal shade of blue-green from glacial flour.",
+      "Canada's first national park, established 1885 — Banff in Alberta."
+    ]},
+  { name: "Bagan, Myanmar", lat: 21.1717, lng: 94.8585,
+    clues: [
+      "An ancient plain dotted with thousands of Buddhist temples and pagodas in Southeast Asia.",
+      "Over 2,000 structures remain from the 11th-13th centuries. Best seen from a hot air balloon at sunrise.",
+      "The archaeological zone of Bagan, capital of the first Burmese empire in Myanmar."
+    ]},
+  { name: "Easter Island, Chile", lat: -27.1127, lng: -109.3497,
+    clues: [
+      "One of the most remote inhabited islands on Earth, in the southeastern Pacific Ocean.",
+      "Hundreds of enormous stone head statues stare inland from the coast. How they were moved remains debated.",
+      "The Moai of Rapa Nui — Easter Island, a Chilean territory 3,700 km from the mainland."
+    ]},
+  { name: "Hallstatt, Austria", lat: 47.5622, lng: 13.6493,
+    clues: [
+      "A tiny lakeside village in the Alps, so picturesque it has been replicated in other countries.",
+      "Salt mining here dates back 7,000 years. Pastel houses cling to the steep mountainside above a mirror lake.",
+      "Hallstatt, Austria — population under 800, yet one of Europe's most photographed villages."
+    ]},
+  { name: "Socotra Island, Yemen", lat: 12.4634, lng: 53.8237,
+    clues: [
+      "An isolated island in the Indian Ocean with alien-looking flora found nowhere else on Earth.",
+      "Dragon blood trees with umbrella canopies and bulbous bottle trees create a surreal landscape.",
+      "Socotra, Yemen — called the Galapagos of the Indian Ocean for its extreme biodiversity."
+    ]},
+  { name: "Svalbard, Norway", lat: 78.2232, lng: 15.6267,
+    clues: [
+      "An Arctic archipelago where polar bears outnumber people. Permafrost year-round.",
+      "The Global Seed Vault is buried in a mountain here. The sun doesn't set from April to August.",
+      "Svalbard, Norway — one of the world's northernmost inhabited places, halfway between Norway and the North Pole."
+    ]},
+  { name: "Cinque Terre, Italy", lat: 44.1461, lng: 9.6439,
+    clues: [
+      "Five cliffside fishing villages on a rugged Mediterranean coastline in southern Europe.",
+      "Colorful houses stack up steep hillsides above the sea. Vineyards and olive groves terrace the slopes.",
+      "Cinque Terre on the Italian Riviera — connected by hiking trails and a coastal railway."
+    ]},
+  { name: "Lake Baikal, Russia", lat: 53.5587, lng: 108.1650,
+    clues: [
+      "The world's deepest and oldest freshwater lake, in a remote region of northern Asia.",
+      "It holds 20% of the world's unfrozen surface freshwater. The Nerpa seal lives only here.",
+      "Lake Baikal in Siberia — 25 million years old, 1,642 meters deep."
+    ]},
+  { name: "Wadi Rum, Jordan", lat: 29.5328, lng: 35.4413,
+    clues: [
+      "A vast red desert of sandstone arches and towering cliffs in the Middle East.",
+      "Bedouin camps dot the landscape. Several famous films set on Mars were filmed here.",
+      "Wadi Rum, the Valley of the Moon — where Lawrence of Arabia roamed in southern Jordan."
+    ]},
+  { name: "Ha Long Bay, Vietnam", lat: 20.9101, lng: 107.1839,
+    clues: [
+      "A bay filled with nearly 2,000 limestone karst islands rising from emerald waters in Southeast Asia.",
+      "Floating fishing villages and hidden grottoes. Legend says a dragon created these islands.",
+      "Ha Long Bay in northeast Vietnam — UNESCO World Heritage Site since 1994."
+    ]},
+];
+
+// ==================== SIMPLIFIED WORLD MAP DATA ====================
+// Continent outlines as [lng, lat] polygons (simplified)
+const MAP_DATA = [
+  // North America
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[-168,72],[-141,73],[-130,72],[-120,75],[-100,77],[-85,77],[-80,73],[-65,73],[-55,70],[-60,63],[-65,60],[-67,47],[-70,43],[-75,35],[-82,30],[-82,25],[-90,22],[-97,19],[-105,20],[-110,24],[-117,33],[-122,37],[-124,40],[-124,48],[-130,55],[-140,60],[-150,61],[-157,58],[-162,55],[-166,61],[-168,65],[-168,72]] },
+  // South America
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[-82,9],[-77,8],[-72,12],[-63,10],[-60,5],[-52,4],[-50,0],[-50,-2],[-44,-3],[-38,-4],[-35,-6],[-35,-10],[-37,-13],[-39,-15],[-40,-22],[-42,-23],[-44,-23],[-48,-28],[-50,-29],[-53,-33],[-57,-36],[-62,-39],[-65,-42],[-65,-46],[-68,-50],[-70,-52],[-74,-52],[-75,-48],[-73,-42],[-72,-35],[-71,-30],[-70,-18],[-75,-15],[-76,-10],[-78,-5],[-80,0],[-78,3],[-77,8],[-82,9]] },
+  // Europe
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[-10,36],[-9,38],[-9,43],[0,44],[3,43],[5,44],[2,51],[-5,54],[-6,58],[-3,59],[0,61],[5,62],[10,58],[12,55],[14,54],[20,55],[24,55],[28,55],[29,60],[25,65],[20,69],[25,71],[30,70],[40,68],[45,68],[50,68],[55,68],[55,60],[50,55],[42,50],[40,48],[35,46],[30,41],[28,41],[26,40],[23,36],[20,36],[15,38],[12,37],[5,36],[0,36],[-10,36]] },
+  // Africa
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[-17,15],[-16,11],[-15,7],[-8,5],[-7,4],[5,5],[8,4],[10,2],[10,0],[9,-3],[12,-5],[14,-5],[16,-3],[20,-4],[30,-3],[33,-5],[35,-8],[40,-11],[42,-14],[44,-19],[44,-23],[40,-27],[36,-30],[33,-34],[28,-34],[23,-33],[18,-32],[17,-29],[16,-24],[13,-18],[12,-13],[12,-6],[9,4],[5,5],[-7,4],[-8,5],[-12,5],[-16,11],[-17,15]] },
+  // Asia (simplified)
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[28,41],[30,41],[35,46],[40,48],[42,50],[50,55],[55,60],[55,68],[60,70],[70,73],[80,75],[100,77],[130,75],[140,72],[160,67],[170,65],[170,60],[160,55],[150,50],[145,45],[142,40],[140,35],[135,34],[130,30],[128,33],[125,30],[120,25],[115,22],[110,20],[108,16],[105,10],[100,2],[98,3],[96,7],[93,10],[90,22],[88,23],[85,27],[80,30],[77,28],[73,25],[69,25],[66,25],[62,25],[60,27],[55,27],[50,30],[45,35],[40,37],[36,37],[30,37],[28,41]] },
+  // Australia
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[115,-35],[117,-35],[120,-34],[127,-33],[130,-32],[132,-32],[133,-27],[136,-26],[137,-28],[139,-30],[141,-34],[144,-38],[147,-38],[149,-37],[151,-34],[153,-28],[153,-25],[150,-22],[147,-20],[145,-16],[143,-14],[141,-13],[137,-12],[135,-14],[132,-12],[129,-15],[127,-13],[124,-15],[122,-17],[118,-20],[115,-22],[114,-25],[114,-30],[115,-35]] },
+  // Greenland
+  { fill: '#5a7b5f', outline: '#4a6b4f', points: [[-55,83],[-40,84],[-25,84],[-18,82],[-18,78],[-20,75],[-22,70],[-28,68],[-35,65],[-43,60],[-50,62],[-53,66],[-55,70],[-58,75],[-55,83]] },
+  // UK/Ireland
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[-6,50],[-5,51],[-3,51],[0,51],[2,52],[2,54],[0,55],[-1,57],[-2,58],[-5,58],[-6,56],[-5,55],[-3,54],[-5,52],[-6,50]] },
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[-10,52],[-10,54],[-8,55],[-6,54],[-7,52],[-10,52]] },
+  // New Zealand
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[172,-34],[174,-36],[175,-38],[176,-41],[175,-43],[174,-44],[172,-45],[170,-44],[168,-43],[167,-44],[166,-46],[168,-47],[170,-46],[172,-44],[174,-42],[173,-40],[172,-37],[172,-34]] },
+  // Japan
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[130,31],[131,33],[133,34],[135,35],[137,37],[140,40],[141,42],[142,43],[145,45],[144,43],[142,40],[141,38],[140,36],[137,35],[135,33],[132,31],[130,31]] },
+  // Indonesia/Philippines (simplified)
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[95,-6],[98,-2],[100,0],[104,1],[106,0],[106,-2],[108,-6],[110,-7],[112,-8],[114,-8],[116,-8],[118,-9],[120,-10],[122,-8],[124,-6],[126,-5],[128,-3],[126,0],[124,2],[120,5],[118,4],[116,2],[114,0],[112,-1],[110,-2],[108,-3],[106,-5],[104,-6],[100,-5],[97,-5],[95,-6]] },
+  // Madagascar
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[44,-13],[46,-14],[48,-16],[50,-20],[50,-24],[48,-26],[46,-25],[44,-22],[43,-18],[44,-15],[44,-13]] },
+  // Sri Lanka
+  { fill: '#4a6b4f', outline: '#3a5a3f', points: [[80,10],[81,8],[82,7],[81,6],[80,7],[80,10]] },
+  // Iceland
+  { fill: '#5a7b5f', outline: '#4a6b4f', points: [[-24,66],[-22,66],[-18,66],[-14,65],[-14,64],[-18,63],[-22,64],[-24,65],[-24,66]] },
+];
+
+// ==================== GAME STATE ====================
+const canvas = document.getElementById('map-canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+// Map view
+let mapCenterX = 0;  // longitude
+let mapCenterY = 15;  // latitude
+let mapZoom = 1;
+const MIN_ZOOM = 0.8;
+const MAX_ZOOM = 6;
+
+// Game state
+let gameState = 'start'; // start, playing, result, end
+let currentRound = 0;
+let totalScore = 0;
+let roundLocations = [];
+let currentLocation = null;
+let cluesRevealed = 1;
+let guessLat = null, guessLng = null;
+let pinPlaced = false;
+let roundResults = [];
+
+// Interaction
+let isDragging = false;
+let dragStartX, dragStartY;
+let dragStartCX, dragStartCY;
+let hoverLat = null, hoverLng = null;
+let lastTouchDist = 0;
+
+// Animation
+let resultAnimTimer = 0;
+let arcProgress = 0;
+
+// ==================== COORDINATE CONVERSION ====================
+function lngToX(lng) {
+  return W / 2 + (lng - mapCenterX) * (W / 360) * mapZoom;
+}
+function latToY(lat) {
+  return H / 2 - (lat - mapCenterY) * (H / 180) * mapZoom;
+}
+function xToLng(x) {
+  return (x - W / 2) / ((W / 360) * mapZoom) + mapCenterX;
+}
+function yToLat(y) {
+  return -((y - H / 2) / ((H / 180) * mapZoom)) + mapCenterY;
+}
+
+// ==================== HAVERSINE DISTANCE ====================
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ==================== DRAWING ====================
+function drawMap() {
+  // Ocean background
+  const oceanGrad = ctx.createLinearGradient(0, 0, 0, H);
+  oceanGrad.addColorStop(0, '#0d1b2a');
+  oceanGrad.addColorStop(0.5, '#1a2744');
+  oceanGrad.addColorStop(1, '#0d1b2a');
+  ctx.fillStyle = oceanGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(100,140,180,0.08)';
+  ctx.lineWidth = 1;
+  for (let lng = -180; lng <= 180; lng += 30) {
+    const x = lngToX(lng);
+    if (x >= -10 && x <= W + 10) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+  }
+  for (let lat = -90; lat <= 90; lat += 30) {
+    const y = latToY(lat);
+    if (y >= -10 && y <= H + 10) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+  }
+  // Equator and prime meridian slightly brighter
+  ctx.strokeStyle = 'rgba(100,140,180,0.15)';
+  const eqY = latToY(0);
+  ctx.beginPath(); ctx.moveTo(0, eqY); ctx.lineTo(W, eqY); ctx.stroke();
+  const pmX = lngToX(0);
+  ctx.beginPath(); ctx.moveTo(pmX, 0); ctx.lineTo(pmX, H); ctx.stroke();
+
+  // Draw landmasses
+  for (const region of MAP_DATA) {
+    ctx.beginPath();
+    for (let i = 0; i < region.points.length; i++) {
+      const x = lngToX(region.points[i][0]);
+      const y = latToY(region.points[i][1]);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = region.fill;
+    ctx.fill();
+    ctx.strokeStyle = region.outline;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+function drawPin(lat, lng, color, label, size) {
+  const x = lngToX(lng);
+  const y = latToY(lat);
+  const s = size || 1;
+
+  // Shadow
+  ctx.beginPath();
+  ctx.ellipse(x, y + 4 * s, 6 * s, 3 * s, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fill();
+
+  // Pin body
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.bezierCurveTo(x - 10 * s, y - 20 * s, x - 10 * s, y - 32 * s, x, y - 32 * s);
+  ctx.bezierCurveTo(x + 10 * s, y - 32 * s, x + 10 * s, y - 20 * s, x, y);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Inner circle
+  ctx.beginPath();
+  ctx.arc(x, y - 22 * s, 5 * s, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fill();
+
+  if (label) {
+    ctx.font = `600 ${11 * s}px Inter, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'white';
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth = 3;
+    ctx.strokeText(label, x, y - 38 * s);
+    ctx.fillText(label, x, y - 38 * s);
+  }
+}
+
+function drawStar(lat, lng, size) {
+  const x = lngToX(lng);
+  const y = latToY(lat);
+  const r = (size || 8);
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = (i * Math.PI / 5) - Math.PI / 2;
+    const rad = (i % 2 === 0) ? r : r * 0.4;
+    const sx = x + Math.cos(a) * rad;
+    const sy = y + Math.sin(a) * rad;
+    if (i === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#d4a017';
+  ctx.fill();
+  ctx.strokeStyle = '#b8860b';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+function drawArc(lat1, lng1, lat2, lng2, progress) {
+  const x1 = lngToX(lng1), y1 = latToY(lat1);
+  const x2 = lngToX(lng2), y2 = latToY(lat2);
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+  const dist = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+  const bulge = Math.min(dist * 0.3, 80);
+  const cpY = my - bulge;
+
+  ctx.setLineDash([6, 4]);
+  ctx.strokeStyle = 'rgba(212,160,23,0.7)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+
+  const steps = Math.floor(40 * progress);
+  for (let i = 0; i <= steps; i++) {
+    const t = (i / 40);
+    const px = (1 - t) * (1 - t) * x1 + 2 * (1 - t) * t * mx + t * t * x2;
+    const py = (1 - t) * (1 - t) * y1 + 2 * (1 - t) * t * cpY + t * t * y2;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Distance label at midpoint of arc
+  if (progress > 0.5) {
+    const t = 0.5;
+    const lx = (1 - t) * (1 - t) * x1 + 2 * (1 - t) * t * mx + t * t * x2;
+    const ly = (1 - t) * (1 - t) * y1 + 2 * (1 - t) * t * cpY + t * t * y2;
+    const km = haversine(lat1, lng1, lat2, lng2);
+    const label = km < 1 ? '< 1 km' : Math.round(km).toLocaleString() + ' km';
+    ctx.font = '600 12px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    const a = Math.min(1, (progress - 0.5) * 4);
+    ctx.fillStyle = `rgba(212,160,23,${a})`;
+    ctx.strokeStyle = `rgba(0,0,0,${a * 0.6})`;
+    ctx.lineWidth = 3;
+    ctx.strokeText(label, lx, ly - 10);
+    ctx.fillText(label, lx, ly - 10);
+  }
+}
+
+function drawCrosshair(x, y) {
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// ==================== RENDER ====================
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  drawMap();
+
+  if (gameState === 'playing' || gameState === 'result') {
+    // Draw previous round pins
+    for (let i = 0; i < roundResults.length; i++) {
+      const r = roundResults[i];
+      drawPin(r.guessLat, r.guessLng, 'rgba(192,57,43,0.4)', null, 0.6);
+      drawStar(r.actualLat, r.actualLng, 5);
+    }
+
+    if (gameState === 'playing') {
+      // Hover crosshair
+      if (hoverLat !== null && !pinPlaced) {
+        const hx = lngToX(hoverLng);
+        const hy = latToY(hoverLat);
+        drawCrosshair(hx, hy);
+      }
+      // Current guess pin
+      if (pinPlaced) {
+        drawPin(guessLat, guessLng, '#c0392b', null, 1);
+      }
+    }
+
+    if (gameState === 'result') {
+      // Draw guess pin, actual star, and arc
+      drawPin(guessLat, guessLng, '#c0392b', 'Your Guess', 1);
+      if (arcProgress > 0.8) {
+        drawStar(currentLocation.lat, currentLocation.lng, 10);
+      }
+      drawArc(guessLat, guessLng, currentLocation.lat, currentLocation.lng, arcProgress);
+    }
+  }
+
+  // Coords display
+  if (hoverLat !== null && (gameState === 'playing' || gameState === 'result')) {
+    document.getElementById('coords').textContent =
+      `${Math.abs(hoverLat).toFixed(1)}°${hoverLat >= 0 ? 'N' : 'S'}, ${Math.abs(hoverLng).toFixed(1)}°${hoverLng >= 0 ? 'E' : 'W'}`;
+  }
+
+  requestAnimationFrame(render);
+}
+
+// ==================== GAME LOGIC ====================
+function pickLocations() {
+  const shuffled = [...LOCATIONS].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, 5);
+}
+
+function startGame() {
+  document.getElementById('start-screen').style.display = 'none';
+  document.getElementById('end-screen').style.display = 'none';
+  currentRound = 0;
+  totalScore = 0;
+  roundResults = [];
+  roundLocations = pickLocations();
+  document.getElementById('hud-score').textContent = '0';
+  startRound();
+}
+
+function startRound() {
+  gameState = 'playing';
+  currentRound++;
+  currentLocation = roundLocations[currentRound - 1];
+  cluesRevealed = 1;
+  pinPlaced = false;
+  guessLat = null;
+  guessLng = null;
+  arcProgress = 0;
+
+  // Update HUD
+  document.getElementById('hud-round').textContent = currentRound + ' / 5';
+  document.getElementById('postcard-stamp').textContent = 'Round ' + currentRound;
+
+  // Set clues
+  document.getElementById('clue-text-1').textContent = currentLocation.clues[0];
+  document.getElementById('clue-text-2').textContent = currentLocation.clues[1];
+  document.getElementById('clue-text-3').textContent = currentLocation.clues[2];
+  document.getElementById('clue-1').classList.remove('clue-hidden');
+  document.getElementById('clue-2').classList.add('clue-hidden');
+  document.getElementById('clue-3').classList.add('clue-hidden');
+
+  // Update UI
+  document.getElementById('reveal-btn').disabled = false;
+  document.getElementById('reveal-btn').style.display = 'block';
+  document.getElementById('postcard-multiplier').textContent = 'Score Multiplier: x3';
+  document.getElementById('postcard').style.display = 'block';
+  document.getElementById('confirm-btn').style.display = 'none';
+  document.getElementById('next-btn').style.display = 'none';
+  document.getElementById('result-popup').style.display = 'none';
+
+  // Reset map view
+  mapCenterX = 0;
+  mapCenterY = 15;
+  mapZoom = 1;
+}
+
+function revealClue() {
+  if (cluesRevealed >= 3) return;
+  cluesRevealed++;
+  document.getElementById('clue-' + cluesRevealed).classList.remove('clue-hidden');
+  if (cluesRevealed >= 3) {
+    document.getElementById('reveal-btn').disabled = true;
+    document.getElementById('reveal-btn').style.display = 'none';
+  }
+  updateMultiplierDisplay();
+}
+
+function getMultiplier() {
+  if (cluesRevealed === 1) return 3;
+  if (cluesRevealed === 2) return 2;
+  return 1;
+}
+
+function updateMultiplierDisplay() {
+  const m = getMultiplier();
+  document.getElementById('postcard-multiplier').textContent = 'Score Multiplier: x' + m;
+  document.getElementById('postcard-multiplier').style.color =
+    m === 3 ? '#27ae60' : m === 2 ? '#d4a017' : '#c0392b';
+}
+
+function placePin(lat, lng) {
+  if (gameState !== 'playing') return;
+  guessLat = lat;
+  guessLng = lng;
+  pinPlaced = true;
+  document.getElementById('confirm-btn').style.display = 'block';
+}
+
+function confirmGuess() {
+  if (!pinPlaced || gameState !== 'playing') return;
+  gameState = 'result';
+
+  const dist = haversine(guessLat, guessLng, currentLocation.lat, currentLocation.lng);
+  const mult = getMultiplier();
+  let baseScore;
+  if (dist < 50) baseScore = 5000;
+  else if (dist < 150) baseScore = 4000 + (1 - (dist - 50) / 100) * 1000;
+  else if (dist < 500) baseScore = 3000 + (1 - (dist - 150) / 350) * 1000;
+  else if (dist < 1500) baseScore = 1000 + (1 - (dist - 500) / 1000) * 2000;
+  else if (dist < 5000) baseScore = 100 + (1 - (dist - 1500) / 3500) * 900;
+  else baseScore = Math.max(0, 100 - (dist - 5000) / 150);
+
+  const roundScore = Math.round(baseScore * mult);
+  totalScore += roundScore;
+
+  roundResults.push({
+    name: currentLocation.name,
+    guessLat, guessLng,
+    actualLat: currentLocation.lat, actualLng: currentLocation.lng,
+    distance: dist, score: roundScore, multiplier: mult
+  });
+
+  document.getElementById('hud-score').textContent = totalScore.toLocaleString();
+  document.getElementById('confirm-btn').style.display = 'none';
+
+  // Show result with animation
+  arcProgress = 0;
+  const arcAnim = setInterval(() => {
+    arcProgress = Math.min(1, arcProgress + 0.03);
+    if (arcProgress >= 1) {
+      clearInterval(arcAnim);
+      showResultPopup(dist, roundScore, mult);
+    }
+  }, 16);
+}
+
+function showResultPopup(dist, score, mult) {
+  const popup = document.getElementById('result-popup');
+  let title;
+  if (dist < 50) title = 'Perfect!';
+  else if (dist < 150) title = 'Incredible!';
+  else if (dist < 500) title = 'Great!';
+  else if (dist < 1500) title = 'Not Bad!';
+  else if (dist < 5000) title = 'Could Be Closer';
+  else title = 'Way Off!';
+
+  document.getElementById('result-title').textContent = title;
+  document.getElementById('result-title').style.color =
+    dist < 150 ? '#27ae60' : dist < 1500 ? '#d4a017' : '#c0392b';
+  document.getElementById('result-location').textContent = currentLocation.name;
+  document.getElementById('result-distance').textContent =
+    dist < 1 ? '< 1 km away' : Math.round(dist).toLocaleString() + ' km away';
+  document.getElementById('result-score-val').textContent = '+' + score.toLocaleString();
+  document.getElementById('result-mult').textContent = mult > 1 ? `(x${mult} multiplier!)` : '';
+
+  popup.style.display = 'block';
+  document.getElementById('next-btn').style.display = 'block';
+  document.getElementById('next-btn').textContent = currentRound >= 5 ? 'See Results' : 'Next Round';
+}
+
+function nextRound() {
+  document.getElementById('result-popup').style.display = 'none';
+  document.getElementById('next-btn').style.display = 'none';
+  if (currentRound >= 5) {
+    showEndScreen();
+  } else {
+    startRound();
+  }
+}
+
+function showEndScreen() {
+  gameState = 'end';
+  document.getElementById('postcard').style.display = 'none';
+
+  let rank;
+  if (totalScore >= 60000) rank = 'World Explorer';
+  else if (totalScore >= 40000) rank = 'Seasoned Traveler';
+  else if (totalScore >= 20000) rank = 'Tourist';
+  else if (totalScore >= 10000) rank = 'Armchair Traveler';
+  else rank = 'Lost in Translation';
+
+  document.getElementById('end-total').textContent = totalScore.toLocaleString() + ' pts';
+  document.getElementById('end-rank').textContent = rank;
+
+  let html = '';
+  for (const r of roundResults) {
+    const distStr = r.distance < 1 ? '< 1 km' : Math.round(r.distance).toLocaleString() + ' km';
+    html += `<div class="end-round-row">
+      <span class="loc-name">${r.name}</span>
+      <span class="loc-dist">${distStr}</span>
+      <span class="loc-score">+${r.score.toLocaleString()}${r.multiplier > 1 ? ' (x' + r.multiplier + ')' : ''}</span>
+    </div>`;
+  }
+  document.getElementById('end-rounds').innerHTML = html;
+  document.getElementById('end-screen').style.display = 'flex';
+}
+
+// ==================== INPUT HANDLING ====================
+function getMapXY(e) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  const { x, y } = getMapXY(e);
+  isDragging = true;
+  dragStartX = x;
+  dragStartY = y;
+  dragStartCX = mapCenterX;
+  dragStartCY = mapCenterY;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const { x, y } = getMapXY(e);
+  hoverLat = yToLat(y);
+  hoverLng = xToLng(x);
+
+  if (isDragging) {
+    const dx = x - dragStartX;
+    const dy = y - dragStartY;
+    mapCenterX = dragStartCX - dx / ((W / 360) * mapZoom);
+    mapCenterY = dragStartCY + dy / ((H / 180) * mapZoom);
+    // Clamp
+    mapCenterY = Math.max(-80, Math.min(85, mapCenterY));
+  }
+  canvas.style.cursor = isDragging ? 'grabbing' : (gameState === 'playing' ? 'crosshair' : 'grab');
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  const { x, y } = getMapXY(e);
+  const dx = Math.abs(x - dragStartX);
+  const dy = Math.abs(y - dragStartY);
+  if (dx < 5 && dy < 5 && gameState === 'playing') {
+    placePin(yToLat(y), xToLng(x));
+  }
+  isDragging = false;
+});
+
+canvas.addEventListener('mouseleave', () => {
+  isDragging = false;
+  hoverLat = null;
+  hoverLng = null;
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+  const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, mapZoom * zoomFactor));
+
+  // Zoom toward mouse position
+  const { x, y } = getMapXY(e);
+  const lngBefore = xToLng(x);
+  const latBefore = yToLat(y);
+  mapZoom = newZoom;
+  const lngAfter = xToLng(x);
+  const latAfter = yToLat(y);
+  mapCenterX -= (lngAfter - lngBefore);
+  mapCenterY -= (latAfter - latBefore);
+  mapCenterY = Math.max(-80, Math.min(85, mapCenterY));
+}, { passive: false });
+
+// Touch support
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    isDragging = true;
+    dragStartX = t.clientX;
+    dragStartY = t.clientY;
+    dragStartCX = mapCenterX;
+    dragStartCY = mapCenterY;
+  } else if (e.touches.length === 2) {
+    isDragging = false;
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    lastTouchDist = Math.sqrt(dx * dx + dy * dy);
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 1 && isDragging) {
+    const t = e.touches[0];
+    const dx = t.clientX - dragStartX;
+    const dy = t.clientY - dragStartY;
+    mapCenterX = dragStartCX - dx / ((W / 360) * mapZoom);
+    mapCenterY = dragStartCY + dy / ((H / 180) * mapZoom);
+    mapCenterY = Math.max(-80, Math.min(85, mapCenterY));
+  } else if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (lastTouchDist > 0) {
+      const scale = dist / lastTouchDist;
+      mapZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, mapZoom * scale));
+    }
+    lastTouchDist = dist;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  if (e.changedTouches.length === 1 && isDragging) {
+    const t = e.changedTouches[0];
+    const dx = Math.abs(t.clientX - dragStartX);
+    const dy = Math.abs(t.clientY - dragStartY);
+    if (dx < 10 && dy < 10 && gameState === 'playing') {
+      const rect = canvas.getBoundingClientRect();
+      const x = t.clientX - rect.left;
+      const y = t.clientY - rect.top;
+      placePin(yToLat(y), xToLng(x));
+    }
+  }
+  isDragging = false;
+  lastTouchDist = 0;
+});
+
+// Keyboard
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (gameState === 'playing' && pinPlaced) confirmGuess();
+    else if (gameState === 'result') nextRound();
+  }
+});
+
+// Buttons
+document.getElementById('reveal-btn').addEventListener('click', revealClue);
+document.getElementById('confirm-btn').addEventListener('click', confirmGuess);
+document.getElementById('next-btn').addEventListener('click', nextRound);
+document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById('replay-btn').addEventListener('click', startGame);
+
+// ==================== RESIZE ====================
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W;
+  canvas.height = H;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ==================== START ====================
+render();
+</script>
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px Segoe UI,Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px"><span id="vc-count">...</span> Explorers</div>
+<script>
+(function(){var G="pin-drop",SU="https://ivhpqkqnfqcgrfrsvszf.supabase.co",SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM";function hdr(){return{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json"}}async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("").slice(0,32)}catch(e){return"anon-"+Math.random().toString(36).slice(2,10)}}async function run(){var h=await vh();try{await fetch(SU+"/rest/v1/game_visits",{method:"POST",headers:Object.assign(hdr(),{"Prefer":"resolution=merge-duplicates,return=minimal"}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}try{var r=await fetch(SU+"/rest/v1/game_visits?game=eq."+G+"&select=id",{headers:Object.assign(hdr(),{"Prefer":"count=exact"})});var c=r.headers.get("content-range");if(c){var n=c.split("/")[1];if(n&&n!=="*")document.getElementById("vc-count").textContent=Number(n).toLocaleString()}}catch(e){}}run()})();
+</script>
+</body>
+</html>

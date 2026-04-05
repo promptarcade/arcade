@@ -1,0 +1,1572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>City Chomp</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a1a; }
+canvas { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function() {
+'use strict';
+
+// ============================
+// CANVAS SETUP
+// ============================
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ============================
+// SOUND ENGINE
+// ============================
+const SFX = {
+  _ctx: null,
+  _get() {
+    if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (this._ctx.state === 'suspended') this._ctx.resume();
+    return this._ctx;
+  },
+  _tone(f, type, dur, vol) {
+    try {
+      const c = this._get(), o = c.createOscillator(), g = c.createGain();
+      o.type = type; o.frequency.value = f;
+      g.gain.setValueAtTime(vol, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
+      o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + dur);
+    } catch(e) {}
+  },
+  gulp() {
+    this._tone(180 + Math.random() * 80, 'sine', 0.12, 0.09);
+    this._tone(90, 'triangle', 0.09, 0.06);
+  },
+  bigGulp() {
+    this._tone(70, 'sine', 0.25, 0.12);
+    this._tone(45, 'triangle', 0.18, 0.09);
+    setTimeout(() => this._tone(55, 'sine', 0.15, 0.07), 60);
+  },
+  grow() {
+    this._tone(320, 'sine', 0.07, 0.05);
+    setTimeout(() => this._tone(420, 'sine', 0.07, 0.04), 45);
+  },
+  timerEnd() {
+    this._tone(400, 'square', 0.12, 0.07);
+    setTimeout(() => this._tone(300, 'square', 0.15, 0.06), 100);
+    setTimeout(() => this._tone(200, 'square', 0.2, 0.05), 220);
+  }
+};
+
+// ============================
+// SUPABASE / SCORE
+// ============================
+const _SU = 'https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+const _SK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+const LS_KEY = 'city-chomp-hs';
+
+async function submitScore(score) {
+  const n = prompt('Score: ' + score + '! Enter name (max 5):');
+  if (!n) return;
+  const name = n.trim().slice(0, 5).toUpperCase();
+  if (!name) return;
+  let hash = '';
+  try {
+    const d = navigator.userAgent + screen.width + screen.height + new Date().getTimezoneOffset();
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(d));
+    hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+  } catch(e) {}
+  try {
+    await fetch(_SU + '/rest/v1/high_scores', {
+      method: 'POST',
+      headers: { 'apikey': _SK, 'Authorization': 'Bearer ' + _SK, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ game: 'city-chomp', initials: name, score: score, player_hash: hash })
+    });
+  } catch(e) {}
+}
+
+function getHighScore() { return parseInt(localStorage.getItem(LS_KEY)) || 0; }
+function setHighScore(s) { localStorage.setItem(LS_KEY, s); }
+
+// ============================
+// CONFIG
+// ============================
+const WORLD = 3000;
+const GAME_TIME = 120;
+const HALF = WORLD / 2;
+const MAIN_ROAD_W = 38;
+const SIDE_ROAD_W = 22;
+const HOLE_START_R = 28;
+const HOLE_MAX_R = 350;
+const HOLE_SPEED = 180;
+const CONSUME_RATIO = 0.85;
+
+// Object definitions: [w, h, minHole, pts, growth, type]
+const OBJ_DEFS = {
+  hydrant:     { w: 14, h: 14, minHole: 18, pts: 5, growth: 0.5 },
+  trash:       { w: 16, h: 16, minHole: 18, pts: 3, growth: 0.4 },
+  bench:       { w: 34, h: 14, minHole: 22, pts: 8, growth: 0.7 },
+  lamppost:    { w: 12, h: 40, minHole: 22, pts: 10, growth: 0.6 },
+  mailbox:     { w: 16, h: 20, minHole: 20, pts: 7, growth: 0.5 },
+  bush:        { w: 24, h: 20, minHole: 22, pts: 5, growth: 0.5 },
+  tree:        { w: 30, h: 35, minHole: 32, pts: 15, growth: 1.0 },
+  car:         { w: 48, h: 24, minHole: 38, pts: 25, growth: 1.5 },
+  van:         { w: 54, h: 28, minHole: 44, pts: 30, growth: 1.8 },
+  truck:       { w: 66, h: 30, minHole: 55, pts: 40, growth: 2.2 },
+  house:       { w: 72, h: 65, minHole: 60, pts: 60, growth: 3.5 },
+  shop:        { w: 65, h: 58, minHole: 55, pts: 50, growth: 3.0 },
+  apartment:   { w: 60, h: 90, minHole: 80, pts: 80, growth: 5.0 },
+  tower:       { w: 55, h: 120, minHole: 110, pts: 150, growth: 7.0 },
+  skyscraper:  { w: 65, h: 140, minHole: 140, pts: 250, growth: 10.0 }
+};
+
+// ============================
+// COLORS
+// ============================
+const COL = {
+  grass: '#4a8c3f',
+  grassDark: '#3f7a35',
+  parkGrass: '#5ca04f',
+  road: '#5a5a5a',
+  roadEdge: '#6e6e6e',
+  sidewalk: '#9e9e8e',
+  crosswalk: '#e8e8e0',
+  centerLine: '#e0e0d0',
+  roofColors: ['#b04040', '#8b5e3c', '#6b7b4a', '#5a6a8a', '#7a5a5a', '#8a7050'],
+  carColors: ['#c03030', '#3050c0', '#e0e0e0', '#2a2a2a', '#d0a020', '#308030', '#8030a0', '#e07020'],
+  awningColors: ['#c04040', '#3070c0', '#40a040', '#d08020', '#8040a0', '#20a0a0']
+};
+
+// ============================
+// RANDOM HELPERS
+// ============================
+function rand(a, b) { return a + Math.random() * (b - a); }
+function randInt(a, b) { return Math.floor(rand(a, b + 1)); }
+function pick(arr) { return arr[randInt(0, arr.length - 1)]; }
+
+// ============================
+// CITY GENERATION
+// ============================
+// Roads: stored as {x1,y1,x2,y2,width,isMain}
+let roads = [];
+let blocks = [];
+let objects = [];
+
+function generateCity() {
+  roads = [];
+  blocks = [];
+  objects = [];
+
+  // ================================================================
+  // HAND-DESIGNED ROAD LAYOUT
+  // Modelled on an inner suburb — main high street running through,
+  // residential streets branching off, a park, and a small downtown
+  // ================================================================
+
+  // Main high street — runs east-west through the middle, slight curve
+  roads.push({ x1: 100, y1: HALF - 20, x2: WORLD - 100, y2: HALF + 30, width: MAIN_ROAD_W, isMain: true });
+
+  // Secondary avenue — runs north-south, crosses the high street
+  roads.push({ x1: HALF + 100, y1: 150, x2: HALF + 60, y2: WORLD - 150, width: MAIN_ROAD_W, isMain: true });
+
+  // Residential streets — north side of high street
+  roads.push({ x1: 250, y1: HALF - 350, x2: WORLD - 400, y2: HALF - 340, width: SIDE_ROAD_W, isMain: false });
+  roads.push({ x1: 200, y1: HALF - 650, x2: WORLD - 300, y2: HALF - 660, width: SIDE_ROAD_W, isMain: false });
+  roads.push({ x1: 180, y1: HALF - 920, x2: WORLD - 500, y2: HALF - 930, width: SIDE_ROAD_W, isMain: false });
+
+  // Residential streets — south side
+  roads.push({ x1: 200, y1: HALF + 320, x2: WORLD - 250, y2: HALF + 340, width: SIDE_ROAD_W, isMain: false });
+  roads.push({ x1: 300, y1: HALF + 620, x2: WORLD - 200, y2: HALF + 640, width: SIDE_ROAD_W, isMain: false });
+  roads.push({ x1: 250, y1: HALF + 900, x2: WORLD - 350, y2: HALF + 920, width: SIDE_ROAD_W, isMain: false });
+
+  // Cross streets connecting north-south (residential cul-de-sacs and connectors)
+  roads.push({ x1: 500, y1: HALF - 930, x2: 490, y2: HALF + 340, width: SIDE_ROAD_W, isMain: false });
+  roads.push({ x1: 900, y1: HALF - 650, x2: 910, y2: HALF + 640, width: SIDE_ROAD_W, isMain: false });
+  roads.push({ x1: 1350, y1: HALF - 350, x2: 1340, y2: HALF + 920, width: SIDE_ROAD_W, isMain: false });
+  roads.push({ x1: 1800, y1: HALF - 920, x2: 1810, y2: HALF + 640, width: SIDE_ROAD_W, isMain: false });
+  roads.push({ x1: 2200, y1: HALF - 650, x2: 2190, y2: HALF + 340, width: SIDE_ROAD_W, isMain: false });
+  roads.push({ x1: 2600, y1: HALF - 350, x2: 2610, y2: HALF + 920, width: SIDE_ROAD_W, isMain: false });
+
+  // Short dead-end lane (character detail)
+  roads.push({ x1: 700, y1: HALF + 340, x2: 695, y2: HALF + 520, width: 18, isMain: false });
+
+  // ================================================================
+  // HAND-DESIGNED BLOCKS — each block is a specific place
+  // ================================================================
+
+  // --- DOWNTOWN (east side, along the avenue) ---
+  blocks.push({ left: HALF + 140, top: HALF - 640, right: HALF + 500, bottom: HALF - 360, district: 'downtown' });
+  blocks.push({ left: HALF + 140, top: HALF - 330, right: HALF + 450, bottom: HALF - 40, district: 'downtown' });
+  blocks.push({ left: HALF + 140, top: HALF + 50, right: HALF + 500, bottom: HALF + 310, district: 'downtown' });
+
+  // --- HIGH STREET SHOPS (both sides of the main road, central section) ---
+  blocks.push({ left: 520, top: HALF - 160, right: 880, bottom: HALF - 40, district: 'commercial' });
+  blocks.push({ left: 520, top: HALF + 50, right: 880, bottom: HALF + 170, district: 'commercial' });
+  blocks.push({ left: 930, top: HALF - 160, right: 1320, bottom: HALF - 40, district: 'commercial' });
+  blocks.push({ left: 930, top: HALF + 50, right: 1320, bottom: HALF + 170, district: 'commercial' });
+
+  // --- PARK (southwest) ---
+  blocks.push({ left: 220, top: HALF + 360, right: 680, bottom: HALF + 880, district: 'park' });
+
+  // --- RESIDENTIAL BLOCKS (everywhere else) ---
+  // North of high street
+  blocks.push({ left: 270, top: HALF - 630, right: 470, bottom: HALF - 370, district: 'residential' });
+  blocks.push({ left: 520, top: HALF - 630, right: 870, bottom: HALF - 370, district: 'residential' });
+  blocks.push({ left: 930, top: HALF - 630, right: 1320, bottom: HALF - 370, district: 'residential' });
+  blocks.push({ left: 1370, top: HALF - 630, right: 1770, bottom: HALF - 370, district: 'residential' });
+  blocks.push({ left: 270, top: HALF - 910, right: 470, bottom: HALF - 670, district: 'residential' });
+  blocks.push({ left: 520, top: HALF - 910, right: 870, bottom: HALF - 670, district: 'residential' });
+  blocks.push({ left: 1830, top: HALF - 630, right: 2170, bottom: HALF - 370, district: 'residential' });
+  blocks.push({ left: 1830, top: HALF - 910, right: 2170, bottom: HALF - 670, district: 'residential' });
+
+  // South of high street
+  blocks.push({ left: 720, top: HALF + 360, right: 1320, bottom: HALF + 600, district: 'residential' });
+  blocks.push({ left: 1370, top: HALF + 360, right: 1770, bottom: HALF + 600, district: 'residential' });
+  blocks.push({ left: 1370, top: HALF + 660, right: 2170, bottom: HALF + 880, district: 'residential' });
+  blocks.push({ left: 720, top: HALF + 660, right: 1320, bottom: HALF + 880, district: 'residential' });
+  blocks.push({ left: HALF + 140, top: HALF + 360, right: HALF + 500, bottom: HALF + 600, district: 'residential' });
+  blocks.push({ left: 2230, top: HALF + 50, right: 2580, bottom: HALF + 310, district: 'residential' });
+  blocks.push({ left: 2230, top: HALF + 360, right: 2580, bottom: HALF + 600, district: 'residential' });
+
+  // Fill all blocks
+  for (const block of blocks) fillBlock(block);
+
+  // Place cars on roads and street furniture on sidewalks
+  placeCarsOnRoads();
+  placeStreetFurniture();
+  placeStarterObjects();
+}
+
+function fillBlock(block) {
+  const { left, top, right, bottom, district } = block;
+  const bw = right - left;
+  const bh = bottom - top;
+
+  if (district === 'downtown') {
+    // Towers and skyscrapers
+    fillDowntown(left, top, bw, bh);
+  } else if (district === 'park') {
+    fillPark(left, top, bw, bh);
+  } else if (district === 'commercial') {
+    fillCommercial(left, top, bw, bh);
+  } else {
+    fillResidential(left, top, bw, bh);
+  }
+}
+
+function fillDowntown(x, y, w, h) {
+  const padding = 25;
+  let cx = x + padding;
+  while (cx + 70 < x + w - padding) {
+    let cy = y + padding;
+    while (cy + 100 < y + h - padding) {
+      if (Math.random() < 0.5) {
+        const def = OBJ_DEFS.skyscraper;
+        objects.push({ type: 'skyscraper', x: cx + rand(0, 5), y: cy + rand(0, 5), w: def.w, h: def.h, minHole: def.minHole, pts: def.pts, growth: def.growth, angle: 0, color: pick(['#607090', '#506080', '#708090', '#556075']) });
+        cy += def.h + rand(15, 30);
+      } else {
+        const def = OBJ_DEFS.tower;
+        objects.push({ type: 'tower', x: cx + rand(0, 5), y: cy + rand(0, 5), w: def.w, h: def.h, minHole: def.minHole, pts: def.pts, growth: def.growth, angle: 0, color: pick(['#607898', '#708088', '#5a6a80', '#6a7a90']) });
+        cy += def.h + rand(15, 25);
+      }
+      cx += rand(65, 80);
+    }
+    cx += rand(65, 85);
+  }
+  // Fill remaining with apartments
+  let ax = x + padding;
+  while (ax + 65 < x + w - padding) {
+    let ay = y + padding;
+    while (ay + 95 < y + h - padding) {
+      if (!objectAt(ax, ay, 65, 95)) {
+        const def = OBJ_DEFS.apartment;
+        objects.push({ type: 'apartment', x: ax, y: ay, w: def.w, h: def.h, minHole: def.minHole, pts: def.pts, growth: def.growth, angle: 0, color: pick(['#888070', '#807868', '#907868']) });
+      }
+      ay += 100;
+    }
+    ax += 70;
+  }
+}
+
+function fillPark(x, y, w, h) {
+  // Trees scattered
+  const numTrees = Math.floor((w * h) / 4000);
+  for (let i = 0; i < numTrees; i++) {
+    const tx = x + rand(15, w - 15);
+    const ty = y + rand(15, h - 15);
+    if (!objectAt(tx - 15, ty - 15, 30, 30)) {
+      const def = OBJ_DEFS.tree;
+      objects.push({ type: 'tree', x: tx, y: ty, w: def.w, h: def.h, minHole: def.minHole, pts: def.pts, growth: def.growth, angle: 0 });
+    }
+  }
+  // Benches along paths
+  const numBenches = Math.floor((w * h) / 12000);
+  for (let i = 0; i < numBenches; i++) {
+    const bx = x + rand(20, w - 50);
+    const by = y + rand(20, h - 30);
+    if (!objectAt(bx - 5, by - 5, 44, 24)) {
+      const def = OBJ_DEFS.bench;
+      objects.push({ type: 'bench', x: bx, y: by, w: def.w, h: def.h, minHole: def.minHole, pts: def.pts, growth: def.growth, angle: Math.random() < 0.5 ? 0 : Math.PI / 2 });
+    }
+  }
+  // Bushes
+  const numBushes = Math.floor((w * h) / 6000);
+  for (let i = 0; i < numBushes; i++) {
+    const bx = x + rand(10, w - 30);
+    const by = y + rand(10, h - 25);
+    if (!objectAt(bx - 5, by - 5, 34, 30)) {
+      const def = OBJ_DEFS.bush;
+      objects.push({ type: 'bush', x: bx, y: by, w: def.w, h: def.h, minHole: def.minHole, pts: def.pts, growth: def.growth, angle: 0 });
+    }
+  }
+}
+
+function fillCommercial(x, y, w, h) {
+  const padding = 25;
+  let cx = x + padding;
+  while (cx + 70 < x + w - padding) {
+    let cy = y + padding;
+    while (cy + 65 < y + h - padding) {
+      if (!objectAt(cx, cy, 70, 65)) {
+        const def = OBJ_DEFS.shop;
+        objects.push({ type: 'shop', x: cx, y: cy, w: def.w, h: def.h, minHole: def.minHole, pts: def.pts, growth: def.growth, angle: 0, color: pick(COL.awningColors), roofColor: pick(['#a09080', '#908070', '#807060']) });
+        // Sometimes add a tree next to shop
+        if (Math.random() < 0.3) {
+          const td = OBJ_DEFS.tree;
+          const tx = cx + def.w + 5;
+          const ty = cy + rand(5, 30);
+          if (tx + td.w < x + w - padding) {
+            objects.push({ type: 'tree', x: tx, y: ty, w: td.w, h: td.h, minHole: td.minHole, pts: td.pts, growth: td.growth, angle: 0 });
+          }
+        }
+      }
+      cy += 68 + rand(0, 10);
+    }
+    cx += 72 + rand(0, 12);
+  }
+}
+
+function fillResidential(x, y, w, h) {
+  const padding = 25; // setback from road edge
+  let cx = x + padding;
+  while (cx + 80 < x + w - padding) {
+    let cy = y + padding;
+    while (cy + 75 < y + h - padding) {
+      if (!objectAt(cx, cy, 80, 75)) {
+        const def = OBJ_DEFS.house;
+        const houseObj = {
+          type: 'house', x: cx, y: cy, w: def.w, h: def.h,
+          minHole: def.minHole, pts: def.pts, growth: def.growth, angle: 0,
+          roofColor: pick(COL.roofColors),
+          wallColor: pick(['#e8dcc8', '#d8ccb8', '#c8bca8', '#f0e8d8', '#e0d4c0'])
+        };
+        objects.push(houseObj);
+
+        // Garden trees next to house
+        if (Math.random() < 0.6) {
+          const td = OBJ_DEFS.tree;
+          const side = Math.random() < 0.5 ? -1 : 1;
+          const tx = side > 0 ? cx + def.w + 4 : cx - td.w - 4;
+          const ty = cy + rand(10, def.h - td.h);
+          if (tx > x + padding && tx + td.w < x + w - padding && !objectAt(tx - 2, ty - 2, td.w + 4, td.h + 4)) {
+            objects.push({ type: 'tree', x: tx, y: ty, w: td.w, h: td.h, minHole: td.minHole, pts: td.pts, growth: td.growth, angle: 0 });
+          }
+        }
+        // Garden bushes
+        if (Math.random() < 0.4) {
+          const bd = OBJ_DEFS.bush;
+          const bx = cx + rand(-bd.w - 2, def.w + 2);
+          const by = cy + def.h + 3;
+          if (by + bd.h < y + h - padding && !objectAt(bx - 2, by - 2, bd.w + 4, bd.h + 4)) {
+            objects.push({ type: 'bush', x: bx, y: by, w: bd.w, h: bd.h, minHole: bd.minHole, pts: bd.pts, growth: bd.growth, angle: 0 });
+          }
+        }
+        // Driveway car
+        if (Math.random() < 0.5) {
+          const cd = OBJ_DEFS.car;
+          const carX = cx + def.w + 6;
+          const carY = cy + def.h - cd.h - 5;
+          if (carX + cd.w < x + w - padding && !objectAt(carX - 2, carY - 2, cd.w + 4, cd.h + 4)) {
+            objects.push({ type: 'car', x: carX, y: carY, w: cd.w, h: cd.h, minHole: cd.minHole, pts: cd.pts, growth: cd.growth, angle: 0, color: pick(COL.carColors) });
+          }
+        }
+      }
+      cy += 82 + rand(0, 15);
+    }
+    cx += 88 + rand(0, 15);
+  }
+}
+
+function objectAt(x, y, w, h) {
+  for (const o of objects) {
+    if (o.x < x + w && o.x + o.w > x && o.y < y + h && o.y + o.h > y) return true;
+  }
+  return false;
+}
+
+function isOnRoad(x, y, w, h) {
+  const cx = x + w / 2, cy = y + h / 2;
+  for (const r of roads) {
+    const isHoriz = Math.abs(r.x2 - r.x1) > Math.abs(r.y2 - r.y1);
+    if (isHoriz) {
+      const minX = Math.min(r.x1, r.x2), maxX = Math.max(r.x1, r.x2);
+      const ry = r.y1 + (r.y2 - r.y1) * ((cx - r.x1) / (r.x2 - r.x1 || 1));
+      if (cx >= minX && cx <= maxX && Math.abs(cy - ry) < r.width / 2 + 5) return r;
+    } else {
+      const minY = Math.min(r.y1, r.y2), maxY = Math.max(r.y1, r.y2);
+      const rx = r.x1 + (r.x2 - r.x1) * ((cy - r.y1) / (r.y2 - r.y1 || 1));
+      if (cy >= minY && cy <= maxY && Math.abs(cx - rx) < r.width / 2 + 5) return r;
+    }
+  }
+  return null;
+}
+
+function placeCarsOnRoads() {
+  for (const r of roads) {
+    const isHoriz = Math.abs(r.x2 - r.x1) > Math.abs(r.y2 - r.y1);
+    const len = isHoriz ? Math.abs(r.x2 - r.x1) : Math.abs(r.y2 - r.y1);
+    const numCars = Math.floor(len / 200);
+    for (let i = 0; i < numCars; i++) {
+      const t = rand(0.05, 0.95);
+      const px = r.x1 + (r.x2 - r.x1) * t;
+      const py = r.y1 + (r.y2 - r.y1) * t;
+      const offset = rand(-r.width / 4, r.width / 4);
+      const vehicleType = Math.random() < 0.7 ? 'car' : (Math.random() < 0.6 ? 'van' : 'truck');
+      const def = OBJ_DEFS[vehicleType];
+      const vx = isHoriz ? px - def.w / 2 : px - def.h / 2 + offset;
+      const vy = isHoriz ? py - def.h / 2 + offset : py - def.w / 2;
+      const angle = isHoriz ? 0 : Math.PI / 2;
+      if (!objectAt(vx - 3, vy - 3, def.w + 6, def.h + 6)) {
+        objects.push({
+          type: vehicleType, x: vx, y: vy, w: def.w, h: def.h,
+          minHole: def.minHole, pts: def.pts, growth: def.growth,
+          angle: angle, color: pick(COL.carColors)
+        });
+      }
+    }
+  }
+}
+
+function placeStreetFurniture() {
+  for (const r of roads) {
+    const isHoriz = Math.abs(r.x2 - r.x1) > Math.abs(r.y2 - r.y1);
+    const len = isHoriz ? Math.abs(r.x2 - r.x1) : Math.abs(r.y2 - r.y1);
+    const spacing = r.isMain ? 120 : 200;
+    const count = Math.floor(len / spacing);
+    for (let i = 0; i < count; i++) {
+      const t = (i + 0.5) / count;
+      const px = r.x1 + (r.x2 - r.x1) * t;
+      const py = r.y1 + (r.y2 - r.y1) * t;
+      const side = Math.random() < 0.5 ? 1 : -1;
+      const dist = r.width / 2 + 8;
+      const fx = isHoriz ? px : px + side * dist;
+      const fy = isHoriz ? py + side * dist : py;
+
+      const furnitureRoll = Math.random();
+      let ftype;
+      if (furnitureRoll < 0.35) ftype = 'lamppost';
+      else if (furnitureRoll < 0.55) ftype = 'hydrant';
+      else if (furnitureRoll < 0.7) ftype = 'mailbox';
+      else if (furnitureRoll < 0.85) ftype = 'trash';
+      else ftype = 'bench';
+
+      const def = OBJ_DEFS[ftype];
+      if (!objectAt(fx - def.w / 2 - 2, fy - def.h / 2 - 2, def.w + 4, def.h + 4)) {
+        objects.push({
+          type: ftype, x: fx - def.w / 2, y: fy - def.h / 2,
+          w: def.w, h: def.h, minHole: def.minHole, pts: def.pts, growth: def.growth,
+          angle: isHoriz && ftype === 'bench' ? 0 : (!isHoriz && ftype === 'bench' ? Math.PI / 2 : 0)
+        });
+      }
+    }
+  }
+}
+
+function placeStarterObjects() {
+  const starters = ['hydrant', 'trash', 'hydrant', 'trash', 'trash', 'hydrant'];
+  for (let i = 0; i < 6; i++) {
+    const ang = (Math.PI * 2 / 6) * i + rand(-0.3, 0.3);
+    const dist = rand(22, 38);
+    const sx = HALF + Math.cos(ang) * dist;
+    const sy = HALF + Math.sin(ang) * dist;
+    const t = starters[i];
+    const def = OBJ_DEFS[t];
+    // Remove any existing object here
+    objects = objects.filter(o => {
+      const dx = (o.x + o.w / 2) - sx;
+      const dy = (o.y + o.h / 2) - sy;
+      return Math.sqrt(dx * dx + dy * dy) > 30;
+    });
+    objects.push({
+      type: t, x: sx - def.w / 2, y: sy - def.h / 2,
+      w: def.w, h: def.h, minHole: def.minHole, pts: def.pts, growth: def.growth, angle: 0
+    });
+  }
+}
+
+// ============================
+// DRAWING FUNCTIONS
+// ============================
+
+// Pre-render ground texture
+let groundCanvas = null;
+function renderGround() {
+  groundCanvas = document.createElement('canvas');
+  groundCanvas.width = WORLD;
+  groundCanvas.height = WORLD;
+  const gc = groundCanvas.getContext('2d');
+
+  // Base grass
+  gc.fillStyle = COL.grass;
+  gc.fillRect(0, 0, WORLD, WORLD);
+
+  // Subtle grass variation
+  for (let i = 0; i < 8000; i++) {
+    const gx = rand(0, WORLD);
+    const gy = rand(0, WORLD);
+    gc.fillStyle = Math.random() < 0.5 ? COL.grassDark : '#54964a';
+    gc.globalAlpha = rand(0.08, 0.2);
+    gc.fillRect(gx, gy, rand(8, 30), rand(8, 30));
+  }
+  gc.globalAlpha = 1;
+
+  // Park areas lighter green
+  for (const block of blocks) {
+    if (block.district === 'park') {
+      gc.fillStyle = COL.parkGrass;
+      gc.globalAlpha = 0.5;
+      gc.fillRect(block.left - 10, block.top - 10, block.right - block.left + 20, block.bottom - block.top + 20);
+      gc.globalAlpha = 1;
+      // Park paths
+      gc.strokeStyle = '#b8a880';
+      gc.lineWidth = 6;
+      gc.setLineDash([]);
+      // Diagonal path
+      gc.beginPath();
+      gc.moveTo(block.left + 10, block.top + 10);
+      gc.lineTo(block.right - 10, block.bottom - 10);
+      gc.stroke();
+      gc.beginPath();
+      gc.moveTo(block.right - 10, block.top + 10);
+      gc.lineTo(block.left + 10, block.bottom - 10);
+      gc.stroke();
+      // Pond
+      const pw = Math.min(60, (block.right - block.left) * 0.3);
+      const ph = Math.min(45, (block.bottom - block.top) * 0.3);
+      const pcx = (block.left + block.right) / 2;
+      const pcy = (block.top + block.bottom) / 2;
+      gc.fillStyle = '#3a7ab0';
+      gc.beginPath();
+      gc.ellipse(pcx, pcy, pw, ph, 0, 0, Math.PI * 2);
+      gc.fill();
+      gc.fillStyle = '#4a8ac0';
+      gc.beginPath();
+      gc.ellipse(pcx - pw * 0.15, pcy - ph * 0.15, pw * 0.6, ph * 0.6, 0, 0, Math.PI * 2);
+      gc.fill();
+    }
+  }
+
+  // Draw roads
+  for (const r of roads) {
+    const isHoriz = Math.abs(r.x2 - r.x1) > Math.abs(r.y2 - r.y1);
+    const dx = r.x2 - r.x1, dy = r.y2 - r.y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const nx = -dy / len, ny = dx / len;
+
+    // Sidewalk
+    gc.strokeStyle = COL.sidewalk;
+    gc.lineWidth = r.width + 12;
+    gc.lineCap = 'round';
+    gc.setLineDash([]);
+    gc.beginPath();
+    gc.moveTo(r.x1, r.y1);
+    gc.lineTo(r.x2, r.y2);
+    gc.stroke();
+
+    // Curb edge
+    gc.strokeStyle = COL.roadEdge;
+    gc.lineWidth = r.width + 4;
+    gc.beginPath();
+    gc.moveTo(r.x1, r.y1);
+    gc.lineTo(r.x2, r.y2);
+    gc.stroke();
+
+    // Asphalt
+    gc.strokeStyle = COL.road;
+    gc.lineWidth = r.width;
+    gc.beginPath();
+    gc.moveTo(r.x1, r.y1);
+    gc.lineTo(r.x2, r.y2);
+    gc.stroke();
+
+    // Center line on main roads
+    if (r.isMain) {
+      gc.strokeStyle = COL.centerLine;
+      gc.lineWidth = 2;
+      gc.setLineDash([12, 18]);
+      gc.beginPath();
+      gc.moveTo(r.x1, r.y1);
+      gc.lineTo(r.x2, r.y2);
+      gc.stroke();
+      gc.setLineDash([]);
+    }
+  }
+
+  // No crosswalk markings — they looked like hash marks at every intersection
+}
+
+function drawHydrant(gc, x, y) {
+  gc.fillStyle = '#cc2020';
+  gc.beginPath();
+  gc.arc(x + 7, y + 7, 6, 0, Math.PI * 2);
+  gc.fill();
+  gc.fillStyle = '#aa1818';
+  gc.fillRect(x + 3, y + 4, 8, 6);
+  // Cross bar
+  gc.fillStyle = '#dd3030';
+  gc.fillRect(x + 1, y + 5, 12, 3);
+  // Top nub
+  gc.fillStyle = '#bb2020';
+  gc.fillRect(x + 5, y + 1, 4, 4);
+}
+
+function drawTrash(gc, x, y) {
+  gc.fillStyle = '#555555';
+  gc.fillRect(x + 2, y + 3, 12, 11);
+  gc.fillStyle = '#666666';
+  gc.fillRect(x + 1, y + 2, 14, 3);
+  // Lid
+  gc.fillStyle = '#4a4a4a';
+  gc.fillRect(x + 3, y + 1, 10, 3);
+  gc.fillRect(x + 6, y, 4, 2);
+  // Bands
+  gc.fillStyle = '#484848';
+  gc.fillRect(x + 2, y + 7, 12, 1);
+  gc.fillRect(x + 2, y + 11, 12, 1);
+}
+
+function drawBench(gc, x, y, angle) {
+  gc.save();
+  gc.translate(x + 17, y + 7);
+  gc.rotate(angle);
+  // Seat slats
+  gc.fillStyle = '#8B6540';
+  gc.fillRect(-15, -5, 30, 4);
+  gc.fillRect(-15, 1, 30, 4);
+  // Legs
+  gc.fillStyle = '#444444';
+  gc.fillRect(-14, -6, 3, 12);
+  gc.fillRect(11, -6, 3, 12);
+  gc.fillRect(-3, -6, 3, 12);
+  gc.restore();
+}
+
+function drawLamppost(gc, x, y) {
+  // Light pool on ground
+  const grd = gc.createRadialGradient(x + 6, y + 20, 0, x + 6, y + 20, 20);
+  grd.addColorStop(0, 'rgba(255,240,180,0.2)');
+  grd.addColorStop(1, 'rgba(255,240,180,0)');
+  gc.fillStyle = grd;
+  gc.beginPath();
+  gc.arc(x + 6, y + 20, 20, 0, Math.PI * 2);
+  gc.fill();
+  // Post
+  gc.fillStyle = '#555555';
+  gc.fillRect(x + 4, y + 4, 4, 32);
+  // Base
+  gc.fillStyle = '#444444';
+  gc.fillRect(x + 2, y + 34, 8, 4);
+  // Light fixture
+  gc.fillStyle = '#777777';
+  gc.fillRect(x + 1, y + 2, 10, 4);
+  gc.fillStyle = '#ffe8a0';
+  gc.fillRect(x + 3, y + 3, 6, 2);
+}
+
+function drawMailbox(gc, x, y) {
+  // Body
+  gc.fillStyle = '#2255aa';
+  gc.fillRect(x + 2, y + 5, 12, 13);
+  // Rounded top
+  gc.beginPath();
+  gc.arc(x + 8, y + 5, 6, Math.PI, 0);
+  gc.fillStyle = '#2255aa';
+  gc.fill();
+  // Slot
+  gc.fillStyle = '#1a4488';
+  gc.fillRect(x + 4, y + 8, 8, 2);
+  // Label
+  gc.fillStyle = '#ffffff';
+  gc.fillRect(x + 5, y + 12, 6, 3);
+  // Stand
+  gc.fillStyle = '#444444';
+  gc.fillRect(x + 6, y + 17, 4, 3);
+}
+
+function drawBush(gc, x, y) {
+  // Organic shape with variation
+  gc.fillStyle = '#3a7030';
+  gc.beginPath();
+  gc.ellipse(x + 12, y + 12, 11, 9, 0, 0, Math.PI * 2);
+  gc.fill();
+  gc.fillStyle = '#2d5a25';
+  gc.beginPath();
+  gc.ellipse(x + 8, y + 10, 7, 7, -0.3, 0, Math.PI * 2);
+  gc.fill();
+  gc.fillStyle = '#48883a';
+  gc.beginPath();
+  gc.ellipse(x + 16, y + 10, 6, 6, 0.2, 0, Math.PI * 2);
+  gc.fill();
+  // Highlight dots
+  gc.fillStyle = '#5a9a4a';
+  gc.beginPath();
+  gc.arc(x + 10, y + 8, 2, 0, Math.PI * 2);
+  gc.fill();
+  gc.beginPath();
+  gc.arc(x + 16, y + 9, 1.5, 0, Math.PI * 2);
+  gc.fill();
+}
+
+function drawTree(gc, x, y) {
+  // Shadow under canopy
+  gc.fillStyle = 'rgba(0,0,0,0.15)';
+  gc.beginPath();
+  gc.ellipse(x + 15, y + 20, 14, 12, 0, 0, Math.PI * 2);
+  gc.fill();
+  // Trunk
+  gc.fillStyle = '#6b4a2a';
+  gc.fillRect(x + 12, y + 16, 6, 12);
+  // Canopy
+  gc.fillStyle = '#2d6620';
+  gc.beginPath();
+  gc.arc(x + 15, y + 14, 13, 0, Math.PI * 2);
+  gc.fill();
+  // Darker center
+  gc.fillStyle = '#245518';
+  gc.beginPath();
+  gc.arc(x + 15, y + 14, 8, 0, Math.PI * 2);
+  gc.fill();
+  // Lighter edges
+  gc.fillStyle = '#3a8830';
+  gc.beginPath();
+  gc.arc(x + 9, y + 11, 5, 0, Math.PI * 2);
+  gc.fill();
+  gc.beginPath();
+  gc.arc(x + 21, y + 12, 4, 0, Math.PI * 2);
+  gc.fill();
+  gc.beginPath();
+  gc.arc(x + 14, y + 6, 4.5, 0, Math.PI * 2);
+  gc.fill();
+}
+
+function drawCar(gc, x, y, angle, color) {
+  gc.save();
+  gc.translate(x + 24, y + 12);
+  gc.rotate(angle);
+  // Body
+  gc.fillStyle = color || '#c03030';
+  gc.beginPath();
+  gc.moveTo(-22, -10);
+  gc.lineTo(20, -10);
+  gc.quadraticCurveTo(24, -10, 24, -6);
+  gc.lineTo(24, 6);
+  gc.quadraticCurveTo(24, 10, 20, 10);
+  gc.lineTo(-22, 10);
+  gc.quadraticCurveTo(-24, 10, -24, 6);
+  gc.lineTo(-24, -6);
+  gc.quadraticCurveTo(-24, -10, -22, -10);
+  gc.fill();
+  // Roof/cabin darker
+  gc.fillStyle = shadeColor(color || '#c03030', -30);
+  gc.fillRect(-8, -7, 18, 14);
+  // Windshield
+  gc.fillStyle = '#8ab8d8';
+  gc.beginPath();
+  gc.moveTo(10, -7);
+  gc.lineTo(14, -6);
+  gc.lineTo(14, 6);
+  gc.lineTo(10, 7);
+  gc.closePath();
+  gc.fill();
+  // Rear window
+  gc.fillStyle = '#7aa8c8';
+  gc.beginPath();
+  gc.moveTo(-8, -7);
+  gc.lineTo(-12, -6);
+  gc.lineTo(-12, 6);
+  gc.lineTo(-8, 7);
+  gc.closePath();
+  gc.fill();
+  // Side windows
+  gc.fillStyle = '#90c0e0';
+  gc.fillRect(-5, -8, 14, 3);
+  gc.fillRect(-5, 5, 14, 3);
+  // Wheels
+  gc.fillStyle = '#222222';
+  gc.fillRect(-17, -12, 8, 3);
+  gc.fillRect(-17, 9, 8, 3);
+  gc.fillRect(10, -12, 8, 3);
+  gc.fillRect(10, 9, 8, 3);
+  // Headlights
+  gc.fillStyle = '#ffffaa';
+  gc.fillRect(22, -7, 2, 4);
+  gc.fillRect(22, 3, 2, 4);
+  // Taillights
+  gc.fillStyle = '#ff3333';
+  gc.fillRect(-24, -7, 2, 4);
+  gc.fillRect(-24, 3, 2, 4);
+  gc.restore();
+}
+
+function drawVan(gc, x, y, angle, color) {
+  gc.save();
+  gc.translate(x + 27, y + 14);
+  gc.rotate(angle);
+  // Body
+  gc.fillStyle = color || '#e0e0e0';
+  gc.beginPath();
+  gc.moveTo(-25, -12);
+  gc.lineTo(23, -12);
+  gc.quadraticCurveTo(27, -12, 27, -8);
+  gc.lineTo(27, 8);
+  gc.quadraticCurveTo(27, 12, 23, 12);
+  gc.lineTo(-25, 12);
+  gc.quadraticCurveTo(-27, 12, -27, 8);
+  gc.lineTo(-27, -8);
+  gc.quadraticCurveTo(-27, -12, -25, -12);
+  gc.fill();
+  // Cabin
+  gc.fillStyle = shadeColor(color || '#e0e0e0', -20);
+  gc.fillRect(8, -10, 16, 20);
+  // Windshield
+  gc.fillStyle = '#8ab8d8';
+  gc.fillRect(18, -9, 6, 18);
+  // Side windows
+  gc.fillStyle = '#90c0e0';
+  gc.fillRect(10, -12, 8, 3);
+  gc.fillRect(10, 9, 8, 3);
+  // Cargo area
+  gc.strokeStyle = shadeColor(color || '#e0e0e0', -15);
+  gc.lineWidth = 1;
+  gc.strokeRect(-24, -10, 30, 20);
+  // Wheels
+  gc.fillStyle = '#222222';
+  gc.fillRect(-20, -14, 9, 3);
+  gc.fillRect(-20, 11, 9, 3);
+  gc.fillRect(14, -14, 9, 3);
+  gc.fillRect(14, 11, 9, 3);
+  gc.restore();
+}
+
+function drawTruck(gc, x, y, angle, color) {
+  gc.save();
+  gc.translate(x + 33, y + 15);
+  gc.rotate(angle);
+  // Trailer
+  gc.fillStyle = color || '#4a6a9a';
+  gc.fillRect(-33, -13, 42, 26);
+  gc.strokeStyle = shadeColor(color || '#4a6a9a', -20);
+  gc.lineWidth = 1;
+  gc.strokeRect(-33, -13, 42, 26);
+  // Cab
+  gc.fillStyle = shadeColor(color || '#4a6a9a', 20);
+  gc.fillRect(11, -11, 18, 22);
+  // Windshield
+  gc.fillStyle = '#8ab8d8';
+  gc.fillRect(24, -9, 5, 18);
+  // Exhaust stacks
+  gc.fillStyle = '#555';
+  gc.fillRect(10, -14, 3, 4);
+  gc.fillRect(10, 10, 3, 4);
+  // Wheels
+  gc.fillStyle = '#222222';
+  gc.fillRect(-28, -15, 10, 3);
+  gc.fillRect(-28, 12, 10, 3);
+  gc.fillRect(-14, -15, 10, 3);
+  gc.fillRect(-14, 12, 10, 3);
+  gc.fillRect(16, -13, 10, 3);
+  gc.fillRect(16, 10, 10, 3);
+  gc.restore();
+}
+
+function drawHouse(gc, x, y, obj) {
+  const wc = obj.wallColor || '#e8dcc8';
+  const rc = obj.roofColor || '#b04040';
+  // Wall
+  gc.fillStyle = wc;
+  gc.fillRect(x + 4, y + 20, 64, 42);
+  // Roof
+  gc.fillStyle = rc;
+  gc.beginPath();
+  gc.moveTo(x, y + 22);
+  gc.lineTo(x + 36, y + 2);
+  gc.lineTo(x + 72, y + 22);
+  gc.closePath();
+  gc.fill();
+  // Ridge line
+  gc.strokeStyle = shadeColor(rc, -25);
+  gc.lineWidth = 2;
+  gc.beginPath();
+  gc.moveTo(x + 36, y + 2);
+  gc.lineTo(x + 36, y + 22);
+  gc.stroke();
+  // Chimney
+  gc.fillStyle = '#8B5E3C';
+  gc.fillRect(x + 52, y + 5, 10, 17);
+  gc.fillStyle = '#7a5030';
+  gc.fillRect(x + 50, y + 4, 14, 3);
+  // Front door
+  gc.fillStyle = '#5a3520';
+  gc.fillRect(x + 30, y + 40, 12, 22);
+  gc.fillStyle = '#daa520';
+  gc.beginPath();
+  gc.arc(x + 39, y + 52, 1.5, 0, Math.PI * 2);
+  gc.fill();
+  // Windows
+  gc.fillStyle = '#a0d0f0';
+  gc.fillRect(x + 10, y + 28, 14, 12);
+  gc.fillRect(x + 50, y + 28, 14, 12);
+  // Window frames
+  gc.strokeStyle = '#ffffff';
+  gc.lineWidth = 1;
+  gc.strokeRect(x + 10, y + 28, 14, 12);
+  gc.strokeRect(x + 50, y + 28, 14, 12);
+  gc.beginPath();
+  gc.moveTo(x + 17, y + 28); gc.lineTo(x + 17, y + 40);
+  gc.moveTo(x + 10, y + 34); gc.lineTo(x + 24, y + 34);
+  gc.moveTo(x + 57, y + 28); gc.lineTo(x + 57, y + 40);
+  gc.moveTo(x + 50, y + 34); gc.lineTo(x + 64, y + 34);
+  gc.stroke();
+  // Garden path from door to bottom
+  gc.fillStyle = '#b8a880';
+  gc.fillRect(x + 33, y + 62, 6, 3);
+}
+
+function drawShop(gc, x, y, obj) {
+  const ac = obj.color || '#c04040';
+  const rc = obj.roofColor || '#a09080';
+  // Walls
+  gc.fillStyle = '#e0d8c8';
+  gc.fillRect(x + 2, y + 2, 61, 54);
+  // Flat roof
+  gc.fillStyle = rc;
+  gc.fillRect(x, y, 65, 6);
+  // Awning
+  gc.fillStyle = ac;
+  gc.fillRect(x + 2, y + 6, 61, 10);
+  // Awning stripes
+  gc.fillStyle = shadeColor(ac, 30);
+  for (let s = x + 2; s < x + 63; s += 10) {
+    gc.fillRect(s, y + 6, 5, 10);
+  }
+  // Display window
+  gc.fillStyle = '#b0d8f0';
+  gc.fillRect(x + 6, y + 18, 53, 18);
+  gc.strokeStyle = '#8a8a7a';
+  gc.lineWidth = 1;
+  gc.strokeRect(x + 6, y + 18, 53, 18);
+  // Window divider
+  gc.beginPath();
+  gc.moveTo(x + 32, y + 18);
+  gc.lineTo(x + 32, y + 36);
+  gc.stroke();
+  // Door
+  gc.fillStyle = '#6a5040';
+  gc.fillRect(x + 26, y + 38, 13, 18);
+  gc.fillStyle = '#daa520';
+  gc.beginPath();
+  gc.arc(x + 36, y + 48, 1.5, 0, Math.PI * 2);
+  gc.fill();
+  // Signage area
+  gc.fillStyle = '#ffffff';
+  gc.fillRect(x + 15, y + 8, 35, 6);
+}
+
+function drawApartment(gc, x, y, obj) {
+  const c = obj.color || '#888070';
+  // Main building
+  gc.fillStyle = c;
+  gc.fillRect(x, y, 60, 90);
+  // Outline
+  gc.strokeStyle = shadeColor(c, -20);
+  gc.lineWidth = 1;
+  gc.strokeRect(x, y, 60, 90);
+  // Flat roof edge
+  gc.fillStyle = shadeColor(c, -15);
+  gc.fillRect(x, y, 60, 4);
+  // AC units on roof
+  gc.fillStyle = '#888888';
+  gc.fillRect(x + 8, y + 1, 10, 3);
+  gc.fillRect(x + 42, y + 1, 10, 3);
+  // Windows grid
+  gc.fillStyle = '#a0d0f0';
+  for (let wy = y + 10; wy < y + 85; wy += 14) {
+    for (let wx = x + 6; wx < x + 54; wx += 16) {
+      gc.fillRect(wx, wy, 10, 10);
+      gc.strokeStyle = '#8090a0';
+      gc.strokeRect(wx, wy, 10, 10);
+    }
+  }
+  // Entrance
+  gc.fillStyle = '#5a4a3a';
+  gc.fillRect(x + 22, y + 76, 16, 14);
+}
+
+function drawTower(gc, x, y, obj) {
+  const c = obj.color || '#607898';
+  // Main structure
+  gc.fillStyle = c;
+  gc.fillRect(x, y, 55, 120);
+  // Glass facade pattern
+  gc.fillStyle = '#8ab8d8';
+  for (let wy = y + 8; wy < y + 112; wy += 10) {
+    for (let wx = x + 4; wx < x + 51; wx += 12) {
+      gc.fillRect(wx, wy, 8, 7);
+    }
+  }
+  // Structural lines
+  gc.strokeStyle = shadeColor(c, -15);
+  gc.lineWidth = 1;
+  gc.strokeRect(x, y, 55, 120);
+  gc.beginPath();
+  gc.moveTo(x + 27, y); gc.lineTo(x + 27, y + 120);
+  gc.stroke();
+  // Roof
+  gc.fillStyle = shadeColor(c, -20);
+  gc.fillRect(x - 2, y, 59, 5);
+  // Antenna
+  gc.fillStyle = '#666666';
+  gc.fillRect(x + 25, y - 12, 3, 14);
+  gc.fillStyle = '#ff3333';
+  gc.beginPath();
+  gc.arc(x + 26.5, y - 13, 2, 0, Math.PI * 2);
+  gc.fill();
+}
+
+function drawSkyscraper(gc, x, y, obj) {
+  const c = obj.color || '#607090';
+  // Main structure
+  gc.fillStyle = c;
+  gc.fillRect(x, y, 65, 140);
+  // Glass curtain wall pattern
+  for (let wy = y + 6; wy < y + 134; wy += 8) {
+    for (let wx = x + 3; wx < x + 62; wx += 10) {
+      gc.fillStyle = (Math.floor((wy - y) / 8) + Math.floor((wx - x) / 10)) % 3 === 0 ? '#9ac0e0' : '#80b0d0';
+      gc.fillRect(wx, wy, 7, 5.5);
+    }
+  }
+  // Structural frame
+  gc.strokeStyle = shadeColor(c, -20);
+  gc.lineWidth = 2;
+  gc.strokeRect(x, y, 65, 140);
+  for (let fy = y; fy < y + 140; fy += 28) {
+    gc.beginPath();
+    gc.moveTo(x, fy); gc.lineTo(x + 65, fy);
+    gc.stroke();
+  }
+  // Helipad on roof
+  gc.fillStyle = shadeColor(c, -10);
+  gc.fillRect(x + 5, y + 2, 55, 12);
+  gc.strokeStyle = '#ffffff';
+  gc.lineWidth = 1;
+  gc.beginPath();
+  gc.arc(x + 32, y + 8, 5, 0, Math.PI * 2);
+  gc.stroke();
+  gc.fillStyle = '#ffffff';
+  gc.font = '6px sans-serif';
+  gc.textAlign = 'center';
+  gc.fillText('H', x + 32, y + 10);
+  // Crown
+  gc.fillStyle = shadeColor(c, 10);
+  gc.fillRect(x + 10, y - 6, 45, 8);
+  gc.fillRect(x + 20, y - 12, 25, 8);
+}
+
+function shadeColor(color, amount) {
+  let r = parseInt(color.slice(1, 3), 16);
+  let g = parseInt(color.slice(3, 5), 16);
+  let b = parseInt(color.slice(5, 7), 16);
+  r = Math.max(0, Math.min(255, r + amount));
+  g = Math.max(0, Math.min(255, g + amount));
+  b = Math.max(0, Math.min(255, b + amount));
+  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
+function drawObject(gc, obj) {
+  switch (obj.type) {
+    case 'hydrant': drawHydrant(gc, obj.x, obj.y); break;
+    case 'trash': drawTrash(gc, obj.x, obj.y); break;
+    case 'bench': drawBench(gc, obj.x, obj.y, obj.angle); break;
+    case 'lamppost': drawLamppost(gc, obj.x, obj.y); break;
+    case 'mailbox': drawMailbox(gc, obj.x, obj.y); break;
+    case 'bush': drawBush(gc, obj.x, obj.y); break;
+    case 'tree': drawTree(gc, obj.x, obj.y); break;
+    case 'car': drawCar(gc, obj.x, obj.y, obj.angle, obj.color); break;
+    case 'van': drawVan(gc, obj.x, obj.y, obj.angle, obj.color); break;
+    case 'truck': drawTruck(gc, obj.x, obj.y, obj.angle, obj.color); break;
+    case 'house': drawHouse(gc, obj.x, obj.y, obj); break;
+    case 'shop': drawShop(gc, obj.x, obj.y, obj); break;
+    case 'apartment': drawApartment(gc, obj.x, obj.y, obj); break;
+    case 'tower': drawTower(gc, obj.x, obj.y, obj); break;
+    case 'skyscraper': drawSkyscraper(gc, obj.x, obj.y, obj); break;
+  }
+}
+
+// Pre-render object sprites to offscreen canvases for performance
+let objectSprites = new Map();
+function prerenderObjects() {
+  objectSprites.clear();
+  for (const obj of objects) {
+    const pad = 30;
+    const ow = obj.w + pad * 2;
+    const oh = obj.h + pad * 2;
+    const oc = document.createElement('canvas');
+    oc.width = ow;
+    oc.height = oh;
+    const ogc = oc.getContext('2d');
+    const fakeObj = Object.assign({}, obj, { x: pad, y: pad });
+    drawObject(ogc, fakeObj);
+    obj._sprite = oc;
+    obj._pad = pad;
+  }
+}
+
+// ============================
+// GAME STATE
+// ============================
+let state = 'title'; // title, playing, gameover
+let holeX, holeY, holeR;
+let score, consumed, timer;
+let lastTime;
+let camX, camY;
+let consumeAnims = []; // shrink+rotate animations
+
+// Input
+let keys = {};
+let touchActive = false;
+let touchX = 0, touchY = 0;
+
+window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (state === 'title') startGame(); });
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  touchActive = true;
+  touchX = e.touches[0].clientX;
+  touchY = e.touches[0].clientY;
+  if (state === 'title') startGame();
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  touchX = e.touches[0].clientX;
+  touchY = e.touches[0].clientY;
+}, { passive: false });
+canvas.addEventListener('touchend', e => { touchActive = false; });
+canvas.addEventListener('mousedown', e => {
+  if (state === 'title') startGame();
+  if (state === 'gameover') startGame();
+});
+
+function startGame() {
+  if (state === 'playing') return;
+  state = 'playing';
+  holeX = HALF;
+  holeY = HALF;
+  holeR = HOLE_START_R;
+  score = 0;
+  consumed = 0;
+  timer = GAME_TIME;
+  consumeAnims = [];
+  generateCity();
+  renderGround();
+  prerenderObjects();
+  lastTime = performance.now();
+  requestAnimationFrame(gameLoop);
+}
+
+// ============================
+// GAME LOOP
+// ============================
+function gameLoop(now) {
+  if (state !== 'playing') return;
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+
+  // Timer
+  timer -= dt;
+  if (timer <= 0) {
+    timer = 0;
+    endGame();
+    return;
+  }
+
+  // Move hole
+  let dx = 0, dy = 0;
+  if (keys['arrowleft'] || keys['a']) dx -= 1;
+  if (keys['arrowright'] || keys['d']) dx += 1;
+  if (keys['arrowup'] || keys['w']) dy -= 1;
+  if (keys['arrowdown'] || keys['s']) dy += 1;
+
+  if (touchActive) {
+    const screenHX = W / 2;
+    const screenHY = H / 2;
+    const tdx = touchX - screenHX;
+    const tdy = touchY - screenHY;
+    const dist = Math.sqrt(tdx * tdx + tdy * tdy);
+    if (dist > 10) {
+      dx = tdx / dist;
+      dy = tdy / dist;
+    }
+  }
+
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len > 0) {
+    dx /= len; dy /= len;
+    holeX += dx * HOLE_SPEED * dt;
+    holeY += dy * HOLE_SPEED * dt;
+  }
+
+  // Clamp to world
+  holeX = Math.max(holeR, Math.min(WORLD - holeR, holeX));
+  holeY = Math.max(holeR, Math.min(WORLD - holeR, holeY));
+
+  // Check consumption
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    if (holeR < obj.minHole) continue;
+    const ocx = obj.x + obj.w / 2;
+    const ocy = obj.y + obj.h / 2;
+    const ddx = ocx - holeX;
+    const ddy = ocy - holeY;
+    const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+    const objR = Math.max(obj.w, obj.h) / 2;
+    if (dist + objR * CONSUME_RATIO < holeR) {
+      // Consume!
+      score += obj.pts;
+      consumed++;
+      const prevR = holeR;
+      holeR = Math.min(HOLE_MAX_R, holeR + obj.growth);
+      if (holeR > prevR + 0.1) SFX.grow();
+
+      // Start consume animation
+      consumeAnims.push({
+        x: ocx, y: ocy, obj: obj,
+        scale: 1, rotation: 0,
+        life: 0.35, maxLife: 0.35
+      });
+
+      if (obj.pts >= 40) SFX.bigGulp();
+      else SFX.gulp();
+
+      objects.splice(i, 1);
+    }
+  }
+
+  // Update consume animations
+  for (let i = consumeAnims.length - 1; i >= 0; i--) {
+    const a = consumeAnims[i];
+    a.life -= dt;
+    const t = 1 - (a.life / a.maxLife);
+    a.scale = 1 - t;
+    a.rotation = t * Math.PI * 2;
+    // Pull toward hole
+    a.x += (holeX - a.x) * dt * 6;
+    a.y += (holeY - a.y) * dt * 6;
+    if (a.life <= 0) consumeAnims.splice(i, 1);
+  }
+
+  // Camera
+  camX = holeX - W / 2;
+  camY = holeY - H / 2;
+
+  // Draw
+  render();
+
+  requestAnimationFrame(gameLoop);
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Draw visible portion of ground
+  const sx = Math.max(0, Math.floor(camX));
+  const sy = Math.max(0, Math.floor(camY));
+  const sw = Math.min(WORLD - sx, W);
+  const sh = Math.min(WORLD - sy, H);
+  if (sw > 0 && sh > 0 && groundCanvas) {
+    ctx.drawImage(groundCanvas, sx, sy, sw, sh, sx - camX, sy - camY, sw, sh);
+  }
+
+  // Fill edges outside world
+  ctx.fillStyle = '#333333';
+  if (camX < 0) ctx.fillRect(0, 0, -camX, H);
+  if (camY < 0) ctx.fillRect(0, 0, W, -camY);
+  if (camX + W > WORLD) ctx.fillRect(WORLD - camX, 0, camX + W - WORLD, H);
+  if (camY + H > WORLD) ctx.fillRect(0, WORLD - camY, W, camY + H - WORLD);
+
+  // Draw objects (only visible ones)
+  const viewL = camX - 80;
+  const viewR = camX + W + 80;
+  const viewT = camY - 80;
+  const viewB = camY + H + 80;
+
+  // Sort by Y for proper overlap
+  const visible = objects.filter(o => o.x + o.w > viewL && o.x < viewR && o.y + o.h > viewT && o.y < viewB);
+  visible.sort((a, b) => (a.y + a.h) - (b.y + b.h));
+
+  for (const obj of visible) {
+    if (obj._sprite) {
+      ctx.drawImage(obj._sprite, obj.x - obj._pad - camX, obj.y - obj._pad - camY);
+    }
+  }
+
+  // Draw consume animations
+  for (const a of consumeAnims) {
+    if (a.scale <= 0.01) continue;
+    ctx.save();
+    ctx.translate(a.x - camX, a.y - camY);
+    ctx.rotate(a.rotation);
+    ctx.scale(a.scale, a.scale);
+    ctx.globalAlpha = a.scale;
+    if (a.obj._sprite) {
+      ctx.drawImage(a.obj._sprite, -a.obj.w / 2 - a.obj._pad, -a.obj.h / 2 - a.obj._pad);
+    }
+    ctx.restore();
+  }
+
+  // Draw the hole
+  drawHole(holeX - camX, holeY - camY, holeR);
+
+  // HUD
+  drawHUD();
+}
+
+function drawHole(sx, sy, r) {
+  ctx.save();
+
+  // Shadow offset
+  const shadowOff = r * 0.08;
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(sx + shadowOff, sy + shadowOff * 0.5, r, r * 0.85, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Main hole - dark ellipse for top-down 3D look
+  const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
+  grad.addColorStop(0, '#000000');
+  grad.addColorStop(0.4, '#0a0a0a');
+  grad.addColorStop(0.7, '#151515');
+  grad.addColorStop(0.85, '#1a1018');
+  grad.addColorStop(1, '#201020');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.ellipse(sx, sy, r, r * 0.85, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Depth rings
+  ctx.strokeStyle = 'rgba(30,20,40,0.4)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i <= 4; i++) {
+    const rr = r * (i / 5);
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, rr, rr * 0.85, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Rim highlight
+  ctx.strokeStyle = 'rgba(80,60,100,0.35)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(sx, sy, r - 1, r * 0.85 - 1, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Inner glow
+  ctx.strokeStyle = 'rgba(60,30,80,0.2)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.ellipse(sx, sy, r * 0.3, r * 0.25, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawHUD() {
+  const pad = 16;
+  const fontSize = 20;
+  ctx.font = 'bold ' + fontSize + 'px "Segoe UI", Arial, sans-serif';
+  ctx.textBaseline = 'top';
+
+  // Semi-transparent HUD background
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, 0, W, 44);
+
+  // Score (top-left)
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('Score: ' + score, pad, 12);
+
+  // Timer (center)
+  ctx.textAlign = 'center';
+  const timeStr = Math.ceil(timer) + 's';
+  ctx.fillStyle = timer <= 10 ? '#ff4444' : '#ffffff';
+  ctx.fillText(timeStr, W / 2, 12);
+
+  // Hole size (top-right area)
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#aaaaff';
+  ctx.fillText('Size: ' + Math.floor(holeR), W - pad - 120, 12);
+
+  // Objects consumed
+  ctx.fillStyle = '#aaffaa';
+  ctx.fillText('Eaten: ' + consumed, W - pad, 12);
+}
+
+function endGame() {
+  state = 'gameover';
+  SFX.timerEnd();
+  const hs = getHighScore();
+  if (score > hs) setHighScore(score);
+  // Delay score submission to let sound play
+  setTimeout(() => {
+    submitScore(score);
+    // After prompt, draw game over screen and allow restart
+    drawGameOver();
+  }, 500);
+}
+
+function drawGameOver() {
+  // Dim
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  let y = H / 2 - 80;
+
+  ctx.font = 'bold 48px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('GAME OVER', W / 2, y);
+  y += 60;
+
+  ctx.font = 'bold 32px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = '#ffcc44';
+  ctx.fillText('Score: ' + score, W / 2, y);
+  y += 40;
+
+  ctx.font = '22px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = '#aaaaaa';
+  ctx.fillText('Objects eaten: ' + consumed, W / 2, y);
+  y += 35;
+
+  const hs = getHighScore();
+  ctx.fillStyle = '#88aaff';
+  ctx.fillText('High Score: ' + hs, W / 2, y);
+  y += 35;
+
+  ctx.font = '20px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = score >= hs ? '#44ff44' : '#aaaaaa';
+  ctx.fillText(score >= hs ? 'NEW HIGH SCORE!' : '', W / 2, y);
+  y += 50;
+
+  ctx.font = '18px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = '#cccccc';
+  ctx.fillText('Click or press any key to play again', W / 2, y);
+}
+
+function drawTitle() {
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, W, H);
+
+  // Decorative circles (abstract city from above)
+  for (let i = 0; i < 30; i++) {
+    ctx.fillStyle = 'rgba(' + randInt(40, 80) + ',' + randInt(40, 80) + ',' + randInt(60, 100) + ',0.3)';
+    ctx.fillRect(rand(0, W), rand(0, H), rand(20, 80), rand(30, 120));
+  }
+  // Roads
+  ctx.fillStyle = 'rgba(90,90,90,0.4)';
+  for (let i = 0; i < 5; i++) {
+    ctx.fillRect(0, rand(0, H), W, rand(15, 30));
+    ctx.fillRect(rand(0, W), 0, rand(15, 30), H);
+  }
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  let y = H / 2 - 60;
+
+  ctx.font = 'bold 56px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('CITY CHOMP', W / 2, y);
+  y += 50;
+
+  // Draw a small hole
+  drawHole(W / 2, y, 30);
+  y += 50;
+
+  ctx.font = '22px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = '#aaaacc';
+  ctx.fillText('Consume the city with your black hole!', W / 2, y);
+  y += 35;
+
+  ctx.font = '18px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = '#8888aa';
+  ctx.fillText('Arrow keys / WASD to move | Touch to drag', W / 2, y);
+  y += 30;
+  ctx.fillText('Eat small things first, grow bigger, eat buildings!', W / 2, y);
+  y += 40;
+
+  const hs = getHighScore();
+  if (hs > 0) {
+    ctx.fillStyle = '#88aaff';
+    ctx.fillText('High Score: ' + hs, W / 2, y);
+    y += 30;
+  }
+
+  ctx.font = '20px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = '#cccccc';
+  ctx.fillText('Click or press any key to start', W / 2, y);
+}
+
+// Title screen loop
+function titleLoop() {
+  if (state !== 'title') return;
+  drawTitle();
+  requestAnimationFrame(titleLoop);
+}
+
+// Start
+titleLoop();
+
+})();
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px 'Segoe UI',Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px;">
+  <span id="vc-count">...</span> Devourers
+</div>
+<script>
+(function(){
+  var G='city-chomp',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

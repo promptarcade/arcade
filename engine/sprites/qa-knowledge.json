@@ -1,0 +1,670 @@
+{
+  "principles": [
+    {
+      "issue": "All objects resting on surfaces need a contact shadow or ground line to feel grounded",
+      "fix": "Add 1-2px darker line or shadow beneath the object where it meets the ground",
+      "promotedFrom": "general",
+      "hitCount": 0,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "Specular highlights must be placed relative to the light direction, not arbitrarily",
+      "fix": "Light comes from upper-left by default. Place primary highlight upper-left, secondary upper-center",
+      "promotedFrom": "general",
+      "hitCount": 0,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "Texture noise applied before shading gets overwritten by the shading pass",
+      "fix": "Apply scatterNoise and texture in drawPost callback, after PostProcess.applyShading()",
+      "promotedFrom": "general",
+      "hitCount": 0,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "Eyes drawn before shading lose detail to the shading pass",
+      "fix": "Draw eyes in drawPost callback or after applyShading(). Use _eyeParams pattern for characters.",
+      "promotedFrom": "general",
+      "hitCount": 0,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "4-tone palette ramps produce visible banding at higher resolutions — use expanded tone counts",
+      "fix": "SOLVED: ColorRamp now supports N-tone ramps. Style profiles set toneCount (Pixel/Chibi=4, Illustrated=6, HD=8). Use tone(group, 0.0-1.0) helper in draw code for palette-agnostic color selection.",
+      "promotedFrom": "props",
+      "hitCount": 2,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "Quality gaps are design failures not engine limitations — every shortfall in the test was fixable with better drawing decisions",
+      "fix": "Don't lower expectations. Use the QA loop: render, verify, identify the specific issue, fix it, re-render. The gap closes with iteration, not with caveats.",
+      "promotedFrom": "general",
+      "hitCount": 1,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "NO EMPTY SPACE: every pixel must belong to a rendered surface — background fill showing through gaps is the #1 sign of amateur work",
+      "fix": "Pack forms tight. The gap between two surfaces is itself a rendered thing (a dark crevice line), not an absence. Never scatter shapes on a base fill — the base should not be visible through the content.",
+      "promotedFrom": "reference-study",
+      "hitCount": 1,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "FULL TONAL RANGE PER FORM: every individual form needs its own near-white highlight and near-black shadow, regardless of global lighting position",
+      "fix": "A scale in shadow still has a bright catchlight — just dimmer. Local contrast within each form matters as much as global lighting across the image. Each form should span 70%+ of the available tonal range.",
+      "promotedFrom": "reference-study",
+      "hitCount": 1,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "EDGES DEFINE FORMS: 3D reads from what happens at boundaries, not from gradient fills across surfaces",
+      "fix": "Concentrate contrast at borders: dark crevice below, bright ridge above. Interiors can be nearly flat. Spend pixel budget on edges, not on interior per-pixel normal computation.",
+      "promotedFrom": "reference-study",
+      "hitCount": 1,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "COLOUR TEMPERATURE SHIFTS WITH LIGHT: lit areas are not just brighter shadows — they shift hue",
+      "fix": "Shadows shift cool (blue-green for green subjects, crimson-brown for red). Highlights shift warm (yellow-green, orange-yellow). Use separate palette groups for lit and shadow, not just different tones of the same hue. This is what the dual-palette crossfade pattern achieves.",
+      "promotedFrom": "reference-study",
+      "hitCount": 1,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "CONSISTENT DETAIL DENSITY: detail level must be uniform across the entire image — sharp transitions from detailed to simple areas break the illusion",
+      "fix": "Texture, colour noise, and surface variation must appear at the same density everywhere. Don't have detailed central elements surrounded by flat zones. If an area is in shadow, it still has texture — just darker texture.",
+      "promotedFrom": "reference-study",
+      "hitCount": 1,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "SPECULAR HIGHLIGHTS: tiny and extreme contrast — pure white against dark surroundings",
+      "fix": "Speculars should be 2-5px diameter maximum. The contrast ratio between specular and surrounding surface should be extreme. A large soft glow is not a specular — it's a diffuse highlight. Speculars are hard, bright, small.",
+      "promotedFrom": "reference-study",
+      "hitCount": 1,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "INDIVIDUAL STRANDS/FIBERS: organic detail (hair, iris fibers, wood grain) must be individually distinct elements, not procedural sine wave patterns",
+      "fix": "Draw each fiber as a separate streak with its own colour and brightness. Vary length, angle, and tone per strand. Dozens of unique elements, not a mathematical function that produces uniform repetition.",
+      "promotedFrom": "reference-study",
+      "hitCount": 1,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "DRAWPOST IS MANDATORY for manual lighting — auto-shading overwrites per-pixel values",
+      "fix": "For training exercises and HD-tier detailed work, draw ALL content in drawPost() with outlineMode:'none'. The engine's PostProcess.applyShading pass runs after draw() and remaps every pixel.",
+      "promotedFrom": "training-phase-1",
+      "hitCount": 3,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "S-CURVE CONTRAST is essential — without it, 8-tone palettes sit in mid-range",
+      "fix": "Apply v*v*(3-2*v) to computed values before mapping to tones. For metal, use quintic: v*v*v*(v*(v*6-15)+10) for sharper transitions.",
+      "promotedFrom": "training-phase-1",
+      "hitCount": 6,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "SILHOUETTE FIRST: block out the correct overall shape/proportion before any shading — amazing lighting on wrong proportions still looks wrong",
+      "fix": "Write profile function FIRST as a width-at-height curve. Render as flat fill. Pass silhouette test (identifiable from shape alone) BEFORE any shading. The profile encodes the object's identity — a belly bulge makes a pot, a cosine curve makes a bowl, an S-curve shoulder makes a bottle. Get the curve right, THEN apply lighting. The universal pattern: define bounding box ratio → write profile(t) → flat fill → verify → shade.",
+      "promotedFrom": "soup-shop-feedback",
+      "hitCount": 3,
+      "promoted": "2026-03-26"
+    },
+    {
+      "issue": "ORGANIC ASYMMETRY: natural objects (food, animals, plants) should never be perfectly symmetrical — slight irregularity sells realism",
+      "fix": "Add random offset to mirrored features. Drumsticks at slightly different angles. Loaf ends at different heights. Leaves at different sizes. Perfect symmetry reads as manufactured, not natural.",
+      "promotedFrom": "phase-6c-feedback",
+      "hitCount": 1,
+      "promoted": "2026-03-26"
+    },
+    {
+      "issue": "DETAIL MUST STAY WITHIN BOUNDS: scoring lines, texture, features must not extend past the silhouette edge",
+      "fix": "After placing detail (scores, cracks, spots), check that each pixel is within the object's filled area using isFilled() or boundary check against the profile function.",
+      "promotedFrom": "phase-6c-feedback",
+      "hitCount": 1,
+      "promoted": "2026-03-26"
+    },
+    {
+      "issue": "CONSISTENT VIEWING ANGLE within a scene: props sharing a screen must share the same camera perspective — mixing angles breaks cohesion",
+      "fix": "Before drawing a SET of props, decide the camera angle for that context (3/4 elevated for overworld, side-on for platformer, top-down for UI). All objects rendered for the same view use the same perspective. Different game views (e.g. overworld vs battle) can have different angles — just be consistent within each.",
+      "promotedFrom": "soup-shop-feedback",
+      "hitCount": 1,
+      "promoted": "2026-03-26"
+    },
+    {
+      "issue": "TIGHT PACKING for repeating forms (scales, stones, tiles) — row spacing must be LESS than form height to create overlap",
+      "fix": "Set row spacing to (scaleSize - 2) not scaleSize. Use small jitter (30% not 90%). The crevice base should only be visible as thin dark lines, never as open background.",
+      "promotedFrom": "training-phase-5",
+      "hitCount": 3,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "DUAL LIGHT SOURCES create atmosphere — combine cool ambient (moon) with warm localized (fire) for scene depth",
+      "fix": "Compute both light contributions per pixel. Fire light uses distance falloff. Objects get warm tones on fire-facing side, cool tones on moon-facing side. The campfire scene (6.4) is the reference.",
+      "promotedFrom": "training-phase-6",
+      "hitCount": 1,
+      "promoted": "2026-03-25"
+    },
+    {
+      "issue": "No dark outlines detected at sprite edges. Outlines help define silhouette.",
+      "fix": null,
+      "promotedFrom": "props",
+      "hitCount": 5,
+      "promoted": "2026-03-27"
+    },
+    {
+      "issue": "Phong/Blinn-Phong specular can land in a different spot than the diffuse peak, creating a dual-light-source look",
+      "fix": "Use Math.pow(diffuse, 14) * strength instead of reflection-vector specular. This guarantees the specular sits inside the brightest diffuse region. Only use full Phong when you specifically want the specular offset (e.g. metal environment reflections).",
+      "promotedFrom": "training-fresh-phase-1",
+      "hitCount": 1,
+      "promoted": "2026-03-27"
+    },
+    {
+      "issue": "Ground planes with a hard top edge read as shelves/platforms, not surfaces",
+      "fix": "Fill the entire canvas: dark background above horizon, lit ground below. The tonal transition at the horizon line makes the ground read as a receding surface. Never leave the ground as a partial-width rectangle.",
+      "promotedFrom": "training-fresh-phase-1",
+      "hitCount": 1,
+      "promoted": "2026-03-27"
+    },
+    {
+      "issue": "Circle rasterization produces jagged sparse pixels at poles — visible as artifacts where spheres meet surfaces",
+      "fix": "Sink spheres 1-2px into the ground (cy = groundY - r + 2) so the aliased bottom edge is hidden by the surface. Draw sphere first, then fill ground only into empty pixels using isFilled() check.",
+      "promotedFrom": "training-fresh-phase-1",
+      "hitCount": 1,
+      "promoted": "2026-03-27"
+    },
+    {
+      "issue": "Hue-shifting ramps exaggerate colour steps on large smooth forms — each tone reads as a distinct colour ring",
+      "fix": "Use less saturated base colours so ramp steps are subtler. Or break up bands with texture/detail. Or bypass the palette ramp with manual per-pixel interpolation for large smooth surfaces. Dithering (±3% hash noise) helps but doesn't fully solve it.",
+      "promotedFrom": "training-fresh-phase-2",
+      "hitCount": 1,
+      "promoted": "2026-03-27"
+    },
+    {
+      "issue": "Smooth surfaces expose palette banding — texture breaks it up",
+      "fix": "Perturb surface normals with hash-based bump noise (bumpStr 0.1-0.2) before computing diffuse/specular. Each pixel catches light at a slightly different angle, breaking concentric tone bands into irregular texture. This is why scaled/detailed surfaces (dragon scales) never show banding — every sub-form has its own lighting. For intentionally smooth objects (glass, polished metal), accept the bands or use more tones.",
+      "promotedFrom": "training-fresh-phase-2-reference-study",
+      "hitCount": 1,
+      "promoted": "2026-03-27"
+    },
+    {
+      "issue": "Low ambient + high diffuse creates a focused spotlight look — most of the sphere sits in shadow",
+      "fix": "For broad dispersed lighting, raise ambient to 0.12-0.18 and reduce diffuse multiplier to 0.5-0.55. This spreads brightness across more of the surface, giving a gentler gradient with fewer visible tone transitions. Reserve low ambient (0.03) for dramatic/focused lighting deliberately.",
+      "promotedFrom": "training-fresh-phase-2",
+      "hitCount": 1,
+      "promoted": "2026-03-27"
+    },
+    {
+      "issue": "Handle attachment points must not create steps in the body contour",
+      "fix": "Handles must extend past the body's widest point (belly peak) so the body never juts out below them. Body belly should be subtle (2-3px max) — large belly bulges create visible juts at handle endpoints no matter where you place them.",
+      "promotedFrom": "training-fresh-phase-3",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Profile functions with hard breakpoints create visible steps in the silhouette",
+      "fix": "Use smooth transitions (smoothstep, sine curves) between profile regions. Avoid piecewise linear segments that meet at different slopes. The body should be one continuous curve, not segments stitched together.",
+      "promotedFrom": "training-fresh-phase-3",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Small canvases produce crude results — use proven canvas sizes",
+      "fix": "128x96 minimum for HD-tier props. Previous training used 128x96 for pots with ~46px half-widths. Halving the canvas (80x80, 96x96) halves the pixel budget and makes curves visibly jagged. Check qa-knowledge and existing training for proven dimensions before starting.",
+      "promotedFrom": "training-fresh-phase-3",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Cast shadows default too small and too faint — they read as smudges not shadows",
+      "fix": "Shadow ellipse radius should be ~1.2x the object radius. Intensity multiplier ~0.75 (not 0.5). The shadow must be obviously darker than the surrounding ground at a glance.",
+      "promotedFrom": "training-fresh-phase-1",
+      "hitCount": 1,
+      "promoted": "2026-03-27"
+    },
+    {
+      "issue": "Palette hex values define the tonal range ceiling — tone() math cannot exceed the visual range between the darkest and brightest palette colors",
+      "fix": "Before iterating on lighting math, verify the palette produces adequate visual range by rendering a test gradient. If the darkest color group isn't visually near-black and the brightest isn't near-white, fix the hex values first. No amount of S-curve or ambient tuning can compensate for a palette that doesn't span the full range.",
+      "promotedFrom": "ralph-training-ex1",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Per-pixel hash noise reads as dithering/speckle, not surface texture — bump features need to be larger than 1px",
+      "fix": "Use hash(x/3, y/3) or hash(x>>1, y>>1) as the PRIMARY bump source so groups of 2-4 pixels share similar normal perturbation. Add per-pixel hash only as secondary fine detail. Single-pixel noise is too fine to read as surface roughness at any zoom level.",
+      "promotedFrom": "ralph-training-ex1",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Bump-perturbing normals COMPRESSES tonal range — dark pixels get brighter, bright pixels get darker",
+      "fix": "Compute CLEAN lighting (smooth dome/sphere normals, no bump) first. Then modulate the FINAL brightness value with noise: v += (hash(x/3,y/3) - 0.5) * 0.18. This preserves full tonal sweep while adding surface variation. Only perturb normals when you want to CHANGE which areas are lit/dark, not when you want texture.",
+      "promotedFrom": "ralph-training-ex1-iter3",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Texture from noise functions reads as dithering at ANY block size — organic texture requires drawn micro-structures",
+      "fix": "Instead of hash-based normal perturbation, draw actual micro-features: tiny 2-3px convex bumps with a highlight pixel (upper-left) and shadow pixel (lower-right). Scatter across the surface at ~30-35% coverage. Each micro-feature is a tiny rendered form, not a noise value. This is what makes reference surfaces read as rough/organic.",
+      "promotedFrom": "ralph-training-ex1-iter3",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Specular highlight shape communicates material type — geometric shapes (cross, star) read as UI/lens flare, not surface gloss",
+      "fix": "Use 2-3px irregular asymmetric clusters (e.g. L-shape, offset triangle) for wet/glossy speculars. Avoid symmetrical shapes. Place on surface at 20-30% brightness for maximum contrast — specular in highlight zone is invisible.",
+      "promotedFrom": "ralph-training-ex1-iter3",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "ColorRamp tonal range is determined by BASE HEX LIGHTNESS — near-black bases produce 8 near-black tones, not a full dark-to-light ramp",
+      "fix": "The engine scales base lightness: deepShadow=L*0.45, shadow=L*0.70, highlight=L*1.30. For full range, use TWO groups: dark base at L=25-30% (ramp spans L=12-36%) and bright base at L=70-75% (ramp spans L=32-94%). Combined = 12-94% luminance. NEVER use near-black (#020804) or near-white (#f0ffd8) as bases — they produce 8 tones all clustered near the same brightness. ALWAYS render a flat gradient strip to verify palette range before iterating on rendering code.",
+      "promotedFrom": "ralph-training-ex1-iter4",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Micro-texture features must be 4-5px minimum to read as convex forms — 2px dot pairs read as noise",
+      "fix": "Draw each texture bump as a 4-5px dome with computed dome normals (blending 50% global position + 50% local bump NdotL). Scatter at 30-40% surface coverage. Each bump should be visually identifiable as a distinct raised form at 4x zoom. 2-3px highlight+shadow dot pairs are too small at any canvas size.",
+      "promotedFrom": "ralph-training-ex1-iter4",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Textured surfaces need features FIRST then form lighting — not form gradient with features painted on top",
+      "fix": "Pack the surface with micro-features (domes, bumps) at near-100% coverage FIRST. Then modulate each feature's brightness based on global form position. Dark base should only be visible as thin 1-2px crevice lines between features, never as open flat areas. Features ARE the surface, not decorations on a gradient.",
+      "promotedFrom": "ralph-training-ex1-iter5",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Uniform repeating patterns (hex grids, regular spacing) read as wallpaper/stamps, not organic texture",
+      "fix": "Vary feature size (mix of 2-6px radii), spacing (non-grid placement with collision avoidance), and shape. Larger features in center/focus areas, smaller at edges. Add organic jitter but also SIZE variation — uniform domes at different positions are still a pattern.",
+      "promotedFrom": "ralph-training-ex1-iter5",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Each repeated micro-feature needs its own full tonal sweep — uniformly bright features read as flat circles",
+      "fix": "Compute per-feature dome normals and NdotL. Each feature should have its own near-white highlight (upper-left pixel) and near-black shadow (lower-right pixel). Global form lighting modulates the feature's range but doesn't replace local lighting.",
+      "promotedFrom": "ralph-training-ex1-iter5",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Voronoi tessellation is the correct approach for densely packed repeating forms — guarantees 100% coverage by construction",
+      "fix": "For each pixel, find 2 nearest feature centers. If distance ratio (best2 - best1) < threshold (~0.12): crevice pixel (DARKEST). If < 0.28: ridge pixel (locally bright). Else: sphere-lit interior from nearest center. This eliminates 'dots on dark surface' because every pixel belongs to a cell. Boundary width is controlled by the threshold.",
+      "promotedFrom": "ralph-training-ex1-iter6",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Hardcoded palette extremes at ALL boundaries backfires — uniform bright ridges create artificial grid pattern",
+      "fix": "Only use DARKEST for crevice lines and BRIGHTEST for specular highlights. Ridges should be LOCALLY brightest (computed from global position), not globally brightest. Shadow-zone ridges at 50-60% look natural; uniform white ridges look like a wire mesh overlay.",
+      "promotedFrom": "ralph-training-ex1-iter6",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Height field normal computation produces noise not identifiable features — explicit per-feature normals are better",
+      "fix": "Computing bumps as a height field and deriving normals via finite differences produces continuous smooth variations that read as noise. Voronoi cells with per-cell sphere normals produce individually identifiable 3D forms. The difference: height fields have gradual transitions, explicit features have sharp crevice boundaries.",
+      "promotedFrom": "ralph-training-ex1-iter6",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Palette TONE DISTRIBUTION matters more than range endpoints — near-black bases waste tones as visually identical darks",
+      "fix": "Cool base at L=12% produces 8 tones between L=5-16% — all look the same. Cool base at L=20% produces L=9-26% with each tone visually distinct. Optimal: L=20-25% cool, L=72-76% warm. Always verify the 16-tone ramp shows distinct, monotonically increasing lightness steps before iterating on rendering code.",
+      "promotedFrom": "ralph-training-ex1-iter7",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "S-curve contrast creates uniform dark blobs on shadow side of repeated forms — use gamma for per-feature rendering",
+      "fix": "S-curve smoothstep(v) maps v<0.1 to near-zero, creating a large uniform dark area on sphere shadow sides (30% of surface at identical darkest tone). Gamma 0.65 (pow(v, 0.65)) distributes tones more evenly — the dark side shows gradual transition. Use S-curve for overall composition, gamma for per-feature detail rendering.",
+      "promotedFrom": "ralph-training-ex1-iter7",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Specular placement paradox: invisible on both bright AND very dark surfaces — place in mid-tone zones with 4-5px clusters",
+      "fix": "On bright surfaces (L>80%): only 15% contrast with white specular — invisible. On very dark surfaces (L<20%): 80%+ contrast but 2-3px too small to spot against dark expanse. Sweet spot: mid-tone zones (L=40-50%) with 4-5px irregular clusters of absolute brightest palette tone. Both high contrast AND visible feature size.",
+      "promotedFrom": "ralph-training-ex1-iter7",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Combining global form lighting with local feature lighting: multiply compresses range, add lifts floor — use range-band shifting instead",
+      "fix": "Instead of v = localV * globalMod (compresses shadow features) or v = localV * 0.8 + globalV * 0.2 (lifts highlight floors), SHIFT the tonal window: lo = 0.03 + globalFactor * 0.30, hi = 0.52 + globalFactor * 0.45, v = lo + localV * (hi - lo). Each feature keeps constant bandwidth while window position communicates global form. Requires localV to span full [0,1] range.",
+      "promotedFrom": "ralph-training-ex1-iter8",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Zone-based rendering for small forms: divide NdotL into 5 discrete tonal zones with sharp jumps instead of smooth gradients",
+      "fix": "For forms <30px diameter, map NdotL to 5 discrete palette indices (deep shadow/shadow/mid/highlight/peak) with deliberate jumps. Smooth gradients produce 2-3 perceptible tones; discrete zones produce 5 identifiable steps. Use gamma 0.65 first, then quantize.",
+      "promotedFrom": "ralph-training-ex2",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Range-band shifting for combined global+local lighting: shift tonal WINDOW instead of multiplying",
+      "fix": "Shadow-zone forms use palette indices [baseIdx, baseIdx+7], highlight-zone forms use [baseIdx+7, baseIdx+15]. Each form keeps full bandwidth (~7 tones) while window position communicates global form. Avoids range compression from multiplicative/additive blending.",
+      "promotedFrom": "ralph-training-ex2",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Ridge detection as post-process produces cleaner edge pairs than in-dome boundary computation",
+      "fix": "Multi-pass: (1) draw dome interiors, (2) detect boundary pixels where owner changes → mark as crevice (DARKEST), (3) find pixels 1px inside boundary → boost to ridge brightness (baseIdx+8, 2+ tones above dome peak). Each pass independently tunable.",
+      "promotedFrom": "ralph-training-ex2",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Small Voronoi cells (r<10, <20px diameter) cannot show perceptible full tonal sweep — gradient over too few pixels reads as flat"
+    },
+    {
+      "issue": "Foreshortening repeated forms on curved surfaces: forms must shrink at silhouette edges to sell curvature",
+      "fix": "Scale form radius by the surface normal's z-component (nz): r = baseR * nz. Center of sphere nz≈1 (full size), edges nz→0 (tiny). Geometrically correct foreshortening with no manual size tables.",
+      "promotedFrom": "ralph-training-ex3",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Curved surface silhouettes need soft edge transition, not hard cutoff where forms stop",
+      "fix": "At r=6 (12px diameter, ~120 interior pixels), a 16-tone gradient puts each tone on only ~7 pixels. Critics and viewers perceive this as 3-4 visible tones, not 16. For visible per-cell tonal sweep, use r=12+ cells (24px+ diameter) or accept that small cells communicate texture through structure (crevice/ridge edges) rather than internal gradients.",
+      "promotedFrom": "ralph-training-ex1-iter8",
+      "hitCount": 1,
+      "promoted": "2026-03-28"
+    },
+    {
+      "issue": "Concave forms (sockets, bowls, caves) use DEPTH as primary lighting variable, not surface angle",
+      "fix": "For concave forms, compute normalized depth from the opening edge (0 at rim, 1 at deepest point). Brightness = v * pow(1-depth, 1.5). Ambient occlusion scales with depth: ambient = 0.02 + 0.08*(1-depth). Rim catches light (normal faces outward), center is deep shadow. This is the inverse of convex forms.",
+      "promotedFrom": "ralph-training-ex4",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Rim lighting on ridges bordering concave forms creates the signature bright-against-dark effect",
+      "fix": "The ridge around a concave opening is a CONVEX form (half-cylinder cross-section). Its outer 2-3px catch direct light and should be pushed to high palette indices (12-14 of 16). The contrast against the dark socket interior (index 0-2) creates the defining visual of frames, sockets, and recessed areas.",
+      "promotedFrom": "ralph-training-ex4",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Overhanging geometry casts additional shadow independent of ambient lighting",
+      "fix": "When geometry overhangs a recessed area (upper eyelid over socket, eaves over wall, helmet brim over face), the overhang creates near-black shadow on the recessed surface below it, ADDITIONAL to ambient occlusion. Detect by checking if pixel is near the top edge of the opening AND at shallow depth.",
+      "promotedFrom": "ralph-training-ex4",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Voronoi pixel assignment guarantees 100% coverage — superior to painter-order shape drawing for packed surfaces",
+      "fix": "Instead of drawing each form as a filled shape and relying on overlap, assign EVERY pixel to its nearest seed center (Voronoi). Crevice detection via distance ratio: distNearest/distSecond > 0.85. No pixel is ever unassigned, eliminating coverage gaps.",
+      "promotedFrom": "ralph-training-ex4",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Adaptive seed density near obstacles prevents coverage gaps where forms shrink",
+      "fix": "When repeating forms shrink near a boundary (obstacle edge, silhouette), the main grid spacing creates gaps. Add extra seed rings at multiple distances around the boundary. Check minimum inter-seed distance (8px) to avoid overcrowding while filling gaps.",
+      "promotedFrom": "ralph-training-ex4",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Engine hue shift (+20° shadow, -15° highlight) creates green cast on warm palettes",
+      "fix": "Pre-compensate by using base hues 15-20° REDDER than target output. For amber/gold (target H≈30-40°), use H≈10-20°. For orange (target H≈20-30°), use H≈0-10°. The warm group deepShadow (H+20°) is the worst offender — must stay below H≈45° to avoid green.",
+      "promotedFrom": "ralph-training-ex5",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Radial detail patterns require angular Voronoi assignment, not uniform angular spacing",
+      "fix": "Generate N radial elements at jittered angular positions with per-element brightness/thickness variation. Assign each pixel to nearest element via angular distance. Use angular distance ratio for between-element crevice detection. Effect strength should scale with radial distance (none at center, full at mid/outer).",
+      "promotedFrom": "ralph-training-ex5",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Glossy surface specular differs from matte — needs larger highlight area plus secondary reflection",
+      "fix": "Matte specular: small 3-5px cluster on mid-brightness surface. Glossy specular: 6-8px highlight with bright core + halo ring, plus a smaller secondary reflection on the opposite side. Wet/glossy surfaces catch more ambient light.",
+      "promotedFrom": "ralph-training-ex5",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Multi-form composites must render in depth order then apply cross-form interactions as post-passes",
+      "fix": "Render forms back-to-front (e.g. scales → socket → iris → lid), then apply interactions: cast shadows, reflections, specular as separate passes. This keeps each form's rendering clean while enabling cross-form effects like lid shadow on iris or lid reflection on eye surface.",
+      "promotedFrom": "ralph-training-ex6",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Contained forms should share palette but occupy different tonal windows for value hierarchy",
+      "fix": "When compositing multiple materials in one palette, assign different tonal ranges: background forms span full range (0-15), midground uses mid-dark (2-8), foreground focal elements use mid-bright (6-14). The darkest area (socket depth) and brightest area (specular) create the poles, with each form's tonal window communicating depth position.",
+      "promotedFrom": "ralph-training-ex6",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Reflections on glossy surfaces mirror nearby geometry at reduced intensity",
+      "fix": "Glossy surfaces (eyes, water, polished metal) reflect nearby geometry. The reflected image appears on the OPPOSITE side of the surface from the source (upper lid reflects on lower iris). Brighten by 2-3 palette indices — subtle, not a full mirror. Apply as a post-pass after the base form is rendered.",
+      "promotedFrom": "ralph-training-ex6",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Focal element in composite uses same palette as background — no visual hierarchy",
+      "fix": "Use a contrasting colour temperature palette for the focal element (e.g. warm amber iris against cool green scales). Multiple palette groups (4+) create automatic visual hierarchy through temperature contrast.",
+      "promotedFrom": "ralph-training-ex6",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Inner form does not fill container — dark gap between contained object and container wall",
+      "fix": "Render the inner form for ALL pixels inside the container boundary (e.g. almondDist < 0), not just within a fixed radius circle. A thin border/rim at the container edge provides the visual transition.",
+      "promotedFrom": "ralph-training-ex6",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Value hierarchy in composite scenes: background elements must have CAPPED tonal range so focal element is automatically brightest",
+      "fix": "Reduce the range-band multiplier for background elements (e.g. gb * 6 instead of gb * 9) and cap zone indices at 13/15. Only the focal element should use the full palette range 0-15.",
+      "promotedFrom": "ralph-training-ex7",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Specular quantity and brightness should be inversely proportional to element importance in composition",
+      "fix": "Background elements: few small dim speculars (max 3, 3px, second-brightest). Focal element: large bright speculars (8px core, absolute brightest). The focal specular must be the single brightest point in the entire image.",
+      "promotedFrom": "ralph-training-ex7",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Palette transposition requires only hex value changes when rendering code uses abstracted tone functions",
+      "fix": "Implement all rendering via scaleTone(i) and irisTone(i) functions that map 0-15 across palette groups. To transpose to a new colour, change ONLY the colors:{} hex values — zero code changes needed.",
+      "promotedFrom": "ralph-training-ex8",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Engine hue shift creates unwanted colour drift in non-green palettes — shadows shift +20°, highlights shift -15°",
+      "fix": "Pre-compensate: for target hue H, use H-20° for shadow base and H+15° for highlight base. Red (H=0°): shadow base H≈348° (crimson), highlight base H≈355°. This ensures rendered tones stay within the target hue corridor.",
+      "promotedFrom": "ralph-training-ex8",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Warm-on-warm or cool-on-cool focal contrast requires hue separation, not temperature contrast",
+      "fix": "When both background and focal element are in the same temperature range, use 30-40° hue separation (e.g. red H≈0° scales vs gold H≈35° iris) combined with brightness hierarchy for clear focal pull.",
+      "promotedFrom": "ralph-training-ex8",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Iridescent surfaces need a saturation gradient in the palette, not just a brightness gradient",
+      "fix": "Use HIGH saturation palette group for shadow/oblique normals and LOW saturation (silver/white) for lit/facing normals — the saturation shift encodes the angle-dependent colour change",
+      "promotedFrom": "ralph-training-ex9",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Bump texture must be applied AFTER zone-based tone assignment, not as normal perturbation before lighting",
+      "fix": "Compute clean zone-based lighting first, assign discrete tone index, THEN add brightness variation (±2-3 tones) as a post-step. Normal perturbation compresses tonal range — post-zone shift preserves it.",
+      "promotedFrom": "ralph-char-ex2",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Post-processing pass order determines which features survive — later passes overwrite earlier ones",
+      "fix": "Order: base fill → texture → fold creases → outline → rim highlights → material boundaries → specular. Each later pass must check it's not overwriting critical earlier features (e.g. specular skips outline pixels).",
+      "promotedFrom": "ralph-char-ex2",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Variable outline weight reinforces cross-section lighting on cylindrical forms",
+      "fix": "Shadow side: 2px dark outline (near-black + dark). Lit side: 1px lighter outline. This doubles the lighting information at the silhouette edge.",
+      "promotedFrom": "ralph-char-ex2",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Zone boundary transitions on organic forms must be dithered over 3-6px blend bands — hard zone steps create segmented/blocky appearance",
+      "fix": "Define zone thresholds with a blendWidth (e.g. 0.06). In the transition band, use hash-based dithering to probabilistically assign pixels to upper or lower zone. This creates soft organic transitions instead of hard steps.",
+      "promotedFrom": "ralph-training-characters-ex1",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Profile functions for organic forms need cubic S-curve interpolation, not linear segments — linear creates angular silhouettes",
+      "fix": "Use smoothstep s*s*(3-2*s) to interpolate between control points in profile functions. This produces curved silhouettes that read as natural anatomy.",
+      "promotedFrom": "ralph-training-characters-ex1",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Grid-aligned texture blocks create checkerboard/plaid patterns — use multi-scale hash noise for organic texture",
+      "fix": "Combine fine-grain per-pixel hash noise with medium-scale (3px block) hash noise at different seeds. Add sine-wave drape modulation for fabric. Never use (bx+by)%2 alternation.",
+      "promotedFrom": "ralph-training-characters-ex1",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    },
+    {
+      "issue": "Material transitions need 2+2px dark-bright edge pair to be readable at game scale",
+      "fix": "At material boundaries (fabric→skin, metal→leather): 2px dark crevice at the ending material + 2px bright ridge at the starting material. Single-pixel boundaries are invisible.",
+      "promotedFrom": "ralph-char-ex2",
+      "hitCount": 1,
+      "promoted": "2026-03-29"
+    }
+  ],
+  "categories": {
+    "characters": [
+      {
+        "entity": "portrait",
+        "issue": "Almond-shaped eyes with vertical squeeze at corners read much better than circular ellipses — use vertSqueeze = 1 - abs(xNorm)^1.8 * 0.7",
+        "fix": "For 3/4 angle, scale far eye to 0.75x. Eyes are the most important feature — make them the largest and most detailed element.",
+        "style": "illustrated",
+        "added": "2026-03-26",
+        "hitCount": 1
+      },
+      {
+        "entity": "portrait",
+        "issue": "Bangs must stop ABOVE the eye line — covering eyes defeats the most important facial feature",
+        "fix": "Set bangStopY = eyeLineY - 6 minimum. Hair framing the face should reveal, not obscure.",
+        "style": "illustrated",
+        "added": "2026-03-26",
+        "hitCount": 1
+      },
+      {
+        "entity": "portrait",
+        "issue": "Shadow side of face needs ambient fill to prevent detail loss — pure directional lighting blacks out half the face",
+        "fix": "Add ambient = 0.12 minimum to skin lighting. Bounce light from below (ny * 0.3 * 0.1) fills the underside.",
+        "style": "illustrated",
+        "added": "2026-03-26",
+        "hitCount": 1
+      }
+    ],
+    "props": [
+      {
+        "entity": "hd-chest",
+        "issue": "Barrel-vault lid: elliptical sqrt formula produces smoother arc than cosine at high res",
+        "fix": "Use halfW = chestW * sqrt(1 - t^2 * 0.85) for barrel vault shapes — iterate every row",
+        "style": "hd",
+        "added": "2026-03-25",
+        "hitCount": 2
+      },
+      {
+        "entity": "illustrated-gem",
+        "issue": "Crystals need internal reflections in darker facets to suggest translucency",
+        "fix": "Add lighter triangle streaks in pavilion facets suggesting light bouncing inside. Add sparkle dots along girdle.",
+        "style": "illustrated",
+        "added": "2026-03-25",
+        "hitCount": 2
+      },
+      {
+        "entity": "illustrated-gem",
+        "issue": "Facet edges must vary in thickness — uniform lines read as wireframe",
+        "fix": "Girdle: 3px thick. Crown edges: 2px. Pavilion edges: 1px. Sub-facet accent lines: 1px or absent.",
+        "style": "illustrated",
+        "added": "2026-03-25",
+        "hitCount": 2
+      },
+      {
+        "entity": "pixel-chip",
+        "issue": "At 16px, circle edge notches are too coarse to read cleanly",
+        "fix": "At pixel tier, simplify detail — fewer notches with cleaner placement, or skip notches entirely and rely on stripe for readability",
+        "style": "pixel",
+        "added": "2026-03-25",
+        "hitCount": 1
+      }
+    ],
+    "creatures": [
+      {
+        "entity": "dragon-eye",
+        "issue": "Scale size should vary with distance from focal point — smaller near the eye, larger at edges",
+        "fix": "Calculate distFromEye as normalized elliptical distance, sizeF = 0.6 + dist*0.3 when dist < 1.3, else 1.0",
+        "style": "hd",
+        "added": "2026-03-26",
+        "hitCount": 1
+      },
+      {
+        "entity": "dragon-eye",
+        "issue": "Iris fibres: use 4+ overlapping prime frequencies (11,17,23,31) to avoid procedural regularity",
+        "fix": "Still sine-based but with enough overlapping frequencies the result approximates individual strands. True individual drawing would require per-fibre seeds.",
+        "style": "hd",
+        "added": "2026-03-26",
+        "hitCount": 1
+      }
+    ],
+    "terrain": [
+      {
+        "entity": "tile-set",
+        "issue": "Voronoi-based stone tiles with wrapped distance create convincing natural stone — best terrain result",
+        "fix": "For seamless tiling: wrap distance calculations with if(d > TILE/2) d = TILE - d. Use secondDist - minDist < 2.5 for mortar lines. Per-stone lighting via offset from stone centre.",
+        "style": "illustrated",
+        "added": "2026-03-26",
+        "hitCount": 1
+      },
+      {
+        "entity": "tile-set",
+        "issue": "Grass tufts need clusters of vertical strokes, not individual scattered pixels — directional pattern = readability",
+        "fix": "Generate tuft seeds with height 3-7px, width 1-2px. Tip = highlight group, base = shadow group. Add shadow pixel below each tuft base.",
+        "style": "illustrated",
+        "added": "2026-03-26",
+        "hitCount": 1
+      }
+    ],
+    "effects": []
+  },
+  "_meta": {
+    "entryCount": 92,
+    "lastMaintenance": "2026-04-05T04:44:00.328Z"
+  }
+}

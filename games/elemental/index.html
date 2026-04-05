@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Elemental</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#1a1a2e;color:#e0d6c8;font-family:'Segoe UI',Arial,sans-serif;overflow:hidden;touch-action:manipulation;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+#app{display:flex;flex-direction:column;height:100vh;height:100dvh}
+
+/* Header */
+#header{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:#16213e;border-bottom:1px solid #2a3a5e;flex-shrink:0;z-index:10}
+#header h1{font-size:20px;font-weight:600;letter-spacing:1px;color:#e8d5b5}
+#counter{font-size:14px;color:#8899aa;font-weight:400}
+#counter span{color:#e8d5b5;font-weight:600}
+
+/* Workspace */
+#workspace{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;overflow:hidden;min-height:0}
+#slots{display:flex;align-items:center;gap:20px;margin-bottom:20px}
+.slot{width:80px;height:80px;border:2px dashed #2a3a5e;border-radius:16px;display:flex;align-items:center;justify-content:center;flex-direction:column;transition:all 0.3s}
+.slot.filled{border-color:#4a5a7e;background:rgba(30,40,70,0.6)}
+.slot .tile-icon{font-size:32px}
+.slot .tile-label{font-size:10px;margin-top:2px;color:#8899aa}
+#combine-symbol{font-size:28px;color:#4a5a7e;font-weight:700}
+#result-area{height:100px;display:flex;align-items:center;justify-content:center}
+#result-msg{font-size:14px;color:#667788;font-style:italic;min-height:20px;text-align:center}
+
+/* Discovery animation */
+.discovery-burst{position:absolute;pointer-events:none;display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:20}
+.discovery-burst .tile-big{width:80px;height:80px;border-radius:16px;display:flex;align-items:center;justify-content:center;flex-direction:column;animation:popIn 0.6s cubic-bezier(0.34,1.56,0.64,1) forwards;transform:scale(0)}
+.discovery-burst .burst-name{font-size:16px;font-weight:600;margin-top:8px;animation:fadeUp 0.8s 0.3s forwards;opacity:0;color:#e8d5b5}
+@keyframes popIn{0%{transform:scale(0) rotate(-20deg)}100%{transform:scale(1) rotate(0)}}
+@keyframes fadeUp{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
+.burst-ring{position:absolute;width:80px;height:80px;border-radius:50%;border:3px solid;animation:ringExpand 0.8s forwards;opacity:0.7}
+@keyframes ringExpand{0%{transform:scale(0.5);opacity:0.8}100%{transform:scale(3);opacity:0}}
+
+/* Palette */
+#palette-wrap{background:#16213e;border-top:1px solid #2a3a5e;flex-shrink:0;z-index:10}
+#palette-tabs{display:flex;gap:0;overflow-x:auto;border-bottom:1px solid #2a3a5e;scrollbar-width:none;-ms-overflow-style:none}
+#palette-tabs::-webkit-scrollbar{display:none}
+.tab{padding:6px 14px;font-size:11px;color:#667788;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;transition:all 0.2s}
+.tab.active{color:#e8d5b5;border-bottom-color:#e8d5b5}
+.tab:hover{color:#aabbcc}
+#palette{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px;max-height:180px;overflow-y:auto;justify-content:flex-start;scrollbar-width:thin;scrollbar-color:#2a3a5e #16213e}
+#palette::-webkit-scrollbar{width:6px}
+#palette::-webkit-scrollbar-thumb{background:#2a3a5e;border-radius:3px}
+
+/* Tiles */
+.tile{width:56px;height:56px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-direction:column;cursor:pointer;transition:all 0.15s;border:2px solid transparent;position:relative}
+.tile:hover{transform:scale(1.08);border-color:rgba(255,255,255,0.2)}
+.tile.selected{border-color:#fff;transform:scale(1.1);box-shadow:0 0 12px rgba(255,255,255,0.3)}
+.tile .tile-icon{font-size:22px;line-height:1}
+.tile .tile-label{font-size:8px;margin-top:1px;color:rgba(255,255,255,0.7);text-align:center;line-height:1.1;max-width:52px;overflow:hidden}
+.tile.hint-glow{animation:hintPulse 2s infinite}
+@keyframes hintPulse{0%,100%{box-shadow:0 0 4px rgba(255,220,100,0.2)}50%{box-shadow:0 0 16px rgba(255,220,100,0.6)}}
+.tile.fresh{animation:freshPop 0.4s cubic-bezier(0.34,1.56,0.64,1)}
+@keyframes freshPop{0%{transform:scale(0)}100%{transform:scale(1)}}
+
+/* Controls */
+#controls{display:flex;justify-content:center;gap:12px;padding:6px;background:#16213e;border-top:1px solid #2a3a5e;flex-shrink:0}
+#controls button{background:#1e2d4d;border:1px solid #2a3a5e;color:#8899aa;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit;transition:all 0.2s}
+#controls button:hover{background:#2a3d5d;color:#c0d0e0}
+#controls button.active{color:#ffcc44;border-color:#ffcc44}
+
+/* Search */
+#search-wrap{padding:4px 12px 0}
+#search{width:100%;background:#1e2d4d;border:1px solid #2a3a5e;color:#e0d6c8;padding:5px 10px;border-radius:6px;font-size:12px;font-family:inherit;outline:none}
+#search:focus{border-color:#4a6a9e}
+#search::placeholder{color:#4a5a6e}
+
+/* Shake */
+.shake{animation:shake 0.4s}
+@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}
+
+/* Mobile */
+@media(max-width:600px){
+  .tile{width:48px;height:48px;border-radius:10px}
+  .tile .tile-icon{font-size:18px}
+  .tile .tile-label{font-size:7px}
+  .slot{width:64px;height:64px}
+  .slot .tile-icon{font-size:26px}
+  #header h1{font-size:16px}
+}
+@media(max-width:400px){
+  .tile{width:42px;height:42px}
+  #palette{gap:4px;padding:6px 8px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <h1>Elemental</h1>
+    <div id="counter"><span id="discovered-count">4</span> / <span id="total-count">0</span></div>
+  </div>
+  <div id="workspace">
+    <div id="slots">
+      <div class="slot" id="slot1"></div>
+      <div id="combine-symbol">+</div>
+      <div class="slot" id="slot2"></div>
+    </div>
+    <div id="result-area">
+      <div id="result-msg">combine two elements to discover new ones</div>
+    </div>
+  </div>
+  <div id="palette-wrap">
+    <div id="search-wrap"><input type="text" id="search" placeholder="search elements..."></div>
+    <div id="palette-tabs"></div>
+    <div id="palette"></div>
+  </div>
+  <div id="controls">
+    <button id="btn-clear" title="Clear selection">Clear</button>
+    <button id="btn-hints" title="Toggle hints">Hints</button>
+    <button id="btn-mute" title="Toggle sound">Sound</button>
+    <button id="btn-reset" title="Reset progress">Reset</button>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+// ========================================
+// ELEMENT DATABASE
+// ========================================
+var ELEMENTS = {
+  // Tier 0 — Base
+  water:    {name:'Water',    icon:'\u{1F4A7}', color:'#3388cc', tier:0, category:'Base'},
+  fire:     {name:'Fire',     icon:'\u{1F525}', color:'#dd4422', tier:0, category:'Base'},
+  earth:    {name:'Earth',    icon:'\u{1F30D}', color:'#886633', tier:0, category:'Base'},
+  air:      {name:'Air',      icon:'\u{1F4A8}', color:'#99aacc', tier:0, category:'Base'},
+
+  // Tier 1
+  steam:    {name:'Steam',    icon:'\u{2668}',  color:'#aabbdd', tier:1, category:'Natural'},
+  mud:      {name:'Mud',      icon:'\u{1F4A9}', color:'#775533', tier:1, category:'Natural'},
+  rain:     {name:'Rain',     icon:'\u{1F327}', color:'#5599cc', tier:1, category:'Weather'},
+  lava:     {name:'Lava',     icon:'\u{1F30B}', color:'#cc4400', tier:1, category:'Natural'},
+  smoke:    {name:'Smoke',    icon:'\u{1F32B}', color:'#778899', tier:1, category:'Natural'},
+  dust:     {name:'Dust',     icon:'\u{1F4AB}', color:'#bbaa88', tier:1, category:'Natural'},
+  lake:     {name:'Lake',     icon:'\u{1F4A6}', color:'#4499bb', tier:1, category:'Natural'},
+  energy:   {name:'Energy',   icon:'\u{26A1}',  color:'#ffcc00', tier:1, category:'Force'},
+
+  // Tier 2
+  stone:    {name:'Stone',    icon:'\u{1FAA8}', color:'#888888', tier:2, category:'Material'},
+  ash:      {name:'Ash',      icon:'\u{1F5D1}', color:'#999988', tier:2, category:'Natural'},
+  cloud:    {name:'Cloud',    icon:'\u{2601}',  color:'#bbccdd', tier:2, category:'Weather'},
+  plant:    {name:'Plant',    icon:'\u{1F331}', color:'#44aa44', tier:2, category:'Life'},
+  brick:    {name:'Brick',    icon:'\u{1F9F1}', color:'#bb5533', tier:2, category:'Material'},
+  metal:    {name:'Metal',    icon:'\u{2699}',  color:'#8899aa', tier:2, category:'Material'},
+  mist:     {name:'Mist',     icon:'\u{1F301}', color:'#aabbcc', tier:2, category:'Weather'},
+  clay:     {name:'Clay',     icon:'\u{1FAD9}', color:'#bb8855', tier:2, category:'Material'},
+  lightning:{name:'Lightning', icon:'\u{1F329}', color:'#ffdd44', tier:2, category:'Force'},
+  storm:    {name:'Storm',    icon:'\u{26C8}',  color:'#4466aa', tier:2, category:'Weather'},
+  fog:      {name:'Fog',      icon:'\u{1F32B}', color:'#99aabb', tier:2, category:'Weather'},
+  mountain: {name:'Mountain', icon:'\u{26F0}',  color:'#776655', tier:2, category:'Natural'},
+
+  // Tier 3
+  coal:     {name:'Coal',     icon:'\u{25AA}',  color:'#333333', tier:3, category:'Material'},
+  algae:    {name:'Algae',    icon:'\u{1F33F}', color:'#339933', tier:3, category:'Life'},
+  tree:     {name:'Tree',     icon:'\u{1F333}', color:'#338833', tier:3, category:'Life'},
+  garden:   {name:'Garden',   icon:'\u{1F490}', color:'#55bb55', tier:3, category:'Life'},
+  blade:    {name:'Blade',    icon:'\u{1F5E1}', color:'#99aacc', tier:3, category:'Tool'},
+  pottery:  {name:'Pottery',  icon:'\u{1FAD9}', color:'#cc7744', tier:3, category:'Material'},
+  wall:     {name:'Wall',     icon:'\u{1F9F1}', color:'#aa7755', tier:3, category:'Structure'},
+  boulder:  {name:'Boulder',  icon:'\u{1FAA8}', color:'#777766', tier:3, category:'Natural'},
+  magnet:   {name:'Magnet',   icon:'\u{1F9F2}', color:'#cc3333', tier:3, category:'Tool'},
+  wave:     {name:'Wave',     icon:'\u{1F30A}', color:'#3377bb', tier:3, category:'Natural'},
+  swamp:    {name:'Swamp',    icon:'\u{1F340}', color:'#557744', tier:3, category:'Natural'},
+  forest:   {name:'Forest',   icon:'\u{1F332}', color:'#226622', tier:3, category:'Natural'},
+  diamond:  {name:'Diamond',  icon:'\u{1F48E}', color:'#88ccff', tier:3, category:'Material'},
+  vine:     {name:'Vine',     icon:'\u{1F33F}', color:'#44aa33', tier:3, category:'Life'},
+  sky:      {name:'Sky',      icon:'\u{2B50}',  color:'#5577cc', tier:3, category:'Weather'},
+  soap:     {name:'Soap',     icon:'\u{1F9FC}', color:'#ccddee', tier:3, category:'Material'},
+
+  // Tier 4
+  house:    {name:'House',    icon:'\u{1F3E0}', color:'#bb8844', tier:4, category:'Structure'},
+  wood:     {name:'Wood',     icon:'\u{1FAB5}', color:'#aa7733', tier:4, category:'Material'},
+  charcoal: {name:'Charcoal', icon:'\u{25FC}',  color:'#444444', tier:4, category:'Material'},
+  wildfire: {name:'Wildfire', icon:'\u{1F525}', color:'#ff6600', tier:4, category:'Force'},
+  flower:   {name:'Flower',   icon:'\u{1F33A}', color:'#ee5588', tier:4, category:'Life'},
+  ocean:    {name:'Ocean',    icon:'\u{1F30A}', color:'#2255aa', tier:4, category:'Natural'},
+  moss:     {name:'Moss',     icon:'\u{1F33F}', color:'#448833', tier:4, category:'Life'},
+  alloy:    {name:'Alloy',    icon:'\u{2699}',  color:'#778899', tier:4, category:'Material'},
+  vase:     {name:'Vase',     icon:'\u{1F3FA}', color:'#cc8855', tier:4, category:'Material'},
+  ring:     {name:'Ring',     icon:'\u{1F48D}', color:'#ddaa44', tier:4, category:'Material'},
+  sun:      {name:'Sun',      icon:'\u{2600}',  color:'#ffaa00', tier:4, category:'Cosmic'},
+  snow:     {name:'Snow',     icon:'\u{2744}',  color:'#ccddff', tier:4, category:'Weather'},
+  glacier:  {name:'Glacier',  icon:'\u{1F9CA}', color:'#88bbdd', tier:4, category:'Natural'},
+  mushroom: {name:'Mushroom', icon:'\u{1F344}', color:'#bb7755', tier:4, category:'Life'},
+  river:    {name:'River',    icon:'\u{1F3DE}', color:'#4488bb', tier:4, category:'Natural'},
+  mystery:  {name:'Mystery',  icon:'\u{2753}',  color:'#9966cc', tier:4, category:'Special'},
+
+  // Tier 5
+  rainbow:  {name:'Rainbow',  icon:'\u{1F308}', color:'#dd6688', tier:5, category:'Weather'},
+  fruit:    {name:'Fruit',    icon:'\u{1F34E}', color:'#dd4444', tier:5, category:'Life'},
+  desert:   {name:'Desert',   icon:'\u{1F3DC}', color:'#ddbb66', tier:5, category:'Natural'},
+  tundra:   {name:'Tundra',   icon:'\u{1F3D4}', color:'#aabbcc', tier:5, category:'Natural'},
+  island:   {name:'Island',   icon:'\u{1F3DD}', color:'#55aa55', tier:5, category:'Natural'},
+  sail:     {name:'Sail',     icon:'\u{26F5}',  color:'#eeeedd', tier:5, category:'Tool'},
+  boat:     {name:'Boat',     icon:'\u{1F6F6}', color:'#997744', tier:5, category:'Tool'},
+  village:  {name:'Village',  icon:'\u{1F3D8}', color:'#bb9955', tier:5, category:'Structure'},
+  waterfall:{name:'Waterfall',icon:'\u{1F4A7}', color:'#44aadd', tier:5, category:'Natural'},
+  bouquet:  {name:'Bouquet',  icon:'\u{1F490}', color:'#ee77aa', tier:5, category:'Life'},
+  renewal:  {name:'Renewal',  icon:'\u{1F33B}', color:'#66cc44', tier:5, category:'Life'},
+  steel:    {name:'Steel',    icon:'\u{1F6E1}', color:'#8899aa', tier:5, category:'Material'},
+  love:     {name:'Love',     icon:'\u{2764}',  color:'#ee4466', tier:5, category:'Special'},
+  mycelium: {name:'Mycelium', icon:'\u{1F578}', color:'#886644', tier:5, category:'Life'},
+  iceberg:  {name:'Iceberg',  icon:'\u{1F9CA}', color:'#99ccee', tier:5, category:'Natural'},
+  phoenix:  {name:'Phoenix',  icon:'\u{1F426}', color:'#ff6622', tier:5, category:'Mythic'},
+
+  // Tier 6
+  town:     {name:'Town',     icon:'\u{1F3D8}', color:'#aa8844', tier:6, category:'Structure'},
+  ship:     {name:'Ship',     icon:'\u{1F6A2}', color:'#667788', tier:6, category:'Tool'},
+  sword:    {name:'Sword',    icon:'\u{2694}',  color:'#aabbcc', tier:6, category:'Tool'},
+  oasis:    {name:'Oasis',    icon:'\u{1F334}', color:'#44bb66', tier:6, category:'Natural'},
+  palm:     {name:'Palm',     icon:'\u{1F334}', color:'#44aa33', tier:6, category:'Life'},
+  juice:    {name:'Juice',    icon:'\u{1F9C3}', color:'#ffaa33', tier:6, category:'Life'},
+  home:     {name:'Home',     icon:'\u{1F3E1}', color:'#cc9944', tier:6, category:'Structure'},
+  crystal:  {name:'Crystal',  icon:'\u{1F48E}', color:'#bb88ee', tier:6, category:'Material'},
+  hydropower:{name:'Hydropower',icon:'\u{26A1}',color:'#44bbdd', tier:6, category:'Force'},
+  rebirth:  {name:'Rebirth',  icon:'\u{1F331}', color:'#66dd44', tier:6, category:'Mythic'},
+  lichen:   {name:'Lichen',   icon:'\u{1F343}', color:'#88aa66', tier:6, category:'Life'},
+  decoration:{name:'Decoration',icon:'\u{1F3A8}',color:'#dd88aa',tier:6, category:'Structure'},
+  arctic:   {name:'Arctic',   icon:'\u{2744}',  color:'#88aadd', tier:6, category:'Natural'},
+  truffle:  {name:'Truffle',  icon:'\u{1F344}', color:'#775533', tier:6, category:'Life'},
+  fertile:  {name:'Fertile',  icon:'\u{1F33E}', color:'#66aa33', tier:6, category:'Natural'},
+  shipwreck:{name:'Shipwreck',icon:'\u{26F5}',  color:'#556677', tier:6, category:'Special'},
+
+  // Tier 7
+  city:     {name:'City',     icon:'\u{1F3D9}', color:'#8899aa', tier:7, category:'Structure'},
+  flaming_sword:{name:'Flaming Sword',icon:'\u{2694}',color:'#ff6622',tier:7, category:'Mythic'},
+  estate:   {name:'Estate',   icon:'\u{1F3E1}', color:'#ddaa55', tier:7, category:'Structure'},
+  prism:    {name:'Prism',    icon:'\u{1F4A0}', color:'#bb77ee', tier:7, category:'Material'},
+  paradise: {name:'Paradise', icon:'\u{1F3DD}', color:'#44cc88', tier:7, category:'Special'},
+  electric_city:{name:'Electric City',icon:'\u{1F3D9}',color:'#44ddff',tier:7, category:'Structure'},
+  aurora:   {name:'Aurora',   icon:'\u{1F30C}', color:'#55ccaa', tier:7, category:'Cosmic'},
+  treasure: {name:'Treasure', icon:'\u{1F4B0}', color:'#ffcc00', tier:7, category:'Special'},
+  harvest:  {name:'Harvest',  icon:'\u{1F33E}', color:'#ddaa33', tier:7, category:'Life'},
+  delicacy: {name:'Delicacy', icon:'\u{1F372}', color:'#cc7744', tier:7, category:'Life'},
+  fossil:   {name:'Fossil',   icon:'\u{1F9B4}', color:'#887766', tier:7, category:'Material'},
+  cozy:     {name:'Cozy',     icon:'\u{1F3E0}', color:'#ddaa66', tier:7, category:'Special'},
+  wine:     {name:'Wine',     icon:'\u{1F377}', color:'#882244', tier:7, category:'Life'},
+  spectrum: {name:'Spectrum', icon:'\u{1F308}', color:'#cc66dd', tier:7, category:'Cosmic'},
+  voyage:   {name:'Voyage',   icon:'\u{1F6A2}', color:'#4477aa', tier:7, category:'Special'},
+  sprout:   {name:'Sprout',   icon:'\u{1F33E}', color:'#55cc33', tier:7, category:'Life'},
+
+  // Tier 8
+  park:     {name:'Park',     icon:'\u{1F3DE}', color:'#55aa55', tier:8, category:'Structure'},
+  manor:    {name:'Manor',    icon:'\u{1F3F0}', color:'#cc9944', tier:8, category:'Structure'},
+  utopia:   {name:'Utopia',   icon:'\u{2728}',  color:'#ffdd88', tier:8, category:'Mythic'},
+  pirate:   {name:'Pirate',   icon:'\u{1F3F4}', color:'#555555', tier:8, category:'Special'},
+  northern_lights:{name:'Northern Lights',icon:'\u{1F30C}',color:'#44ddaa',tier:8, category:'Cosmic'},
+  festival: {name:'Festival', icon:'\u{1F389}', color:'#ff7744', tier:8, category:'Special'},
+  legend:   {name:'Legend',   icon:'\u{1F4DC}', color:'#ddaa33', tier:8, category:'Mythic'},
+  cellar:   {name:'Cellar',   icon:'\u{1F37E}', color:'#664433', tier:8, category:'Structure'},
+  oil:      {name:'Oil',      icon:'\u{1F6E2}', color:'#333322', tier:8, category:'Material'},
+  hearth:   {name:'Hearth',   icon:'\u{1F525}', color:'#dd8833', tier:8, category:'Structure'},
+  metropolis:{name:'Metropolis',icon:'\u{1F3D9}',color:'#6688bb',tier:8, category:'Structure'},
+  explorer: {name:'Explorer', icon:'\u{1F9ED}', color:'#bb8844', tier:8, category:'Special'},
+  feast:    {name:'Feast',    icon:'\u{1F37D}', color:'#dd9944', tier:8, category:'Life'},
+  sapling:  {name:'Sapling',  icon:'\u{1F333}', color:'#44bb44', tier:8, category:'Life'},
+  gem:      {name:'Gem',      icon:'\u{1F48E}', color:'#dd55ee', tier:8, category:'Material'},
+  serenity: {name:'Serenity', icon:'\u{1F54A}', color:'#88ccbb', tier:8, category:'Cosmic'},
+  dragon:   {name:'Dragon',   icon:'\u{1F409}', color:'#44aa44', tier:8, category:'Mythic'},
+  fountain: {name:'Fountain', icon:'\u{26F2}',  color:'#55aadd', tier:8, category:'Structure'},
+};
+
+// ========================================
+// RECIPES — key is sorted "a+b", value is result id
+// ========================================
+var RECIPES = {};
+function R(a,b,result){
+  var key = [a,b].sort().join('+');
+  RECIPES[key] = result;
+}
+
+// Tier 1
+R('water','fire','steam');
+R('water','earth','mud');
+R('water','air','rain');
+R('fire','earth','lava');
+R('fire','air','smoke');
+R('earth','air','dust');
+R('water','water','lake');
+R('fire','fire','energy');
+
+// Tier 2
+R('lava','water','stone');
+R('lava','air','ash');
+R('steam','air','cloud');
+R('rain','earth','plant');
+R('mud','fire','brick');
+R('stone','fire','metal');
+R('lake','air','mist');
+R('dust','water','clay');
+R('energy','air','lightning');
+R('cloud','water','storm');
+R('smoke','water','fog');
+R('earth','earth','mountain');
+
+// Tier 3
+R('plant','fire','coal');
+R('plant','water','algae');
+R('plant','earth','tree');
+R('plant','plant','garden');
+R('metal','fire','blade');
+R('clay','fire','pottery');
+R('brick','brick','wall');
+R('stone','stone','boulder');
+R('lightning','metal','magnet');
+R('storm','lake','wave');
+R('algae','lake','swamp');
+R('tree','tree','forest');
+R('coal','fire','diamond');
+R('mountain','plant','vine');
+R('cloud','cloud','sky');
+R('ash','water','soap');
+
+// Tier 4
+R('wall','wall','house');
+R('tree','blade','wood');
+R('tree','fire','charcoal');
+R('forest','fire','wildfire');
+R('garden','water','flower');
+R('wave','wave','ocean');
+R('swamp','plant','moss');
+R('metal','metal','alloy');
+R('pottery','water','vase');
+R('diamond','metal','ring');
+R('sky','fire','sun');
+R('sky','water','snow');
+R('mountain','cloud','glacier');
+R('mud','plant','mushroom');
+R('boulder','water','river');
+R('fog','forest','mystery');
+
+// Tier 5
+R('sun','water','rainbow');
+R('sun','plant','fruit');
+R('sun','earth','desert');
+R('snow','earth','tundra');
+R('ocean','earth','island');
+R('ocean','air','sail');
+R('wood','water','boat');
+R('house','house','village');
+R('river','stone','waterfall');
+R('flower','flower','bouquet');
+R('wildfire','rain','renewal');
+R('alloy','fire','steel');
+R('ring','flower','love');
+R('mushroom','earth','mycelium');
+R('glacier','sun','iceberg');
+R('mystery','fire','phoenix');
+
+// Tier 6
+R('village','village','town');
+R('boat','sail','ship');
+R('steel','blade','sword');
+R('desert','water','oasis');
+R('island','plant','palm');
+R('fruit','water','juice');
+R('love','house','home');
+R('rainbow','stone','crystal');
+R('waterfall','energy','hydropower');
+R('phoenix','ash','rebirth');
+R('tundra','plant','lichen');
+R('bouquet','vase','decoration');
+R('iceberg','ocean','arctic');
+R('mycelium','rain','truffle');
+R('renewal','earth','fertile');
+R('ship','storm','shipwreck');
+
+// Tier 7
+R('town','town','city');
+R('sword','fire','flaming_sword');
+R('home','garden','estate');
+R('crystal','sun','prism');
+R('oasis','palm','paradise');
+R('hydropower','town','electric_city');
+R('arctic','fire','aurora');
+R('shipwreck','ocean','treasure');
+R('fertile','plant','harvest');
+R('truffle','fire','delicacy');
+R('lichen','stone','fossil');
+R('decoration','home','cozy');
+R('juice','fire','wine');
+R('prism','rain','spectrum');
+R('ship','ocean','voyage');
+R('rebirth','plant','sprout');
+
+// Tier 8
+R('city','garden','park');
+R('estate','flower','manor');
+R('paradise','love','utopia');
+R('treasure','ship','pirate');
+R('aurora','sky','northern_lights');
+R('harvest','village','festival');
+R('lava','air','dragon');  // alternate recipe for dragon
+R('flaming_sword','dragon','legend');
+R('wine','pottery','cellar');
+R('fossil','rain','oil');
+R('cozy','fire','hearth');
+R('electric_city','steel','metropolis');
+R('voyage','island','explorer');
+R('delicacy','home','feast');
+R('sprout','sun','sapling');
+R('spectrum','crystal','gem');
+R('water','stone','fountain');
+R('park','fountain','serenity');
+
+// Dragon also discoverable earlier for legend chain
+R('fire','lava','dragon');
+
+var TOTAL = Object.keys(ELEMENTS).length;
+
+// ========================================
+// STATE
+// ========================================
+var discovered = {};
+var selected1 = null;
+var selected2 = null;
+var hintsOn = false;
+var hintTimer = null;
+var lastDiscoveryTime = Date.now();
+var soundOn = true;
+var activeTab = 'All';
+
+// Audio context
+var audioCtx = null;
+function getAudio(){
+  if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playChime(tier){
+  if(!soundOn) return;
+  try{
+    var ctx = getAudio();
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    var freq = 440 + tier * 60;
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.6);
+    // Second harmonic
+    var osc2 = ctx.createOscillator();
+    var gain2 = ctx.createGain();
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.frequency.setValueAtTime(freq * 1.5, ctx.currentTime + 0.1);
+    osc2.type = 'sine';
+    gain2.gain.setValueAtTime(0.08, ctx.currentTime + 0.1);
+    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+    osc2.start(ctx.currentTime + 0.1);
+    osc2.stop(ctx.currentTime + 0.8);
+  }catch(e){}
+}
+
+function playThud(){
+  if(!soundOn) return;
+  try{
+    var ctx = getAudio();
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.setValueAtTime(80, ctx.currentTime);
+    osc.type = 'triangle';
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.2);
+  }catch(e){}
+}
+
+// ========================================
+// SAVE / LOAD
+// ========================================
+function save(){
+  try{
+    localStorage.setItem('elemental-save', JSON.stringify({
+      discovered: Object.keys(discovered),
+      soundOn: soundOn,
+      hintsOn: hintsOn
+    }));
+  }catch(e){}
+}
+
+function load(){
+  try{
+    var raw = localStorage.getItem('elemental-save');
+    if(!raw) return false;
+    var d = JSON.parse(raw);
+    if(d.discovered){
+      d.discovered.forEach(function(id){ discovered[id] = true; });
+    }
+    if(typeof d.soundOn === 'boolean') soundOn = d.soundOn;
+    if(typeof d.hintsOn === 'boolean') hintsOn = d.hintsOn;
+    return d.discovered && d.discovered.length > 4;
+  }catch(e){ return false; }
+}
+
+// ========================================
+// HINT SYSTEM
+// ========================================
+function getHintElements(){
+  // Return element IDs that still have undiscovered combinations
+  var hintable = {};
+  for(var key in RECIPES){
+    var result = RECIPES[key];
+    if(discovered[result]) continue;
+    var parts = key.split('+');
+    if(discovered[parts[0]] && discovered[parts[1]]){
+      hintable[parts[0]] = true;
+      hintable[parts[1]] = true;
+    }
+  }
+  return hintable;
+}
+
+function updateHints(){
+  if(!hintsOn) return;
+  var now = Date.now();
+  if(now - lastDiscoveryTime < 30000) return; // 30s cooldown
+  var hintable = getHintElements();
+  document.querySelectorAll('#palette .tile').forEach(function(el){
+    var id = el.getAttribute('data-id');
+    if(hintable[id]) el.classList.add('hint-glow');
+    else el.classList.remove('hint-glow');
+  });
+}
+
+function clearHints(){
+  document.querySelectorAll('.hint-glow').forEach(function(el){
+    el.classList.remove('hint-glow');
+  });
+}
+
+// ========================================
+// UI RENDERING
+// ========================================
+function getCategories(){
+  var cats = {};
+  for(var id in discovered){
+    var el = ELEMENTS[id];
+    if(el) cats[el.category] = true;
+  }
+  return ['All'].concat(Object.keys(cats).sort());
+}
+
+function renderTabs(){
+  var tabs = document.getElementById('palette-tabs');
+  var cats = getCategories();
+  tabs.innerHTML = '';
+  cats.forEach(function(cat){
+    var t = document.createElement('div');
+    t.className = 'tab' + (cat === activeTab ? ' active' : '');
+    t.textContent = cat;
+    t.onclick = function(){ activeTab = cat; renderTabs(); renderPalette(); };
+    tabs.appendChild(t);
+  });
+}
+
+function renderPalette(){
+  var palette = document.getElementById('palette');
+  palette.innerHTML = '';
+  var search = document.getElementById('search').value.toLowerCase();
+
+  // Sort discovered elements by tier then name
+  var ids = Object.keys(discovered).filter(function(id){ return ELEMENTS[id]; });
+  ids.sort(function(a,b){
+    var ta = ELEMENTS[a].tier, tb = ELEMENTS[b].tier;
+    if(ta !== tb) return ta - tb;
+    return ELEMENTS[a].name.localeCompare(ELEMENTS[b].name);
+  });
+
+  ids.forEach(function(id){
+    var el = ELEMENTS[id];
+    if(activeTab !== 'All' && el.category !== activeTab) return;
+    if(search && el.name.toLowerCase().indexOf(search) === -1) return;
+
+    var tile = document.createElement('div');
+    tile.className = 'tile';
+    if(selected1 === id || selected2 === id) tile.classList.add('selected');
+    tile.setAttribute('data-id', id);
+    tile.style.background = el.color + '33';
+    tile.style.borderColor = (selected1 === id || selected2 === id) ? '#fff' : el.color + '66';
+    tile.innerHTML = '<span class="tile-icon">' + el.icon + '</span><span class="tile-label">' + el.name + '</span>';
+    tile.onclick = function(){ selectElement(id); };
+    palette.appendChild(tile);
+  });
+
+  updateHints();
+}
+
+function renderSlots(){
+  var s1 = document.getElementById('slot1');
+  var s2 = document.getElementById('slot2');
+
+  if(selected1){
+    var e1 = ELEMENTS[selected1];
+    s1.className = 'slot filled';
+    s1.style.background = e1.color + '33';
+    s1.style.borderColor = e1.color;
+    s1.innerHTML = '<span class="tile-icon">' + e1.icon + '</span><span class="tile-label">' + e1.name + '</span>';
+    s1.onclick = function(){ selected1 = null; renderSlots(); renderPalette(); };
+  } else {
+    s1.className = 'slot';
+    s1.style.background = '';
+    s1.style.borderColor = '';
+    s1.innerHTML = '';
+    s1.onclick = null;
+  }
+
+  if(selected2){
+    var e2 = ELEMENTS[selected2];
+    s2.className = 'slot filled';
+    s2.style.background = e2.color + '33';
+    s2.style.borderColor = e2.color;
+    s2.innerHTML = '<span class="tile-icon">' + e2.icon + '</span><span class="tile-label">' + e2.name + '</span>';
+    s2.onclick = function(){ selected2 = null; renderSlots(); renderPalette(); };
+  } else {
+    s2.className = 'slot';
+    s2.style.background = '';
+    s2.style.borderColor = '';
+    s2.innerHTML = '';
+    s2.onclick = null;
+  }
+}
+
+function updateCounter(){
+  document.getElementById('discovered-count').textContent = Object.keys(discovered).length;
+  document.getElementById('total-count').textContent = TOTAL;
+}
+
+// ========================================
+// COMBINATION LOGIC
+// ========================================
+function selectElement(id){
+  if(!selected1){
+    selected1 = id;
+    renderSlots();
+    renderPalette();
+    setResult('');
+    return;
+  }
+  if(!selected2 && id !== selected1){
+    selected2 = id;
+    renderSlots();
+    renderPalette();
+    // Attempt combine after brief delay
+    setTimeout(tryCombine, 300);
+    return;
+  }
+  // Allow same element for self-combos
+  if(!selected2 && id === selected1){
+    selected2 = id;
+    renderSlots();
+    renderPalette();
+    setTimeout(tryCombine, 300);
+    return;
+  }
+  // If both slots full, replace first
+  selected1 = id;
+  selected2 = null;
+  renderSlots();
+  renderPalette();
+  setResult('');
+}
+
+function tryCombine(){
+  if(!selected1 || !selected2) return;
+
+  var key = [selected1, selected2].sort().join('+');
+  var result = RECIPES[key];
+
+  if(!result){
+    // No recipe
+    playThud();
+    setResult('nothing happens...');
+    shakeSlots();
+    setTimeout(function(){
+      selected1 = null;
+      selected2 = null;
+      renderSlots();
+      renderPalette();
+    }, 600);
+    return;
+  }
+
+  if(discovered[result]){
+    // Already discovered
+    var el = ELEMENTS[result];
+    setResult(el.name + ' — already discovered');
+    setTimeout(function(){
+      selected1 = null;
+      selected2 = null;
+      renderSlots();
+      renderPalette();
+    }, 800);
+    return;
+  }
+
+  // New discovery!
+  discovered[result] = true;
+  lastDiscoveryTime = Date.now();
+  clearHints();
+
+  var el = ELEMENTS[result];
+  playChime(el.tier);
+  showDiscovery(el);
+  setResult('');
+
+  setTimeout(function(){
+    selected1 = null;
+    selected2 = null;
+    renderSlots();
+    renderTabs();
+    renderPalette();
+    updateCounter();
+    save();
+  }, 1200);
+}
+
+function showDiscovery(el){
+  var area = document.getElementById('result-area');
+  var burst = document.createElement('div');
+  burst.className = 'discovery-burst';
+
+  var ring = document.createElement('div');
+  ring.className = 'burst-ring';
+  ring.style.borderColor = el.color;
+  burst.appendChild(ring);
+
+  var tile = document.createElement('div');
+  tile.className = 'tile-big';
+  tile.style.background = el.color + '44';
+  tile.style.border = '2px solid ' + el.color;
+  tile.innerHTML = '<span style="font-size:36px">' + el.icon + '</span>';
+  burst.appendChild(tile);
+
+  var name = document.createElement('div');
+  name.className = 'burst-name';
+  name.textContent = el.name;
+  burst.appendChild(name);
+
+  area.innerHTML = '';
+  area.appendChild(burst);
+
+  setTimeout(function(){
+    area.innerHTML = '<div id="result-msg"></div>';
+  }, 1800);
+}
+
+function shakeSlots(){
+  var slots = document.getElementById('slots');
+  slots.classList.add('shake');
+  setTimeout(function(){ slots.classList.remove('shake'); }, 400);
+}
+
+function setResult(text){
+  var el = document.getElementById('result-msg');
+  if(el) el.textContent = text;
+}
+
+// ========================================
+// CONTROLS
+// ========================================
+function initControls(){
+  document.getElementById('btn-clear').onclick = function(){
+    selected1 = null;
+    selected2 = null;
+    renderSlots();
+    renderPalette();
+    setResult('');
+  };
+
+  document.getElementById('btn-hints').onclick = function(){
+    hintsOn = !hintsOn;
+    this.classList.toggle('active', hintsOn);
+    if(hintsOn){
+      lastDiscoveryTime = 0; // Show hints immediately
+      updateHints();
+    } else {
+      clearHints();
+    }
+    save();
+  };
+
+  document.getElementById('btn-mute').onclick = function(){
+    soundOn = !soundOn;
+    this.classList.toggle('active', soundOn);
+    this.textContent = soundOn ? 'Sound' : 'Muted';
+    save();
+  };
+
+  document.getElementById('btn-reset').onclick = function(){
+    if(confirm('Reset all progress? This cannot be undone.')){
+      discovered = {};
+      ['water','fire','earth','air'].forEach(function(id){ discovered[id] = true; });
+      selected1 = null;
+      selected2 = null;
+      activeTab = 'All';
+      save();
+      renderTabs();
+      renderPalette();
+      renderSlots();
+      updateCounter();
+      setResult('combine two elements to discover new ones');
+    }
+  };
+
+  // Search
+  document.getElementById('search').addEventListener('input', function(){
+    renderPalette();
+  });
+
+  // Initial button states
+  document.getElementById('btn-mute').classList.toggle('active', soundOn);
+  document.getElementById('btn-hints').classList.toggle('active', hintsOn);
+}
+
+// ========================================
+// INIT
+// ========================================
+function init(){
+  var loaded = load();
+
+  // Always ensure base elements
+  ['water','fire','earth','air'].forEach(function(id){ discovered[id] = true; });
+
+  if(hintsOn){
+    hintTimer = setInterval(updateHints, 5000);
+  }
+
+  // Watch for hint toggle to start/stop timer
+  var origHintsClick = document.getElementById('btn-hints').onclick;
+  document.getElementById('btn-hints').addEventListener('click', function(){
+    if(hintTimer) clearInterval(hintTimer);
+    if(hintsOn) hintTimer = setInterval(updateHints, 5000);
+  });
+
+  renderTabs();
+  renderPalette();
+  renderSlots();
+  updateCounter();
+  initControls();
+
+  if(!loaded){
+    setResult('combine two elements to discover new ones');
+  }
+}
+
+init();
+
+})();
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.5);color:rgba(150,170,200,0.4);font:11px 'Segoe UI',Arial,sans-serif;padding:3px 12px;border-radius:10px;z-index:9999;pointer-events:none;white-space:nowrap;">
+  <span id="vc-count">...</span> alchemists
+</div>
+<script>
+(function(){
+  var G='elemental',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  function fp(){var n=navigator,s=n.userAgent+n.language+(screen.width+'x'+screen.height)+new Date().getTimezoneOffset();var h=0;for(var i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0}return'fp_'+Math.abs(h).toString(36)}
+  var f=fp();
+  fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:hdr(),body:JSON.stringify({game:G,visitor_hash:f})}).catch(function(){});
+  fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=visitor_hash',{headers:hdr()}).then(function(r){return r.json()}).then(function(d){var u=new Set(d.map(function(x){return x.visitor_hash}));document.getElementById('vc-count').textContent=u.size}).catch(function(){document.getElementById('vc-count').textContent='...'});
+})();
+</script>
+</body>
+</html>

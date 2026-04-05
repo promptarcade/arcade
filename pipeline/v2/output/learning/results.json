@@ -1,0 +1,26 @@
+[
+  {
+    "run": 1,
+    "elapsed": 101.5,
+    "cost": 0.2438389,
+    "retries": 1,
+    "leaks": 0,
+    "memorySize": 0
+  },
+  {
+    "run": 2,
+    "elapsed": 46.2,
+    "cost": 0.11292555,
+    "retries": 0,
+    "leaks": 0,
+    "memorySize": 12
+  },
+  {
+    "run": 3,
+    "elapsed": 49.1,
+    "cost": 0.1140266,
+    "retries": 0,
+    "leaks": 0,
+    "memorySize": 24
+  }
+]

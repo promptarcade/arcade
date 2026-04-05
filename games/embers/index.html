@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Embers</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; background: #0a0a0a; color: #887766; font-family: 'Georgia', 'Times New Roman', serif; overflow-y: auto; overflow-x: hidden; }
+#game { max-width: 700px; margin: 0 auto; padding: 30px 20px 60px; min-height: 100vh; position: relative; }
+
+/* Narrative text */
+#story { margin-bottom: 20px; }
+.msg { padding: 4px 0; font-size: 15px; line-height: 1.6; opacity: 0; animation: fadeIn 1.5s forwards; }
+.msg.old { opacity: 0.4; }
+@keyframes fadeIn { to { opacity: 1; } }
+
+/* Fire display */
+#fire-display { text-align: center; margin: 20px 0; font-size: 24px; min-height: 40px; }
+#fire-display .flame { display: inline-block; animation: flicker 0.3s infinite alternate; }
+@keyframes flicker { from { opacity: 0.7; transform: scale(1); } to { opacity: 1; transform: scale(1.05); } }
+#fire-status { font-size: 13px; color: #665544; margin-top: 4px; }
+
+/* Buttons */
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.btn {
+  background: #1a1a18; border: 1px solid #333; color: #aa9977; padding: 8px 18px;
+  font-family: inherit; font-size: 13px; cursor: pointer; border-radius: 4px;
+  transition: all 0.2s; opacity: 0; animation: fadeIn 0.8s forwards;
+}
+.btn:hover:not(:disabled) { background: #2a2a24; border-color: #554; color: #ccbb99; }
+.btn:active:not(:disabled) { background: #333328; }
+.btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn .cost { font-size: 11px; color: #776655; display: block; margin-top: 2px; }
+
+/* Resources panel */
+#resources { position: fixed; right: 16px; top: 16px; background: rgba(15,15,12,0.9); border: 1px solid #222; border-radius: 6px; padding: 10px 14px; font-size: 12px; min-width: 120px; display: none; }
+#resources h3 { color: #776655; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+.res-row { display: flex; justify-content: space-between; padding: 2px 0; color: #998877; }
+.res-row .val { color: #bbaa88; font-weight: bold; }
+
+/* Village panel */
+#village { margin: 20px 0; padding: 12px; background: #111110; border: 1px solid #222; border-radius: 6px; display: none; }
+#village h3 { color: #776655; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+.worker-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 13px; color: #998877; }
+.worker-row button { background: none; border: 1px solid #333; color: #aa9977; padding: 2px 8px; cursor: pointer; font-family: inherit; font-size: 12px; border-radius: 3px; }
+.worker-row button:hover { background: #222; }
+
+/* Buildings panel */
+#buildings { margin: 20px 0; display: none; }
+#buildings h3 { color: #776655; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+
+/* Exploration */
+#explore { margin: 20px 0; display: none; }
+#explore h3 { color: #776655; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+#explore-text { font-size: 14px; line-height: 1.6; color: #887766; margin: 10px 0; }
+#explore-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Log */
+#log { margin-top: 30px; border-top: 1px solid #1a1a18; padding-top: 12px; display: none; }
+#log h3 { color: #554433; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+#log-entries { font-size: 12px; color: #554433; max-height: 150px; overflow-y: auto; }
+.log-entry { padding: 1px 0; opacity: 0.6; }
+
+@media (max-width: 600px) {
+  #resources { position: static; margin: 10px 0; }
+  #game { padding: 15px 12px 40px; }
+}
+</style>
+</head>
+<body>
+<div id="game">
+  <div id="fire-display"></div>
+  <div id="story"></div>
+  <div class="actions" id="main-actions"></div>
+  <div id="resources"><h3>Stores</h3><div id="res-list"></div></div>
+  <div id="village"><h3>Village</h3><div id="worker-list"></div></div>
+  <div id="infrastructure" style="display:none; margin: 12px 0; padding: 10px 14px; background: #111110; border: 1px solid #222; border-radius: 6px;"><h3 style="color: #776655; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">Infrastructure</h3><div id="infra-list"></div></div>
+  <div id="buildings"><h3>Build</h3><div class="actions" id="build-actions"></div></div>
+  <div id="explore"><h3>The Wasteland</h3><div id="explore-text"></div><div id="explore-choices" class="actions"></div></div>
+  <div id="log"><h3>Events</h3><div id="log-entries"></div></div>
+</div>
+
+<script>
+(function() {
+'use strict';
+
+// ============================================================
+// STATE
+// ============================================================
+const S = {
+  phase: 0, // 0=void, 1=fire, 2=shelter, 3=village, 4=craft, 5=explore
+  fire: 0, // 0=dead, 1=dying, 2=smouldering, 3=burning, 4=roaring
+  fireDecay: 0,
+  wood: 0, food: 0, fur: 0, leather: 0, iron: 0, cloth: 0, medicine: 0,
+  stokings: 0,
+  gathers: 0,
+  huts: 0,
+  wanderers: 0,
+  workers: { gatherer: 0, hunter: 0, tanner: 0, miner: 0 },
+  buildings: { trap: 0, tannery: 0, smokehouse: 0, workshop: 0, mine: 0, trading_post: 0 },
+  tools: { hand_axe: false, bone_spear: false, iron_sword: false, leather_armour: false },
+  explored: new Set(),
+  events: [],
+  time: 0,
+  nextWanderer: 0,
+  autoSaveTimer: 0,
+  started: false,
+};
+
+const FIRE_NAMES = ['dead', 'dying', 'smouldering', 'burning', 'roaring'];
+const FIRE_EMOJIS = ['', '&#x2728;', '&#x1F525;', '&#x1F525;&#x1F525;', '&#x1F525;&#x1F525;&#x1F525;'];
+const FIRE_DECAY_RATE = [0, 0.015, 0.012, 0.010, 0.008]; // per second
+
+// ============================================================
+// BUILDINGS DEFINITIONS
+// ============================================================
+const BLDG = {
+  trap:          { name: 'Trap',          cost: { wood: 10 }, desc: 'catches small animals' },
+  tannery:       { name: 'Tannery',       cost: { wood: 25, fur: 5 }, desc: 'turns fur into leather' },
+  smokehouse:    { name: 'Smokehouse',    cost: { wood: 30 }, desc: 'preserves food longer' },
+  workshop:      { name: 'Workshop',      cost: { wood: 40, leather: 5 }, desc: 'enables tool crafting' },
+  mine:          { name: 'Mine',          cost: { wood: 50, iron: 5 }, desc: 'produces iron ore' },
+  trading_post:  { name: 'Trading Post',  cost: { wood: 60, fur: 10, leather: 5 }, desc: 'strangers bring rare goods' },
+};
+
+const TOOLS = {
+  hand_axe:      { name: 'Hand Axe',      cost: { wood: 15, leather: 3 }, desc: 'gather wood faster' },
+  bone_spear:    { name: 'Bone Spear',    cost: { wood: 10, fur: 5 }, desc: 'hunt more effectively' },
+  iron_sword:    { name: 'Iron Sword',    cost: { iron: 15, leather: 5, wood: 5 }, desc: 'protection in the wasteland' },
+  leather_armour:{ name: 'Leather Armour', cost: { leather: 20, fur: 10 }, desc: 'survive longer exploring' },
+};
+
+// ============================================================
+// UI HELPERS
+// ============================================================
+function msg(text, cls) {
+  const story = document.getElementById('story');
+  // Fade old messages
+  const existing = story.querySelectorAll('.msg:not(.old)');
+  existing.forEach(m => m.classList.add('old'));
+  const div = document.createElement('div');
+  div.className = 'msg' + (cls ? ' ' + cls : '');
+  div.textContent = text;
+  story.appendChild(div);
+  // Keep only last 8 messages
+  while (story.children.length > 8) story.removeChild(story.firstChild);
+}
+
+function logEvent(text) {
+  S.events.push(text);
+  const el = document.getElementById('log-entries');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.textContent = text;
+  el.insertBefore(entry, el.firstChild);
+  while (el.children.length > 30) el.removeChild(el.lastChild);
+  document.getElementById('log').style.display = 'block';
+}
+
+function addBtn(parentId, label, cost, onClick) {
+  const parent = document.getElementById(parentId);
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  let html = label;
+  if (cost) {
+    const parts = Object.entries(cost).map(([k,v]) => v + ' ' + k).join(', ');
+    html += '<span class="cost">' + parts + '</span>';
+  }
+  btn.innerHTML = html;
+  if (cost) {
+    btn.setAttribute('data-cost', JSON.stringify(cost));
+    btn.disabled = !canAfford(cost);
+  }
+  btn.onclick = function() {
+    if (cost && !canAfford(cost)) return;
+    if (cost) spend(cost);
+    onClick();
+    updateUI();
+  };
+  parent.appendChild(btn);
+  return btn;
+}
+
+function clearActions(id) {
+  document.getElementById(id).innerHTML = '';
+}
+
+function canAfford(cost) {
+  for (const [k,v] of Object.entries(cost)) {
+    if ((S[k] || 0) < v) return false;
+  }
+  return true;
+}
+
+function spend(cost) {
+  for (const [k,v] of Object.entries(cost)) S[k] -= v;
+}
+
+// ============================================================
+// GAME PHASES
+// ============================================================
+function initVoid() {
+  msg('it is dark.');
+  setTimeout(() => msg('cold seeps in.'), 2000);
+  setTimeout(() => {
+    addBtn('main-actions', 'strike flint', null, () => {
+      S.phase = 1;
+      S.fire = 2;
+      S.started = true;
+      clearActions('main-actions');
+      msg('a spark catches. a small flame flickers to life.');
+      logEvent('the fire is lit.');
+      initFire();
+    });
+  }, 3500);
+}
+
+function initFire() {
+  document.getElementById('resources').style.display = 'block';
+  setTimeout(() => {
+    addBtn('main-actions', 'stoke the fire', null, stokeFire);
+    addBtn('main-actions', 'gather wood', null, gatherWood);
+  }, 1000);
+}
+
+function stokeFire() {
+  if (S.wood > 0) {
+    S.wood--;
+    S.fire = Math.min(4, S.fire + 1);
+    S.fireDecay = 0;
+    S.stokings++;
+    msg('the fire grows stronger.');
+  } else if (S.fire < 4) {
+    S.fire = Math.min(4, S.fire + 1);
+    S.fireDecay = 0;
+    S.stokings++;
+    msg('you coax the flames with bare hands. the fire stirs.');
+  } else {
+    msg('the fire roars. it needs nothing more.');
+  }
+
+  if (S.stokings === 3 && S.phase < 2) {
+    setTimeout(() => {
+      msg('the warmth spreads. you can see a little now.');
+      msg('there are trees nearby. dead wood on the ground.');
+    }, 1500);
+  }
+
+  if (S.stokings === 8 && S.phase < 2) {
+    setTimeout(() => {
+      msg('the night is vast. with enough wood, you could build a shelter.');
+      S.phase = 2;
+      showBuildActions();
+    }, 2000);
+  }
+}
+
+function gatherWood() {
+  const amount = S.tools.hand_axe ? 5 + Math.floor(Math.random() * 4) : 2 + Math.floor(Math.random() * 3);
+  S.wood += amount;
+  S.gathers++;
+  const msgs = ['you drag back an armful of sticks.', 'dry branches crack underfoot.', 'the wood pile grows.', 'you strip bark from a fallen trunk.'];
+  msg(msgs[Math.floor(Math.random() * msgs.length)]);
+
+  if (S.gathers === 3) {
+    setTimeout(() => msg('your hands are raw. the work goes on.'), 1000);
+  }
+}
+
+function showBuildActions() {
+  document.getElementById('buildings').style.display = 'block';
+  rebuildBuildActions();
+}
+
+function rebuildBuildActions() {
+  clearActions('build-actions');
+
+  if (S.huts < 20) {
+    addBtn('build-actions', 'hut', { wood: 15 + S.huts * 5 }, () => {
+      S.huts++;
+      msg('a rough hut takes shape in the firelight.');
+      logEvent('hut built. (' + S.huts + ' total)');
+      if (S.huts === 1 && S.wanderers === 0) {
+        setTimeout(() => {
+          msg('a ragged figure stumbles from the darkness.');
+          msg('they warm themselves by the fire. they say nothing.');
+          S.wanderers = 1;
+          S.nextWanderer = 60;
+          S.phase = Math.max(S.phase, 3);
+          document.getElementById('village').style.display = 'block';
+          logEvent('a wanderer arrived.');
+          updateUI();
+        }, 3000);
+      }
+      rebuildBuildActions();
+    });
+  }
+
+  // Buildings from BLDG
+  for (const [id, bldg] of Object.entries(BLDG)) {
+    // Trap can be built multiple times; others are one-off
+    if (id !== 'trap' && S.buildings[id]) continue;
+    if (id === 'trap' && S.buildings[id] >= 10) continue; // max 10 traps
+    // Only show if player has seen the relevant resources
+    if (id === 'tannery' && !S.fur) continue;
+    if (id === 'mine' && !S.iron) continue;
+    if (id === 'trading_post' && S.huts < 4) continue;
+    if (id === 'workshop' && !S.leather) continue;
+    addBtn('build-actions', bldg.name, bldg.cost, () => {
+      S.buildings[id] = (S.buildings[id] || 0) + 1;
+      const countStr = id === 'trap' && S.buildings[id] > 1 ? ' (' + S.buildings[id] + ' total)' : '';
+      msg('the ' + bldg.name.toLowerCase() + ' is built. ' + bldg.desc + '.' + countStr);
+      logEvent(bldg.name + ' constructed.' + countStr);
+      if (id === 'workshop') {
+        S.phase = Math.max(S.phase, 4);
+        showCraftActions();
+      }
+      rebuildBuildActions();
+    });
+  }
+}
+
+function updateInfrastructure() {
+  var panel = document.getElementById('infra-list');
+  if (!panel) return;
+  var items = [];
+  if (S.huts > 0) items.push('huts: ' + S.huts);
+  for (var id in BLDG) {
+    if (S.buildings[id] > 0) {
+      var name = BLDG[id].name.toLowerCase();
+      if (id === 'trap') name = (S.buildings[id] === 1 ? 'trap' : 'traps');
+      items.push(name + ': ' + S.buildings[id]);
+    }
+  }
+  if (items.length > 0) {
+    panel.innerHTML = items.map(function(i) {
+      return '<div class="res-row"><span>' + i.split(': ')[0] + '</span><span class="val">' + i.split(': ')[1] + '</span></div>';
+    }).join('');
+    document.getElementById('infrastructure').style.display = 'block';
+  }
+}
+
+function showCraftActions() {
+  // Add craft buttons to main actions
+  for (const [id, tool] of Object.entries(TOOLS)) {
+    if (S.tools[id]) continue;
+    addBtn('main-actions', 'craft ' + tool.name, tool.cost, () => {
+      S.tools[id] = true;
+      msg('you craft a ' + tool.name.toLowerCase() + '. ' + tool.desc + '.');
+      logEvent(tool.name + ' crafted.');
+      if (id === 'iron_sword') {
+        setTimeout(() => {
+          msg('the wind carries strange sounds from beyond the firelight.');
+          msg('with a weapon in hand, you could venture out.');
+          S.phase = Math.max(S.phase, 5);
+          document.getElementById('explore').style.display = 'block';
+          initExplore();
+        }, 2000);
+      }
+    });
+  }
+}
+
+// ============================================================
+// EXPLORATION — text adventure
+// ============================================================
+const LOCATIONS = [
+  { id: 'clearing', text: 'a small clearing. the grass is trampled. old bones litter the ground.', loot: { fur: 3 }, danger: 0.1 },
+  { id: 'cave', text: 'a shallow cave. charcoal marks on the walls — someone was here before.', loot: { iron: 5, cloth: 2 }, danger: 0.2 },
+  { id: 'stream', text: 'a cold stream cuts through stone. fish dart in the shallows.', loot: { food: 8 }, danger: 0 },
+  { id: 'ruins', text: 'crumbling stone walls. a structure, once. nature has reclaimed most of it.', loot: { iron: 8, cloth: 4 }, danger: 0.3 },
+  { id: 'forest', text: 'dense trees block the sky. something moves in the undergrowth.', loot: { wood: 15, fur: 5 }, danger: 0.25 },
+  { id: 'ridge', text: 'a rocky ridge. you can see for miles. smoke rises from far away — others survive.', loot: { iron: 3 }, danger: 0.1 },
+  { id: 'swamp', text: 'foul water. insects swarm. but there are herbs here — medicinal ones.', loot: { medicine: 3, food: 3 }, danger: 0.35 },
+  { id: 'battlefield', text: 'rusted weapons half-buried in mud. a place of violence, long past.', loot: { iron: 12 }, danger: 0.4 },
+  { id: 'village_ruins', text: 'a village. burned. but the cellar is intact — supplies remain.', loot: { food: 12, cloth: 6, medicine: 2 }, danger: 0.2 },
+  { id: 'tower', text: 'a watchtower. the stairs are broken but you climb anyway. at the top — a map scratched into the wall.', loot: { cloth: 3 }, danger: 0.15 },
+];
+
+function initExplore() {
+  showExploreChoices();
+}
+
+function showExploreChoices() {
+  clearActions('explore-choices');
+  const available = LOCATIONS.filter(l => !S.explored.has(l.id));
+  if (available.length === 0) {
+    document.getElementById('explore-text').textContent = 'you have explored everywhere. the wasteland holds no more secrets.';
+    return;
+  }
+  document.getElementById('explore-text').textContent = 'the wasteland stretches in every direction. where do you go?';
+  const choices = available.slice(0, 3);
+  for (const loc of choices) {
+    addBtn('explore-choices', loc.id.replace(/_/g, ' '), { food: 3 }, () => {
+      exploreLocation(loc);
+    });
+  }
+}
+
+function exploreLocation(loc) {
+  clearActions('explore-choices');
+  S.explored.add(loc.id);
+  document.getElementById('explore-text').textContent = loc.text;
+
+  // Danger roll
+  if (Math.random() < loc.danger) {
+    const hasArmour = S.tools.leather_armour;
+    const hasSword = S.tools.iron_sword;
+    if (hasSword && Math.random() < 0.7) {
+      setTimeout(() => {
+        msg('something attacks from the shadows. your sword finds its mark.');
+        logEvent('fought off an attack at ' + loc.id.replace(/_/g, ' ') + '.');
+      }, 1500);
+    } else if (hasArmour) {
+      S.food = Math.max(0, S.food - 5);
+      setTimeout(() => {
+        msg('an ambush. the leather takes the worst of it, but you lose supplies.');
+        logEvent('ambushed at ' + loc.id.replace(/_/g, ' ') + '. lost food.');
+      }, 1500);
+    } else {
+      S.food = Math.max(0, S.food - 10);
+      S.wood = Math.max(0, S.wood - 5);
+      setTimeout(() => {
+        msg('you barely escape with your life. supplies are lost in the scramble.');
+        logEvent('badly ambushed at ' + loc.id.replace(/_/g, ' ') + '.');
+      }, 1500);
+    }
+  }
+
+  // Loot
+  setTimeout(() => {
+    for (const [k,v] of Object.entries(loc.loot)) {
+      S[k] = (S[k] || 0) + v;
+    }
+    const lootStr = Object.entries(loc.loot).map(([k,v]) => v + ' ' + k).join(', ');
+    msg('you find: ' + lootStr + '.');
+    logEvent('explored ' + loc.id.replace(/_/g, ' ') + '. found ' + lootStr + '.');
+    setTimeout(() => showExploreChoices(), 1500);
+    updateUI();
+  }, 2000);
+}
+
+// ============================================================
+// WORKER MANAGEMENT
+// ============================================================
+function updateWorkerUI() {
+  const el = document.getElementById('worker-list');
+  el.innerHTML = '';
+  const idle = S.wanderers - Object.values(S.workers).reduce((a,b) => a+b, 0);
+
+  function workerRow(label, key) {
+    const row = document.createElement('div');
+    row.className = 'worker-row';
+    row.innerHTML = '<span>' + label + ': ' + S.workers[key] + '</span>';
+    const btnMinus = document.createElement('button');
+    btnMinus.textContent = '-';
+    btnMinus.onclick = () => { if (S.workers[key] > 0) { S.workers[key]--; updateUI(); } };
+    const btnPlus = document.createElement('button');
+    btnPlus.textContent = '+';
+    btnPlus.onclick = () => { if (idle > 0) { S.workers[key]++; updateUI(); } };
+    const btns = document.createElement('span');
+    btns.appendChild(btnMinus);
+    btns.appendChild(document.createTextNode(' '));
+    btns.appendChild(btnPlus);
+    row.appendChild(btns);
+    el.appendChild(row);
+  }
+
+  const idleRow = document.createElement('div');
+  idleRow.className = 'worker-row';
+  idleRow.innerHTML = '<span>idle: ' + idle + '</span><span>total: ' + S.wanderers + '</span>';
+  el.appendChild(idleRow);
+
+  workerRow('gatherer', 'gatherer');
+  workerRow('hunter', 'hunter');
+  if (S.buildings.tannery) workerRow('tanner', 'tanner');
+  if (S.buildings.mine) workerRow('miner', 'miner');
+}
+
+// ============================================================
+// GAME LOOP — runs every second
+// ============================================================
+function tick() {
+  if (!S.started) return;
+  S.time++;
+
+  // Fire decay
+  if (S.fire > 0) {
+    S.fireDecay += FIRE_DECAY_RATE[S.fire];
+    if (S.fireDecay >= 1) {
+      S.fireDecay = 0;
+      S.fire--;
+      if (S.fire === 0) {
+        msg('the fire has gone out.');
+        logEvent('the fire died.');
+      } else if (S.fire === 1) {
+        msg('the fire is dying.');
+      }
+    }
+  }
+
+  // Workers produce resources
+  if (S.workers.gatherer > 0) {
+    const amt = S.workers.gatherer * (S.tools.hand_axe ? 2 : 1);
+    S.wood += amt;
+  }
+  if (S.workers.hunter > 0) {
+    const rate = S.tools.bone_spear ? 0.6 : 0.3;
+    if (Math.random() < rate * S.workers.hunter) {
+      S.food += 2;
+      S.fur += 1;
+    }
+  }
+  if (S.workers.tanner > 0 && S.fur >= 2) {
+    S.fur -= 2;
+    S.leather += 1;
+  }
+  if (S.workers.miner > 0) {
+    if (Math.random() < 0.3 * S.workers.miner) {
+      S.iron += 1;
+    }
+  }
+
+  // Traps — each trap has independent 15% chance
+  if (S.buildings.trap) {
+    for (let ti = 0; ti < S.buildings.trap; ti++) {
+      if (Math.random() < 0.15) {
+        S.food += 1;
+        S.fur += 1;
+        if (Math.random() < 0.15) msg('a trap snaps shut. meat and fur.');
+      }
+    }
+  }
+
+  // Trading post
+  if (S.buildings.trading_post && S.time % 60 === 0 && Math.random() < 0.5) {
+    const goods = ['iron', 'medicine', 'cloth'];
+    const g = goods[Math.floor(Math.random() * goods.length)];
+    const amt = 2 + Math.floor(Math.random() * 4);
+    S[g] += amt;
+    msg('a trader passes through. they leave ' + amt + ' ' + g + '.');
+    logEvent('trader brought ' + amt + ' ' + g + '.');
+  }
+
+  // Wanderer arrival
+  if (S.huts > 0 && S.fire >= 2 && S.wanderers < S.huts) {
+    S.nextWanderer--;
+    if (S.nextWanderer <= 0) {
+      S.wanderers++;
+      S.nextWanderer = 30 + Math.floor(Math.random() * 60);
+      msg('a wanderer arrives, drawn by the firelight.');
+      logEvent('a wanderer arrived. (' + S.wanderers + ' total)');
+    }
+  }
+
+  // Food consumption (1 food per 2 wanderers per 30 seconds)
+  if (S.time % 30 === 0 && S.wanderers > 0) {
+    const consume = Math.ceil(S.wanderers / 2);
+    if (S.food >= consume) {
+      S.food -= consume;
+    } else {
+      S.food = 0;
+      if (S.wanderers > 1 && Math.random() < 0.3) {
+        S.wanderers--;
+        msg('a villager leaves in the night. there is not enough food.');
+        logEvent('a villager left. not enough food.');
+      }
+    }
+  }
+
+  // Random events
+  if (S.time % 45 === 0 && S.phase >= 2 && Math.random() < 0.3) {
+    const events = [
+      { text: 'the wind howls. the fire gutters.', effect: () => { S.fire = Math.max(1, S.fire - 1); } },
+      { text: 'a clear night. the stars are impossibly bright.', effect: () => {} },
+      { text: 'wolves howl in the distance.', effect: () => {} },
+      { text: 'rain. the wood pile is soaked. some is ruined.', effect: () => { S.wood = Math.max(0, S.wood - 3); } },
+      { text: 'a wanderer shares a story of the old world. no one remembers it the same way.', effect: () => {} },
+    ];
+    if (S.medicine > 0 && Math.random() < 0.2) {
+      events.push({ text: 'a villager falls ill. medicine saves them.', effect: () => { S.medicine--; } });
+    }
+    const ev = events[Math.floor(Math.random() * events.length)];
+    msg(ev.text);
+    logEvent(ev.text);
+    ev.effect();
+  }
+
+  updateUI();
+}
+
+// ============================================================
+// UI UPDATE
+// ============================================================
+function updateUI() {
+  // Fire display — fully self-contained, no getElementById after innerHTML
+  var fd = document.getElementById('fire-display');
+  if (!fd) return;
+  if (S.started) {
+    fd.innerHTML = (S.fire > 0 ? '<span class="flame">' + FIRE_EMOJIS[S.fire] + '</span>' : '') +
+      '<div style="font-size:13px;color:#665544;margin-top:4px;">the fire is ' + FIRE_NAMES[S.fire] + '.</div>';
+  }
+
+  // Resources
+  const resList = document.getElementById('res-list');
+  resList.innerHTML = '';
+  const resources = ['wood', 'food', 'fur', 'leather', 'iron', 'cloth', 'medicine'];
+  for (const r of resources) {
+    if (S[r] > 0 || (r === 'wood' && S.phase >= 1) || (r === 'food' && S.phase >= 1)) {
+      const row = document.createElement('div');
+      row.className = 'res-row';
+      row.innerHTML = '<span>' + r + '</span><span class="val">' + S[r] + '</span>';
+      resList.appendChild(row);
+    }
+  }
+
+  // Workers
+  if (S.wanderers > 0) updateWorkerUI();
+
+  // Update all button affordability in-place (no rebuild/flash)
+  document.querySelectorAll('.btn[data-cost]').forEach(function(btn) {
+    var cost = JSON.parse(btn.getAttribute('data-cost'));
+    btn.disabled = !canAfford(cost);
+  });
+
+  // Infrastructure counts
+  if (S.phase >= 2) updateInfrastructure();
+
+  // Save
+  save();
+}
+
+// ============================================================
+// SAVE / LOAD
+// ============================================================
+function save() {
+  const data = {
+    phase: S.phase, fire: S.fire, fireDecay: S.fireDecay,
+    wood: S.wood, food: S.food, fur: S.fur, leather: S.leather,
+    iron: S.iron, cloth: S.cloth, medicine: S.medicine,
+    stokings: S.stokings, gathers: S.gathers, huts: S.huts,
+    wanderers: S.wanderers, workers: S.workers, buildings: S.buildings,
+    tools: S.tools, explored: [...S.explored], time: S.time,
+    nextWanderer: S.nextWanderer, started: S.started,
+  };
+  try { localStorage.setItem('embers-save', JSON.stringify(data)); } catch(e) {}
+}
+
+function load() {
+  try {
+    const raw = localStorage.getItem('embers-save');
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    Object.assign(S, d);
+    S.explored = new Set(d.explored || []);
+    return S.started;
+  } catch(e) { return false; }
+}
+
+// ============================================================
+// INIT
+// ============================================================
+function init() {
+  if (load()) {
+    // Restore UI state based on phase
+    msg('the embers still glow. you return to the fire.');
+    document.getElementById('resources').style.display = 'block';
+    if (S.phase >= 1) {
+      addBtn('main-actions', 'stoke the fire', null, stokeFire);
+      addBtn('main-actions', 'gather wood', null, gatherWood);
+    }
+    if (S.phase >= 2) showBuildActions();
+    if (S.phase >= 3) document.getElementById('village').style.display = 'block';
+    if (S.phase >= 4) showCraftActions();
+    if (S.phase >= 5) {
+      document.getElementById('explore').style.display = 'block';
+      initExplore();
+    }
+    updateUI();
+  } else {
+    initVoid();
+  }
+}
+
+init();
+setInterval(tick, 1000);
+
+})();
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.5);color:rgba(150,130,100,0.4);font:11px Georgia,serif;padding:3px 12px;border-radius:10px;z-index:9999;pointer-events:none;white-space:nowrap;">
+  <span id="vc-count">...</span> survivors
+</div>
+<script>
+(function(){
+  var G='embers',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

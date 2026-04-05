@@ -1,0 +1,108 @@
+{
+  "request": "pong - two paddles and a bouncing ball",
+  "spec": {
+    "title": "Reflex Planes",
+    "shapes": [
+      {
+        "id": "shape-a",
+        "description": "tall narrow vertical rectangle with rounded ends",
+        "w": 12,
+        "h": 64,
+        "theme": "cool blue metallic"
+      },
+      {
+        "id": "shape-b",
+        "description": "tall narrow vertical rectangle with rounded ends",
+        "w": 12,
+        "h": 64,
+        "theme": "warm red metallic"
+      },
+      {
+        "id": "shape-c",
+        "description": "small filled circle with bright center glow",
+        "w": 14,
+        "h": 14,
+        "theme": "bright white glow"
+      },
+      {
+        "id": "shape-d",
+        "description": "flat dark matte rectangle",
+        "w": 8,
+        "h": 8,
+        "theme": "dark charcoal matte",
+        "tile": true
+      },
+      {
+        "id": "shape-e",
+        "description": "thin vertical dashed line composed of short flat rectangles evenly spaced",
+        "w": 8,
+        "h": 16,
+        "theme": "dim grey semi-transparent",
+        "tile": true
+      }
+    ],
+    "behaviors": [
+      {
+        "id": "beh-1",
+        "description": "shape-c travels at a constant diagonal velocity (vx, vy). On collision with the top or bottom viewport edge, vy is negated (reflected). On overlapping shape-a or shape-b, vx is negated and magnitude is increased by 5% to accelerate over time. If shape-c exits the left or right viewport edge, velocity resets to initial magnitude and shape-c repositions to the center of the viewport."
+      },
+      {
+        "id": "beh-2",
+        "description": "shape-a is constrained to vertical movement only. Its y-position is clamped so it never exceeds the top or bottom viewport edge."
+      },
+      {
+        "id": "beh-3",
+        "description": "shape-b is constrained to vertical movement only. Its y-position is clamped so it never exceeds the top or bottom viewport edge."
+      },
+      {
+        "id": "beh-4",
+        "description": "shape-e tiles only along the vertical center axis (x=50%) of the viewport to form a continuous segmented vertical dividing line."
+      }
+    ],
+    "inputs": [
+      {
+        "event": "KeyW",
+        "action": "move shape-a upward at fixed velocity"
+      },
+      {
+        "event": "KeyS",
+        "action": "move shape-a downward at fixed velocity"
+      },
+      {
+        "event": "ArrowUp",
+        "action": "move shape-b upward at fixed velocity"
+      },
+      {
+        "event": "ArrowDown",
+        "action": "move shape-b downward at fixed velocity"
+      },
+      {
+        "event": "touchmove-left",
+        "action": "move shape-a to match the y-position of a touch contact on the left half of the viewport"
+      },
+      {
+        "event": "touchmove-right",
+        "action": "move shape-b to match the y-position of a touch contact on the right half of the viewport"
+      }
+    ],
+    "layout": {
+      "shape-a": {
+        "x": "2%",
+        "y": "50%"
+      },
+      "shape-b": {
+        "x": "98%",
+        "y": "50%"
+      },
+      "shape-c": {
+        "x": "50%",
+        "y": "50%"
+      },
+      "shape-d": "tile",
+      "shape-e": "tile"
+    }
+  },
+  "cost": 0.5472014999999999,
+  "elapsed": "284.6",
+  "timestamp": "2026-03-23T21:40:40.716Z"
+}

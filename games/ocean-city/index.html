@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Ocean City</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a2a4a; }
+canvas { display: block; touch-action: none; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function() {
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// SOUND
+// ============================================================
+const SFX = {
+  _ctx: null,
+  _get() { if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this._ctx.state === 'suspended') this._ctx.resume(); return this._ctx; },
+  pop() {
+    try {
+      const c = this._get(), t = c.currentTime;
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(200 + Math.random() * 200, t);
+      o.frequency.exponentialRampToValueAtTime(400 + Math.random() * 200, t + 0.08);
+      g.gain.setValueAtTime(0.06, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+      o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + 0.15);
+      const o2 = c.createOscillator(), g2 = c.createGain();
+      o2.type = 'triangle'; o2.frequency.setValueAtTime(100 + Math.random() * 80, t + 0.03);
+      g2.gain.setValueAtTime(0.03, t + 0.03); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+      o2.connect(g2); g2.connect(c.destination); o2.start(t + 0.03); o2.stop(t + 0.2);
+    } catch(e) {}
+  },
+};
+
+// ============================================================
+// PALETTES
+// ============================================================
+const PALETTES = [
+  { walls: '#e8a87c', roof: '#d35d6e', window: '#ffe0b2', accent: '#c94c4c' },
+  { walls: '#f7d794', roof: '#e77f67', window: '#fff3cd', accent: '#e15f41' },
+  { walls: '#c7ecee', roof: '#22a6b3', window: '#dff9fb', accent: '#0abde3' },
+  { walls: '#a29bfe', roof: '#6c5ce7', window: '#d5c8ff', accent: '#4834d4' },
+  { walls: '#fab1a0', roof: '#e17055', window: '#ffecd2', accent: '#d63031' },
+  { walls: '#81ecec', roof: '#00cec9', window: '#c4fcef', accent: '#009688' },
+  { walls: '#ffeaa7', roof: '#fdcb6e', window: '#fff8dc', accent: '#f39c12' },
+  { walls: '#dfe6e9', roof: '#b2bec3', window: '#ffffff', accent: '#636e72' },
+  { walls: '#55efc4', roof: '#00b894', window: '#c8ffe0', accent: '#00a878' },
+  { walls: '#fd79a8', roof: '#e84393', window: '#ffe0ec', accent: '#c0392b' },
+];
+
+function shadeColor(hex, amt) {
+  const r = Math.max(0, Math.min(255, parseInt(hex.slice(1,3),16) + amt));
+  const g = Math.max(0, Math.min(255, parseInt(hex.slice(3,5),16) + amt));
+  const b = Math.max(0, Math.min(255, parseInt(hex.slice(5,7),16) + amt));
+  return '#' + ((1<<24)|(r<<16)|(g<<8)|b).toString(16).slice(1);
+}
+
+// ============================================================
+// BUILDING GENERATION — isometric dimensions
+// ============================================================
+function generateBuilding(x, y) {
+  const pal = PALETTES[Math.floor(Math.random() * PALETTES.length)];
+  const floors = 1 + Math.floor(Math.random() * 6);
+  const baseW = 28 + Math.floor(Math.random() * 30); // footprint width
+  const baseD = 20 + Math.floor(Math.random() * 20); // footprint depth
+  const floorH = 10 + Math.floor(Math.random() * 6);
+  const totalH = floors * floorH;
+  const roofStyle = Math.floor(Math.random() * 4);
+
+  return {
+    x, y, // world position (center of base)
+    baseW, baseD, totalH, floors, floorH,
+    pal, roofStyle,
+    riseProgress: 0, // 0 = underwater, 1 = fully risen
+    rising: true,
+    placed: performance.now() / 1000,
+  };
+}
+
+// ============================================================
+// PARTICLES
+// ============================================================
+let particles = [];
+
+function addSplash(x, y) {
+  for (let i = 0; i < 10; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 20 + Math.random() * 50;
+    particles.push({
+      x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed * 0.5 - 20,
+      life: 0.5 + Math.random() * 0.3, maxLife: 0.8,
+      size: 2 + Math.random() * 3, color: '#88ccff', type: 'drop',
+    });
+  }
+  // Ripple
+  particles.push({ x, y: y + 3, vx: 0, vy: 0, life: 1, maxLife: 1, size: 8, color: '#88ccff', type: 'ripple' });
+}
+
+// ============================================================
+// STATE
+// ============================================================
+let buildings = [];
+let time = 0;
+
+// ============================================================
+// PLACE BUILDING — anywhere on screen
+// ============================================================
+function placeBuilding(x, y) {
+  // Check if tapping on an existing building — add a floor
+  for (const b of buildings) {
+    if (!b.rising && Math.abs(x - b.x) < b.baseW * 0.6 && Math.abs(y - b.y) < b.totalH + b.baseD) {
+      // Add a floor to this building
+      b.floors++;
+      b.totalH += b.floorH;
+      SFX.pop();
+      // Small celebration particles from the roof
+      for (let i = 0; i < 5; i++) {
+        particles.push({
+          x: b.x + (Math.random() - 0.5) * b.baseW,
+          y: b.y - b.totalH,
+          vx: (Math.random() - 0.5) * 30,
+          vy: -15 - Math.random() * 25,
+          life: 0.4 + Math.random() * 0.3, maxLife: 0.7,
+          size: 2 + Math.random() * 2, color: b.pal.roof, type: 'drop',
+        });
+      }
+      return;
+    }
+  }
+  // No existing building — place a new one
+  SFX.pop();
+  buildings.push(generateBuilding(x, y));
+  addSplash(x, y);
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+canvas.addEventListener('click', e => {
+  SFX._get();
+  placeBuilding(e.offsetX * W / canvas.clientWidth, e.offsetY * H / canvas.clientHeight);
+});
+canvas.addEventListener('touchend', e => {
+  e.preventDefault(); SFX._get();
+  const t = e.changedTouches[0], r = canvas.getBoundingClientRect();
+  placeBuilding((t.clientX - r.left) / r.width * W, (t.clientY - r.top) / r.height * H);
+}, { passive: false });
+canvas.addEventListener('touchstart', e => { e.preventDefault(); SFX._get(); }, { passive: false });
+
+// ============================================================
+// ISOMETRIC DRAWING
+// ============================================================
+// Iso projection: x shifts right, y shifts down-right
+// For a simple 2.5D oblique view:
+// screen_x = world_x
+// screen_y = world_y
+// Buildings drawn with a visible front face, right side, and top
+
+function drawIsoBuilding(b) {
+  const rise = Math.min(1, b.riseProgress);
+  if (rise <= 0) return;
+
+  const bw = b.baseW;
+  const bd = b.baseD;
+  const th = b.totalH * rise; // building grows as it rises
+  const p = b.pal;
+
+  // Isometric offsets for depth
+  const sideW = bd * 0.4; // how wide the side face appears
+  const sideSlant = bd * 0.25; // how much the side slants up
+
+  const x = b.x - bw / 2;
+  const baseBottom = b.y;
+  const y = baseBottom - th;
+
+  // Shadow on water
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.beginPath();
+  ctx.ellipse(b.x + sideW * 0.3, baseBottom + 4, bw * 0.5 + sideW * 0.3, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Right side face (darker)
+  ctx.fillStyle = shadeColor(p.walls, -40);
+  ctx.beginPath();
+  ctx.moveTo(x + bw, y);
+  ctx.lineTo(x + bw + sideW, y - sideSlant);
+  ctx.lineTo(x + bw + sideW, baseBottom - sideSlant);
+  ctx.lineTo(x + bw, baseBottom);
+  ctx.closePath();
+  ctx.fill();
+
+  // Side face floor lines
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  ctx.lineWidth = 1;
+  for (let f = 1; f < b.floors && f * b.floorH < th; f++) {
+    const fy = baseBottom - f * b.floorH;
+    ctx.beginPath();
+    ctx.moveTo(x + bw, fy);
+    ctx.lineTo(x + bw + sideW, fy - sideSlant);
+    ctx.stroke();
+  }
+
+  // Side windows
+  const sWinSize = Math.min(6, b.floorH * 0.35);
+  for (let f = 0; f < b.floors && f * b.floorH < th; f++) {
+    const fy = baseBottom - f * b.floorH - b.floorH * 0.6;
+    const lit = Math.sin(b.placed * 10 + f * 5.1) > 0;
+    ctx.fillStyle = lit ? 'rgba(255,240,200,0.5)' : 'rgba(0,0,0,0.15)';
+    ctx.fillRect(x + bw + sideW * 0.3, fy - sideSlant * 0.3, sWinSize, sWinSize);
+  }
+
+  // Front face
+  ctx.fillStyle = p.walls;
+  ctx.fillRect(x, y, bw, th);
+
+  // Front face windows
+  const winW = Math.max(4, bw * 0.17);
+  const winH = Math.max(4, b.floorH * 0.4);
+  const winCols = Math.max(1, Math.floor((bw - 6) / (winW + 3)));
+  const winGap = (bw - winCols * winW) / (winCols + 1);
+
+  for (let f = 0; f < b.floors && f * b.floorH < th; f++) {
+    for (let c = 0; c < winCols; c++) {
+      const wx = x + winGap + c * (winW + winGap);
+      const wy = baseBottom - f * b.floorH - b.floorH * 0.7;
+      const lit = Math.sin(b.placed * 10 + f * 3.7 + c * 2.3 + time * 0.05) > -0.2;
+      ctx.fillStyle = lit ? p.window : 'rgba(0,0,0,0.2)';
+      ctx.fillRect(wx, wy, winW, winH);
+      if (lit) {
+        ctx.fillStyle = p.window + '33';
+        ctx.fillRect(wx - 1, wy - 1, winW + 2, winH + 2);
+      }
+      ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(wx, wy, winW, winH);
+    }
+  }
+
+  // Front floor lines
+  ctx.strokeStyle = 'rgba(0,0,0,0.05)';
+  ctx.lineWidth = 1;
+  for (let f = 1; f < b.floors && f * b.floorH < th; f++) {
+    const fy = baseBottom - f * b.floorH;
+    ctx.beginPath(); ctx.moveTo(x, fy); ctx.lineTo(x + bw, fy); ctx.stroke();
+  }
+
+  // Door
+  const doorW = Math.min(8, bw * 0.22);
+  const doorH = Math.min(10, b.floorH * 0.65);
+  ctx.fillStyle = p.accent;
+  ctx.fillRect(x + bw / 2 - doorW / 2, baseBottom - doorH, doorW, doorH);
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillRect(x + bw / 2 - doorW / 2, baseBottom - doorH, doorW, doorH * 0.3);
+
+  // Top face (parallelogram)
+  ctx.fillStyle = shadeColor(p.walls, 30);
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + sideW, y - sideSlant);
+  ctx.lineTo(x + bw + sideW, y - sideSlant);
+  ctx.lineTo(x + bw, y);
+  ctx.closePath();
+  ctx.fill();
+
+  // Roof details on top
+  if (b.roofStyle === 1 && th > 15) {
+    // Peaked roof
+    ctx.fillStyle = p.roof;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + bw / 2, y - 10);
+    ctx.lineTo(x + bw, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = shadeColor(p.roof, -25);
+    ctx.beginPath();
+    ctx.moveTo(x + bw, y);
+    ctx.lineTo(x + bw / 2, y - 10);
+    ctx.lineTo(x + bw / 2 + sideW, y - 10 - sideSlant);
+    ctx.lineTo(x + bw + sideW, y - sideSlant);
+    ctx.closePath();
+    ctx.fill();
+  } else if (b.roofStyle === 2 && th > 15) {
+    // Dome
+    ctx.fillStyle = p.roof;
+    ctx.beginPath();
+    ctx.ellipse(x + bw / 2 + sideW * 0.4, y - sideSlant * 0.4, bw * 0.35, 8, 0, Math.PI, 0);
+    ctx.fill();
+  } else if (b.roofStyle === 3 && th > 20) {
+    // Antenna
+    ctx.fillStyle = '#667';
+    ctx.fillRect(x + bw / 2, y - 14, 2, 14);
+    ctx.fillStyle = '#ff4444';
+    ctx.beginPath(); ctx.arc(x + bw / 2 + 1, y - 14, 2, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+// ============================================================
+// DRAW OCEAN
+// ============================================================
+function drawOcean() {
+  // Gradient — deeper blue at top (distance), lighter at bottom (close)
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#1a4a6a');
+  grad.addColorStop(0.3, '#2a5a8a');
+  grad.addColorStop(0.7, '#2a6a9a');
+  grad.addColorStop(1, '#3a7aaa');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Wave pattern across the whole surface
+  ctx.strokeStyle = 'rgba(100,180,220,0.1)';
+  ctx.lineWidth = 1;
+  for (let wi = 0; wi < 12; wi++) {
+    const wy = wi * (H / 12) + Math.sin(time * 0.3 + wi) * 3;
+    ctx.beginPath();
+    for (let x = 0; x < W; x += 4) {
+      const y = wy + Math.sin(x * 0.015 + time * 0.6 + wi * 1.2) * 3;
+      if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Sparkles
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  for (let i = 0; i < 20; i++) {
+    const sx = (i * 97.3 + time * 15) % (W + 50) - 25;
+    const sy = (i * 61.7 + time * 8) % (H + 50) - 25;
+    const sparkle = Math.sin(time * 2.5 + i * 1.9);
+    if (sparkle > 0.7) {
+      ctx.globalAlpha = (sparkle - 0.7) * 3;
+      ctx.fillRect(sx, sy, 2.5, 1.5);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ============================================================
+// DRAW PARTICLES
+// ============================================================
+function drawParticles() {
+  for (const p of particles) {
+    const a = Math.max(0, p.life / p.maxLife);
+    ctx.globalAlpha = a * 0.8;
+    if (p.type === 'ripple') {
+      const expand = 1 - p.life / p.maxLife;
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 1.5 * (1 - expand);
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size + expand * 25, (p.size + expand * 25) * 0.4, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * a, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ============================================================
+// HUD
+// ============================================================
+function drawHUD() {
+  ctx.font = 'bold ' + Math.min(18, W * 0.025) + 'px Segoe UI';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.fillText('OCEAN CITY', 12, 24);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.font = Math.min(13, W * 0.018) + 'px Segoe UI';
+  ctx.fillText(buildings.length + ' building' + (buildings.length !== 1 ? 's' : ''), W - 12, 24);
+
+  if (buildings.length === 0) {
+    const pulse = 0.4 + Math.sin(time * 2) * 0.3;
+    ctx.globalAlpha = pulse;
+    ctx.font = Math.min(22, W * 0.03) + 'px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('Tap anywhere to build', W / 2, H / 2);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+// LOOP
+// ============================================================
+let lastTime = performance.now();
+
+function update(dt) {
+  time += dt;
+
+  // Buildings rise
+  for (const b of buildings) {
+    if (b.rising) {
+      b.riseProgress += dt * 1.8;
+      if (b.riseProgress >= 1) {
+        b.riseProgress = 1;
+        b.rising = false;
+      }
+    }
+  }
+
+  // Particles
+  for (const p of particles) {
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.type === 'drop') p.vy += 80 * dt;
+    p.life -= dt;
+  }
+  particles = particles.filter(p => p.life > 0);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  drawOcean();
+
+  // Sort buildings by Y so further ones (smaller Y) draw first
+  const sorted = [...buildings].sort((a, b) => a.y - b.y);
+  for (const b of sorted) drawIsoBuilding(b);
+
+  drawParticles();
+  drawHUD();
+}
+
+function loop() {
+  const now = performance.now();
+  const dt = Math.min((now - lastTime) / 1000, 0.1);
+  lastTime = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+
+})();
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.35);color:rgba(255,255,255,0.4);font:11px 'Segoe UI',Arial,sans-serif;padding:3px 12px;border-radius:10px;z-index:9999;pointer-events:none;white-space:nowrap;">
+  <span id="vc-count">...</span> Architects
+</div>
+<script>
+(function(){
+  var G='ocean-city',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

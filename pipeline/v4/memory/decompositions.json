@@ -1,0 +1,679 @@
+[
+  {
+    "request": "Pong",
+    "contractCount": 7,
+    "contractSummaries": [
+      {
+        "fn_id": "fn_1",
+        "prompt": "Clamp a value between min and max (inclusive). If val < min, return min. If val > max, return max. E",
+        "argNames": [
+          "val",
+          "min",
+          "max"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_2",
+        "prompt": "Add two numbers. Return a + b. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_3",
+        "prompt": "Multiply two numbers. Return a * b. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_4",
+        "prompt": "Return true if val > threshold, else false. Arguments: val, threshold",
+        "argNames": [
+          "val",
+          "threshold"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_5",
+        "prompt": "Return true if val < threshold, else false. Arguments: val, threshold",
+        "argNames": [
+          "val",
+          "threshold"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_6",
+        "prompt": "Negate a number. Return -val. Arguments: val",
+        "argNames": [
+          "val"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_7",
+        "prompt": "Check if two axis-aligned bounding boxes overlap. Return true if box1 (at x1, y1 with width w1, heig",
+        "argNames": [
+          "x1",
+          "y1",
+          "w1",
+          "h1",
+          "x2",
+          "y2",
+          "w2",
+          "h2"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      }
+    ],
+    "objectCount": 4,
+    "loopSteps": 16,
+    "timestamp": 1774387125358
+  },
+  {
+    "request": "Breakout",
+    "contractCount": 9,
+    "contractSummaries": [
+      {
+        "fn_id": "fn_1",
+        "prompt": "Return the larger value. If a is greater than b return a, otherwise return b. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_2",
+        "prompt": "Return the smaller value. If a is less than b return a, otherwise return b. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_3",
+        "prompt": "Clamp value within bounds. If val < min return min. If val > max return max. Otherwise return val. A",
+        "argNames": [
+          "val",
+          "min",
+          "max"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_4",
+        "prompt": "Multiply two numbers. Return a times b. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_5",
+        "prompt": "Test if first is less. Return true if a is less than b, otherwise false. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_6",
+        "prompt": "Test if first is greater. Return true if a is greater than b, otherwise false. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_7",
+        "prompt": "Negate the value. Return negative of val. Arguments: val",
+        "argNames": [
+          "val"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_8",
+        "prompt": "Detect rect overlap. First rect: x1 y1 w1 h1. Second rect: x2 y2 w2 h2. Return true if overlapping. ",
+        "argNames": [
+          "x1",
+          "y1",
+          "w1",
+          "h1",
+          "x2",
+          "y2",
+          "w2",
+          "h2"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_9",
+        "prompt": "Add two numbers. Return a plus b. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      }
+    ],
+    "objectCount": 6,
+    "loopSteps": 7,
+    "timestamp": 1774387614578
+  },
+  {
+    "request": "A bouncing ball simulation",
+    "contractCount": 7,
+    "contractSummaries": [
+      {
+        "fn_id": "fn_1",
+        "prompt": "Clamp val to the range [min, max]. If val is less than min, return min. If val is greater than max, ",
+        "argNames": [
+          "val",
+          "min",
+          "max"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_2",
+        "prompt": "Add a and b together. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_3",
+        "prompt": "Multiply a by b. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_4",
+        "prompt": "Return true if val is strictly greater than threshold, false otherwise. Arguments: val, threshold",
+        "argNames": [
+          "val",
+          "threshold"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_5",
+        "prompt": "Return true if val is strictly less than threshold, false otherwise. Arguments: val, threshold",
+        "argNames": [
+          "val",
+          "threshold"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_6",
+        "prompt": "Return the negation of val, which is val multiplied by -1. Arguments: val",
+        "argNames": [
+          "val"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_7",
+        "prompt": "Compute and return a multiplied by b, plus c. This computes a*b + c. Arguments: a, b, c",
+        "argNames": [
+          "a",
+          "b",
+          "c"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      }
+    ],
+    "objectCount": 1,
+    "loopSteps": 7,
+    "timestamp": 1774387739213
+  },
+  {
+    "request": "A timer counting down from 60",
+    "contractCount": 4,
+    "contractSummaries": [
+      {
+        "fn_id": "fn_1",
+        "prompt": "Subtract 1 from the input value. Arguments: val",
+        "argNames": [
+          "val"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_2",
+        "prompt": "Return the maximum of val and min. If val is less than min, return min; otherwise return val. Argume",
+        "argNames": [
+          "val",
+          "min"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_3",
+        "prompt": "Calculate the percentage of current relative to max. Return (current / max) * 100. Arguments: curren",
+        "argNames": [
+          "current",
+          "max"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_4",
+        "prompt": "Scale a maximum width by a percentage. Return (max_width * percentage) / 100. Arguments: max_width, ",
+        "argNames": [
+          "max_width",
+          "percentage"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      }
+    ],
+    "objectCount": 3,
+    "loopSteps": 4,
+    "timestamp": 1774388046226
+  },
+  {
+    "request": "A particle fountain",
+    "contractCount": 7,
+    "contractSummaries": [
+      {
+        "fn_id": "fn_1",
+        "prompt": "Add a and b together. Return the sum. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_2",
+        "prompt": "Multiply a by b. Return the product. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_3",
+        "prompt": "Subtract b from a. Return the result. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_4",
+        "prompt": "Return true if a is greater than b, false otherwise. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_5",
+        "prompt": "Return true if a is less than b, false otherwise. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_6",
+        "prompt": "Divide a by b. Return the quotient. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_7",
+        "prompt": "Clamp val between min and max. If val is less than min return min. If val is greater than max return",
+        "argNames": [
+          "val",
+          "min",
+          "max"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      }
+    ],
+    "objectCount": 6,
+    "loopSteps": 25,
+    "timestamp": 1774388318670
+  },
+  {
+    "request": "A sorting algorithm visualizer",
+    "contractCount": 8,
+    "contractSummaries": [
+      {
+        "fn_id": "fn_1",
+        "prompt": "Arguments: a, b. Return true if a is greater than b.",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_2",
+        "prompt": "Arguments: val, min, max. Return true if val is between min and max inclusive.",
+        "argNames": [
+          "val",
+          "min",
+          "max"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_3",
+        "prompt": "Arguments: val, min, max. Clamp val to be within [min, max]. Return the clamped value.",
+        "argNames": [
+          "val",
+          "min",
+          "max"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_4",
+        "prompt": "Arguments: arr, i, j. Return a new array with elements at indices i and j swapped.",
+        "argNames": [
+          "arr",
+          "i",
+          "j"
+        ],
+        "returnType": "array",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_5",
+        "prompt": "Arguments: arr. Return true if the array is sorted in ascending order.",
+        "argNames": [
+          "arr"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_6",
+        "prompt": "Arguments: idx, len. Return true if idx is a valid index for an array of length len.",
+        "argNames": [
+          "idx",
+          "len"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_7",
+        "prompt": "Arguments: start, end, t. Linearly interpolate between start and end where t is 0 to 1. Return the i",
+        "argNames": [
+          "start",
+          "end",
+          "t"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_8",
+        "prompt": "Arguments: elements, width. Calculate the width each bar should have when displaying elements bars i",
+        "argNames": [
+          "elements",
+          "width"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      }
+    ],
+    "objectCount": 4,
+    "loopSteps": 6,
+    "timestamp": 1774388769720
+  },
+  {
+    "request": "A meditation breathing guide",
+    "contractCount": 9,
+    "contractSummaries": [
+      {
+        "fn_id": "fn_1",
+        "prompt": "Add 1 to val and return the result. Arguments: val",
+        "argNames": [
+          "val"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_2",
+        "prompt": "Add 1 to p. If result >= 4, return 0. Otherwise return result. Arguments: p",
+        "argNames": [
+          "p"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_3",
+        "prompt": "Return 4000 if p is 0. Return 1000 if p is 1. Return 4000 if p is 2. Return 1000 if p is 3. Argument",
+        "argNames": [
+          "p"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_4",
+        "prompt": "Add dt to t and return the result. Arguments: t, dt",
+        "argNames": [
+          "t",
+          "dt"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_5",
+        "prompt": "Return true if t >= d. Otherwise return false. Arguments: t, d",
+        "argNames": [
+          "t",
+          "d"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_6",
+        "prompt": "If d is 0, return 0. Otherwise divide e by d and return result. Arguments: e, d",
+        "argNames": [
+          "e",
+          "d"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_7",
+        "prompt": "Clamp v to range [lo, hi]. If v is less than lo return lo. If v is greater than hi return hi. Otherw",
+        "argNames": [
+          "v",
+          "lo",
+          "hi"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_8",
+        "prompt": "If ph is 0 return 1 plus prog. If ph is 2 return 2 minus prog. Otherwise return 1. Arguments: prog, ",
+        "argNames": [
+          "prog",
+          "ph"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_9",
+        "prompt": "Return true if val equals target, otherwise false. Arguments: val, target",
+        "argNames": [
+          "val",
+          "target"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      }
+    ],
+    "objectCount": 2,
+    "loopSteps": 6,
+    "timestamp": 1774389899219
+  },
+  {
+    "request": "A music sequencer with 8 beats",
+    "contractCount": 8,
+    "contractSummaries": [
+      {
+        "fn_id": "fn_1",
+        "prompt": "Increment val by 1, wrapping at max. If val + 1 >= max, return 0. Otherwise return val + 1. Argument",
+        "argNames": [
+          "val",
+          "max"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_2",
+        "prompt": "Test equality. Return true if a equals b. Return false otherwise. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_3",
+        "prompt": "Check if bit is set. Return true if the bit at index idx is set in num. Use bitwise AND to check. Ar",
+        "argNames": [
+          "num",
+          "idx"
+        ],
+        "returnType": "boolean",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_4",
+        "prompt": "Set a bit. Return num with the bit at index idx set to 1 using bitwise OR. Arguments: num, idx",
+        "argNames": [
+          "num",
+          "idx"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_5",
+        "prompt": "Clear a bit. Return num with the bit at index idx set to 0. Arguments: num, idx",
+        "argNames": [
+          "num",
+          "idx"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_6",
+        "prompt": "Clamp a value. If val is less than lo, return lo. If val is greater than hi, return hi. Otherwise re",
+        "argNames": [
+          "val",
+          "lo",
+          "hi"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_7",
+        "prompt": "Add two values. Return a plus b. Arguments: a, b",
+        "argNames": [
+          "a",
+          "b"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      },
+      {
+        "fn_id": "fn_8",
+        "prompt": "Toggle a bit. If the bit at index idx in num is 0, set it to 1. If it is 1, set it to 0. Return the ",
+        "argNames": [
+          "num",
+          "idx"
+        ],
+        "returnType": "number",
+        "vectorCount": 4
+      }
+    ],
+    "objectCount": 8,
+    "loopSteps": 1,
+    "timestamp": 1774390264830
+  }
+]

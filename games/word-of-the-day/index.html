@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Word of the Day</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #15152a; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
+canvas { display: block; touch-action: none; height: 100vh; max-width: 100vw; aspect-ratio: 500 / 750; background: #15152a; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="500" height="750"></canvas>
+<script>
+
+// WORD OF THE DAY v2 — Wheel of Fortune style
+// Any 5 letters accepted. Green=right spot, Yellow=wrong spot, Red=not in word.
+
+var WORDS=["about","above","abuse","actor","acute","admit","adopt","adult","after","again","agent","agree","ahead","alarm","album","alert","alien","align","alive","alley","allow","alone","along","alter","among","angel","anger","angle","angry","apart","apple","apply","arena","argue","arise","array","aside","asset","avoid","award","aware","badly","baker","bases","basic","basis","beach","began","begin","being","below","bench","birth","black","blade","blame","blank","blast","blaze","bleed","blend","bless","blind","block","blood","bloom","blown","board","bonus","booth","bound","brain","brand","brave","bread","break","breed","brick","brief","bring","broad","broke","brown","brush","buddy","build","built","bunch","burst","buyer","cabin","cable","candy","carry","catch","cause","chain","chair","chaos","charm","chase","cheap","check","cheek","cheer","chess","chest","chief","child","china","choir","chunk","civic","civil","claim","clash","class","clean","clear","climb","cling","clock","clone","close","cloud","coach","coast","coral","could","count","court","cover","crack","craft","crash","crazy","cream","creek","crime","cross","crowd","crown","crude","crush","curve","cycle","daily","dance","death","debut","delay","delta","dense","depth","derby","devil","diary","dirty","donor","doubt","dough","draft","drain","drama","drank","drawn","dream","dress","dried","drift","drill","drink","drive","drops","drove","dying","eager","early","earth","eight","elect","elite","empty","enemy","enjoy","enter","entry","equal","error","essay","event","every","exact","exile","exist","extra","faint","faith","fancy","fault","feast","fever","fiber","field","fifth","fifty","fight","final","first","fixed","flame","flash","fleet","flesh","float","flood","floor","flour","fluid","flush","focus","force","forge","forth","forum","found","frame","frank","fraud","fresh","front","frost","fruit","fully","genre","ghost","giant","given","glass","globe","gloom","glory","glove","going","grace","grade","grain","grand","grant","graph","grasp","grass","grave","great","green","greet","grief","grill","grind","gross","group","grove","grown","guard","guess","guest","guide","guilt","happy","harsh","heart","heavy","hence","honor","horse","hotel","house","human","humor","hurry","ideal","image","imply","index","inner","input","irony","ivory","joint","judge","juice","karma","knife","knock","known","label","labor","large","laser","later","laugh","layer","learn","lease","least","leave","legal","level","light","limit","liver","lobby","local","logic","loose","lover","lower","lucky","lunch","lying","magic","major","maker","manor","maple","march","match","maybe","mayor","media","mercy","merge","merit","metal","meter","might","minor","minus","model","money","month","moral","motor","mount","mouse","mouth","movie","music","naive","naval","nerve","never","newly","night","noble","noise","north","noted","novel","nurse","occur","ocean","offer","often","olive","onset","opera","orbit","order","other","ought","outer","owner","panel","panic","paper","party","pasta","patch","pause","peace","peach","pearl","penny","phase","phone","photo","piano","piece","pilot","pitch","place","plain","plane","plant","plate","plaza","plead","point","polar","pound","power","press","price","pride","prime","print","prior","prize","proof","proud","prove","pulse","punch","queen","quest","queue","quick","quiet","quite","quota","quote","radar","radio","raise","rally","ranch","range","rapid","ratio","reach","react","ready","realm","rebel","refer","reign","relax","reply","rider","ridge","rifle","right","rigid","rival","river","robot","rocky","rough","round","route","royal","rural","sadly","saint","salad","sauce","scale","scene","scope","score","sense","serve","seven","shade","shall","shame","shape","share","shark","sharp","sheep","sheer","sheet","shelf","shell","shift","shine","shirt","shock","shoot","shore","short","shout","shown","sight","since","sixth","sixty","sized","skill","skull","sleep","slice","slide","slope","small","smart","smell","smile","smoke","solar","solid","solve","sorry","sound","south","space","spare","speak","speed","spend","spent","spice","spike","spite","split","spoke","sport","spray","squad","stack","staff","stage","stair","stake","stall","stamp","stand","stark","start","state","steak","steam","steel","steep","steer","stick","stiff","still","stock","stone","stood","store","storm","story","stove","strip","stuck","study","stuff","style","sugar","suite","super","surge","swear","sweep","sweet","swept","swift","swing","sword","sworn","table","taste","teeth","theft","theme","there","thick","thing","think","third","those","three","throw","thumb","tight","tired","title","today","token","total","touch","tough","towel","tower","toxic","trace","track","trade","trail","train","trait","trash","treat","trend","trial","tribe","trick","troop","truck","truly","trunk","trust","truth","tumor","twice","twist","ultra","uncle","under","union","unite","unity","until","upper","upset","urban","usage","usual","value","venue","verse","video","vigor","viral","virus","visit","vital","vivid","vocal","voice","voter","waste","watch","water","weave","weigh","weird","whale","wheat","wheel","where","which","while","white","whole","whose","wider","woman","women","world","worry","worse","worst","worth","would","wound","write","wrote","young","yours","youth"];
+
+// Supabase
+var SUPA='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SKEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+function supa(path,opts){var h={'apikey':SKEY,'Authorization':'Bearer '+SKEY};if(opts&&opts.body)h['Content-Type']='application/json';if(opts&&opts.prefer)h['Prefer']=opts.prefer;return fetch(SUPA+'/rest/v1/'+path,{method:opts&&opts.method||'GET',headers:h,body:opts&&opts.body?JSON.stringify(opts.body):undefined}).then(function(r){return r.json()}).catch(function(){return null})}
+async function getHash(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'unknown'}}
+
+// Today's word
+function getTodayStr(){var d=new Date();return d.getFullYear()+'-'+(d.getMonth()+1<10?'0':'')+(d.getMonth()+1)+'-'+(d.getDate()<10?'0':'')+d.getDate()}
+function getWordForDate(s){var h=0;for(var i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0}return WORDS[Math.abs(h)%WORDS.length].toUpperCase()}
+var TODAY=getTodayStr();
+var ANSWER=getWordForDate(TODAY);
+
+// Sound
+var SFX=(function(){var c=null,m=false;function gc(){if(!c)try{c=new(window.AudioContext||window.webkitAudioContext)}catch(e){return null}if(c.state==='suspended')c.resume();return c}function p(fn){if(m)return;var x=gc();if(x)fn(x)}return{get muted(){return m},set muted(v){m=v},
+type:function(){p(function(c){var o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.value=600;g.gain.value=.03;g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.03);o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.03)})},
+submit:function(){p(function(c){var o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.value=400;o.frequency.exponentialRampToValueAtTime(600,c.currentTime+.1);g.gain.value=.06;g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.12);o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.12)})},
+win:function(){p(function(c){for(var i=0;i<5;i++){var o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.value=500+i*100;g.gain.value=.07;g.gain.exponentialRampToValueAtTime(.001,c.currentTime+i*.08+.15);o.connect(g);g.connect(c.destination);o.start(c.currentTime+i*.08);o.stop(c.currentTime+i*.08+.18)}})},
+lose:function(){p(function(c){for(var i=0;i<3;i++){var o=c.createOscillator(),g=c.createGain();o.type='sawtooth';o.frequency.value=300-i*60;g.gain.value=.06;g.gain.exponentialRampToValueAtTime(.001,c.currentTime+i*.15+.2);o.connect(g);g.connect(c.destination);o.start(c.currentTime+i*.15);o.stop(c.currentTime+i*.15+.25)}})},
+flip:function(){p(function(c){var o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.value=700;g.gain.value=.03;g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.04);o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.04)})}
+}})();
+document.addEventListener('keydown',function(e){if(e.key==='m'||e.key==='M')SFX.muted=!SFX.muted});
+
+// Game state
+var canvas=document.getElementById('gameCanvas');
+var ctx=canvas.getContext('2d');
+var CW=canvas.width,CH=canvas.height;
+var MAX_GUESSES=6,WORD_LEN=5;
+var GREEN='#22cc55',YELLOW='#eecc33',RED='#cc4444',EMPTY='#252540',BORDER='#555577',BG='#15152a';
+
+var G={guesses:[],results:[],current:'',gameOver:false,won:false,
+  revealRow:-1,revealCol:-1,revealTimer:0,
+  msg:'',msgTimer:0,shake:false,shakeTimer:0,stats:null};
+
+// Load saved progress
+var saved=localStorage.getItem('wotd2_'+TODAY);
+if(saved){try{var s=JSON.parse(saved);G.guesses=s.g||[];G.results=s.r||[];G.gameOver=s.o||false;G.won=s.w||false}catch(e){}}
+function saveLocal(){localStorage.setItem('wotd2_'+TODAY,JSON.stringify({g:G.guesses,r:G.results,o:G.gameOver,w:G.won}))}
+
+function checkGuess(guess){
+  var result=[];var ans=ANSWER.split('');var g=guess.split('');
+  for(var i=0;i<WORD_LEN;i++){if(g[i]===ans[i]){result[i]='green';ans[i]='_';g[i]='*'}else result[i]='red'}
+  for(var i=0;i<WORD_LEN;i++){if(g[i]==='*')continue;var idx=ans.indexOf(g[i]);if(idx>=0){result[i]='yellow';ans[idx]='_'}}
+  return result;
+}
+
+function submit(){
+  if(G.gameOver||G.current.length!==WORD_LEN)return;
+  // Accept ANY 5 letters — no word list validation
+  var guess=G.current.toUpperCase();
+  var result=checkGuess(guess);
+  G.guesses.push(guess);G.results.push(result);
+  G.revealRow=G.guesses.length-1;G.revealCol=0;G.revealTimer=0;
+  G.current='';SFX.submit();
+  if(guess===ANSWER){G.gameOver=true;G.won=true;G.msg='You got it!';G.msgTimer=4;SFX.win();updateStats(true,G.guesses.length)}
+  else if(G.guesses.length>=MAX_GUESSES){G.gameOver=true;G.msg='Answer: '+ANSWER;G.msgTimer=6;SFX.lose();updateStats(false,MAX_GUESSES)}
+  saveLocal();
+}
+
+async function updateStats(won,n){
+  var hash=await getHash();
+  var ex=await supa('word_stats?player_hash=eq.'+hash+'&limit=1');
+  var s=ex&&ex.length>0?ex[0]:null;
+  if(s){
+    var dist=s.guess_distribution||[0,0,0,0,0,0];if(won)dist[n-1]++;
+    var str=won?s.streak+1:0;
+    await supa('word_stats?player_hash=eq.'+hash,{method:'PATCH',body:{played:s.played+1,won:s.won+(won?1:0),streak:str,max_streak:Math.max(s.max_streak,str),guess_distribution:dist,last_played:TODAY}});
+    G.stats={played:s.played+1,won:s.won+(won?1:0),streak:str,maxStreak:Math.max(s.max_streak,str),dist:dist};
+  }else{
+    var dist=[0,0,0,0,0,0];if(won)dist[n-1]=1;
+    await supa('word_stats',{method:'POST',body:{player_hash:hash,played:1,won:won?1:0,streak:won?1:0,max_streak:won?1:0,guess_distribution:dist,last_played:TODAY}});
+    G.stats={played:1,won:won?1:0,streak:won?1:0,maxStreak:won?1:0,dist:dist};
+  }
+}
+(async function(){var hash=await getHash();var ex=await supa('word_stats?player_hash=eq.'+hash+'&limit=1');if(ex&&ex.length>0){var s=ex[0];G.stats={played:s.played,won:s.won,streak:s.streak,maxStreak:s.max_streak,dist:s.guess_distribution||[0,0,0,0,0,0]}}})();
+
+// Input
+document.addEventListener('keydown',function(e){
+  if(G.gameOver)return;
+  if(e.key==='Enter'){submit();return}
+  if(e.key==='Backspace'){if(G.current.length>0){G.current=G.current.slice(0,-1);SFX.type()}return}
+  if(e.key.length===1&&/^[a-zA-Z]$/.test(e.key)&&G.current.length<WORD_LEN){G.current+=e.key.toUpperCase();SFX.type()}
+});
+
+// Layout
+var TS,TG,BX,BY,KW,KH,KG,KY;
+function layout(){
+  TS=Math.floor(Math.min(CW*0.14,CH*0.055));
+  TG=Math.max(4,Math.floor(TS*0.12));
+  var bw=WORD_LEN*(TS+TG)-TG;
+  BX=Math.floor((CW-bw)/2);
+  BY=Math.floor(CH*0.16);
+  KW=Math.floor(Math.min(CW*0.085,TS*0.9));
+  KH=Math.floor(KW*1.2);
+  KG=Math.max(3,Math.floor(KW*0.08));
+  KY=BY+(TS+TG)*MAX_GUESSES+Math.floor(CH*0.025);
+}
+layout();
+
+function getKeyColor(ch){
+  var best='unused';
+  for(var r=0;r<G.guesses.length;r++){for(var c=0;c<WORD_LEN;c++){
+    if(G.guesses[r][c]===ch){var res=G.results[r][c];
+      if(res==='green')return GREEN;if(res==='yellow'&&best!=='green')best='yellow';if(res==='red'&&best==='unused')best='red'}}}
+  if(best==='yellow')return YELLOW;if(best==='red')return RED;return'#777788';
+}
+
+var KB=[['Q','W','E','R','T','Y','U','I','O','P'],['A','S','D','F','G','H','J','K','L'],['ENTER','Z','X','C','V','B','N','M','DEL']];
+
+// Click handling
+canvas.addEventListener('click',function(e){
+  if(G.gameOver)return;
+  var rect=canvas.getBoundingClientRect();
+  var mx=(e.clientX-rect.left)*(CW/rect.width),my=(e.clientY-rect.top)*(CH/rect.height);
+  for(var ri=0;ri<KB.length;ri++){var row=KB[ri];
+    var rw=0;for(var i=0;i<row.length;i++)rw+=(row[i].length>1?KW*1.4:KW)+KG;rw-=KG;
+    var kx=Math.floor((CW-rw)/2),ky=KY+ri*(KH+KG);
+    for(var ci=0;ci<row.length;ci++){var key=row[ci];var kw=key.length>1?KW*1.4:KW;
+      if(mx>=kx&&mx<=kx+kw&&my>=ky&&my<=ky+KH){
+        if(key==='ENTER')submit();
+        else if(key==='DEL'){if(G.current.length>0){G.current=G.current.slice(0,-1);SFX.type()}}
+        else if(G.current.length<WORD_LEN){G.current+=key;SFX.type()}
+        return}
+      kx+=kw+KG}}
+});
+
+// Draw
+function draw(){
+  ctx.fillStyle=BG;ctx.fillRect(0,0,CW,CH);
+  var tfs=Math.max(14,Math.floor(CH*0.028));
+
+  // Title
+  ctx.font='bold '+tfs+'px Segoe UI';ctx.textAlign='center';ctx.fillStyle='#ffffff';
+  ctx.fillText('WORD OF THE DAY',CW/2,CH*0.035);
+
+  // Date + mute
+  ctx.font=Math.floor(tfs*0.6)+'px Segoe UI';ctx.fillStyle='#8888bb';
+  ctx.fillText(TODAY+'  |  M: mute',CW/2,CH*0.065);
+
+  // Legend
+  ctx.font=Math.floor(tfs*0.5)+'px Segoe UI';
+  ctx.fillStyle=GREEN;ctx.fillText('\u25A0 Right spot',CW*0.22,CH*0.095);
+  ctx.fillStyle=YELLOW;ctx.fillText('\u25A0 Wrong spot',CW*0.5,CH*0.095);
+  ctx.fillStyle=RED;ctx.fillText('\u25A0 Not in word',CW*0.78,CH*0.095);
+
+  // Toast
+  if(G.msgTimer>0){
+    var mfs=Math.floor(tfs*0.8);ctx.font='bold '+mfs+'px Segoe UI';
+    var mw=ctx.measureText(G.msg).width+24;
+    ctx.fillStyle='#ffffff';ctx.fillRect(CW/2-mw/2,CH*0.11,mw,mfs*1.8);
+    ctx.fillStyle=BG;ctx.textAlign='center';ctx.fillText(G.msg,CW/2,CH*0.11+mfs*1.3);
+  }
+
+  // Board
+  var shk=G.shake?Math.sin(G.shakeTimer*40)*3:0;
+  for(var row=0;row<MAX_GUESSES;row++){
+    for(var col=0;col<WORD_LEN;col++){
+      var x=BX+col*(TS+TG)+(row===G.guesses.length?shk:0);
+      var y=BY+row*(TS+TG);
+      var letter='',color=EMPTY,bc=BORDER;
+
+      if(row<G.guesses.length){
+        letter=G.guesses[row][col];
+        if(row===G.revealRow&&col>G.revealCol){color=BORDER;bc='#666'}
+        else{var res=G.results[row][col];color=res==='green'?GREEN:res==='yellow'?YELLOW:RED;bc=color}
+      }else if(row===G.guesses.length&&col<G.current.length){
+        letter=G.current[col];bc='#8888aa';
+      }
+
+      // Tile
+      ctx.fillStyle=color;ctx.fillRect(x,y,TS,TS);
+      ctx.strokeStyle=bc;ctx.lineWidth=2;ctx.strokeRect(x,y,TS,TS);
+      if(letter){ctx.font='bold '+Math.floor(TS*0.6)+'px Segoe UI';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#fff';ctx.fillText(letter,x+TS/2,y+TS/2+1)}
+    }
+  }
+  ctx.textBaseline='alphabetic';
+
+  // Keyboard
+  for(var ri=0;ri<KB.length;ri++){var row=KB[ri];
+    var rw=0;for(var i=0;i<row.length;i++)rw+=(row[i].length>1?KW*1.4:KW)+KG;rw-=KG;
+    var kx=Math.floor((CW-rw)/2),ky=KY+ri*(KH+KG);
+    for(var ci=0;ci<row.length;ci++){var key=row[ci];var kw=key.length>1?KW*1.4:KW;
+      ctx.fillStyle=key.length===1?getKeyColor(key):'#777788';
+      ctx.fillRect(kx,ky,kw,KH);
+      ctx.strokeStyle='rgba(255,255,255,0.08)';ctx.lineWidth=1;ctx.strokeRect(kx,ky,kw,KH);
+      ctx.font='bold '+Math.floor(KH*0.35)+'px Segoe UI';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillStyle='#fff';ctx.fillText(key==='DEL'?'\u232B':key,kx+kw/2,ky+KH/2);
+      kx+=kw+KG}}
+  ctx.textBaseline='alphabetic';
+
+  // Stats (after game over)
+  if(G.gameOver&&G.stats){
+    var sy=KY+(KH+KG)*3+10;var fs=Math.floor(TS*0.28);
+    ctx.font=fs+'px Segoe UI';ctx.textAlign='center';ctx.fillStyle='#aaa';
+    ctx.fillText('Played:'+G.stats.played+' Won:'+G.stats.won+' Streak:'+G.stats.streak+' Best:'+G.stats.maxStreak,CW/2,sy);
+    sy+=fs*1.5;ctx.fillStyle='#888';ctx.fillText('Guess Distribution',CW/2,sy);sy+=fs;
+    var mx=1;for(var i=0;i<6;i++)if(G.stats.dist[i]>mx)mx=G.stats.dist[i];
+    var bw=CW*0.35;
+    for(var i=0;i<6;i++){var w=Math.max(fs,(G.stats.dist[i]/mx)*bw);var bx=CW/2-bw/2;
+      ctx.font=fs+'px Segoe UI';ctx.textAlign='right';ctx.fillStyle='#888';ctx.fillText(''+(i+1),bx-5,sy+i*fs*1.3+fs*.8);
+      ctx.fillStyle=(G.won&&G.guesses.length===i+1)?GREEN:'#444';ctx.fillRect(bx,sy+i*fs*1.3,w,fs);
+      ctx.font='bold '+Math.floor(fs*.7)+'px Segoe UI';ctx.textAlign='right';ctx.fillStyle='#fff';ctx.fillText(''+G.stats.dist[i],bx+w-3,sy+i*fs*1.3+fs*.8);
+      ctx.textAlign='center'}
+  }
+}
+
+var _lt=performance.now();
+function loop(){var now=performance.now(),dt=Math.min((now-_lt)/1000,.05);_lt=now;
+  if(G.shake){G.shakeTimer-=dt;if(G.shakeTimer<=0)G.shake=false}
+  if(G.msgTimer>0)G.msgTimer-=dt;
+  if(G.revealRow>=0&&G.revealCol<WORD_LEN){G.revealTimer+=dt;if(G.revealTimer>.1){G.revealTimer=0;G.revealCol++;SFX.flip()}if(G.revealCol>=WORD_LEN)G.revealRow=-1}
+  draw();requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+
+</script>
+
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px 'Segoe UI',Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px;">
+  <span id="vc-count">...</span> Wordsmiths
+</div>
+<script>
+(function(){
+  var G='word-of-the-day',SU='https://ivhpqkqnfqcgrfrsvszf.supabase.co',SK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  function hdr(){return{'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json'}}
+  async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('').slice(0,32)}catch(e){return'anon-'+Math.random().toString(36).slice(2,10)}}
+  async function run(){
+    var h=await vh();
+    try{await fetch(SU+'/rest/v1/game_visits',{method:'POST',headers:Object.assign(hdr(),{'Prefer':'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}
+    try{var r=await fetch(SU+'/rest/v1/game_visits?game=eq.'+G+'&select=id',{headers:Object.assign(hdr(),{'Prefer':'count=exact'})});var c=r.headers.get('content-range');if(c){var n=c.split('/')[1];if(n&&n!=='*')document.getElementById('vc-count').textContent=Number(n).toLocaleString()}}catch(e){}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

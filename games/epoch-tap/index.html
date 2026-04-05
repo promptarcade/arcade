@@ -1,0 +1,1616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,maximum-scale=1">
+<title>Epoch Tap</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif;background:#000;color:#e0e0e0;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+
+#app{display:flex;flex-direction:column;height:100%;overflow:hidden}
+
+/* Top bar */
+#top-bar{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:rgba(0,0,0,0.7);z-index:10;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,0.1)}
+#era-name{font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:1px}
+#spark-display{font-size:16px;font-weight:700}
+#spark-display span{color:#ffcc44}
+#stats-row{display:flex;gap:12px;padding:2px 12px;font-size:11px;color:#888;background:rgba(0,0,0,0.5);flex-shrink:0}
+
+/* Canvas area */
+#tap-area{flex:1;position:relative;cursor:pointer;overflow:hidden;min-height:0}
+#tap-area canvas{width:100%;height:100%;display:block}
+
+/* Event banner */
+#event-banner{display:none;position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(255,200,50,0.15);border:1px solid rgba(255,200,50,0.4);border-radius:20px;padding:6px 16px;font-size:13px;color:#ffcc44;z-index:5;cursor:pointer;animation:eventPulse 0.5s ease infinite alternate}
+@keyframes eventPulse{from{box-shadow:0 0 8px rgba(255,200,50,0.2)}to{box-shadow:0 0 16px rgba(255,200,50,0.5)}}
+
+/* Bottom panels */
+#bottom-panel{flex-shrink:0;height:50vh;display:flex;flex-direction:column;background:rgba(10,10,20,0.95);border-top:1px solid rgba(255,255,255,0.1)}
+
+/* Tab bar */
+#tab-bar{display:flex;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,0.1)}
+.tab-btn{flex:1;padding:8px 4px;text-align:center;font-size:12px;font-weight:600;background:none;border:none;color:#666;cursor:pointer;border-bottom:2px solid transparent;transition:color 0.15s,border-color 0.15s}
+.tab-btn.active{color:#ffcc44;border-bottom-color:#ffcc44}
+
+/* Tab content */
+.tab-content{display:none;overflow-y:auto;flex:1;min-height:0}
+.tab-content.active{display:block;overflow-y:auto}
+
+/* Generators panel */
+#gen-list{padding:8px}
+.gen-row{display:flex;align-items:center;padding:8px;margin-bottom:4px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);transition:background 0.15s}
+.gen-row.affordable{background:rgba(255,200,50,0.06);border-color:rgba(255,200,50,0.15)}
+.gen-row.locked{opacity:0.35}
+.gen-icon{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;margin-right:8px}
+.gen-info{flex:1;min-width:0}
+.gen-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gen-rate{font-size:10px;color:#888}
+.gen-count{font-size:16px;font-weight:700;margin:0 8px;min-width:24px;text-align:center}
+.gen-buy{padding:6px 12px;border-radius:6px;border:none;font-size:11px;font-weight:600;cursor:pointer;background:rgba(255,200,50,0.15);color:#ffcc44;transition:background 0.15s}
+.gen-buy:active{background:rgba(255,200,50,0.3)}
+.gen-buy:disabled{opacity:0.3;cursor:default}
+
+/* Upgrade row */
+.upgrade-row{display:flex;align-items:center;padding:4px 8px 4px 48px;margin-bottom:2px}
+.upgrade-row.bought{opacity:0.4}
+.upgrade-name{flex:1;font-size:11px;color:#aaccff}
+.upgrade-buy{padding:4px 10px;border-radius:4px;border:none;font-size:10px;cursor:pointer;background:rgba(100,150,255,0.15);color:#aaccff}
+.upgrade-buy:disabled{opacity:0.3;cursor:default}
+
+/* Breakthrough bar */
+#breakthrough{padding:8px 12px;background:rgba(0,0,0,0.5);flex-shrink:0}
+#bt-name{font-size:12px;font-weight:600;margin-bottom:4px}
+#bt-bar-wrap{height:16px;background:rgba(255,255,255,0.08);border-radius:8px;overflow:hidden;margin-bottom:6px}
+#bt-bar{height:100%;background:linear-gradient(90deg,#ffcc44,#ff8844);border-radius:8px;transition:width 0.2s;width:0%}
+#bt-progress{font-size:10px;color:#888;text-align:center;margin-bottom:4px}
+#bt-buttons{display:flex;gap:8px}
+#bt-buttons button{flex:1;padding:6px;border-radius:6px;border:none;font-size:11px;font-weight:600;cursor:pointer;background:rgba(255,200,50,0.15);color:#ffcc44}
+#bt-buttons button:active{background:rgba(255,200,50,0.3)}
+#bt-buttons button:disabled{opacity:0.3;cursor:default}
+
+/* Buy amount toggle */
+#buy-toggle{display:flex;gap:4px;padding:4px 8px;flex-shrink:0}
+#buy-toggle button{padding:4px 8px;border-radius:4px;border:1px solid rgba(255,255,255,0.1);background:none;color:#888;font-size:10px;cursor:pointer}
+#buy-toggle button.active{color:#ffcc44;border-color:rgba(255,200,50,0.3);background:rgba(255,200,50,0.1)}
+
+/* Floating numbers */
+.float-num{position:absolute;pointer-events:none;font-weight:700;font-size:16px;z-index:20;text-shadow:0 1px 4px rgba(0,0,0,0.5);animation:floatUp 0.8s ease-out forwards}
+@keyframes floatUp{0%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-60px) scale(0.7)}}
+
+/* Combo */
+#combo{display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-80px);font-size:20px;font-weight:800;color:#ffcc44;text-shadow:0 0 12px rgba(255,200,50,0.5);z-index:15;pointer-events:none}
+
+/* Era transition overlay */
+#era-transition{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:100;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+#era-transition h2{font-size:clamp(20px,5vw,32px);color:#ffcc44;text-align:center}
+#era-transition p{font-size:14px;color:#aaa;text-align:center;max-width:300px;line-height:1.5}
+#era-transition button{margin-top:12px;padding:10px 32px;border-radius:8px;border:none;font-size:14px;font-weight:600;cursor:pointer;background:#ffcc44;color:#111}
+
+/* Stats/Achievements/Extinction panels */
+.panel-content{padding:12px}
+.panel-content h3{font-size:13px;color:#ffcc44;margin-bottom:8px}
+.stat-line{display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04)}
+.stat-line .val{color:#ffcc44;font-weight:600}
+
+/* Achievement grid */
+.ach-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px}
+.ach-item{padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);font-size:11px}
+.ach-item.unlocked{background:rgba(255,200,50,0.08);border-color:rgba(255,200,50,0.2)}
+.ach-item .ach-name{font-weight:600}
+.ach-item .ach-desc{color:#888;font-size:10px}
+
+/* Extinction panel */
+#ext-panel{text-align:center;padding:20px}
+#ext-panel .lp-preview{font-size:24px;font-weight:800;color:#ff6644;margin:12px 0}
+#ext-btn{padding:10px 24px;border-radius:8px;border:2px solid #ff4444;background:rgba(255,68,68,0.1);color:#ff4444;font-size:14px;font-weight:700;cursor:pointer;margin-top:12px}
+#ext-btn:active{background:rgba(255,68,68,0.2)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="top-bar">
+    <div id="era-name">Primordial Soup</div>
+    <div id="spark-display"><span id="spark-count">0</span> Spark</div>
+  </div>
+  <div id="stats-row">
+    <span>Run #<span id="run-num">1</span></span>
+    <span>LP: <span id="lp-display">0</span></span>
+    <span id="per-sec">0/s</span>
+  </div>
+
+  <div id="tap-area">
+    <canvas id="canvas"></canvas>
+    <div id="event-banner"></div>
+    <div id="combo"></div>
+  </div>
+
+  <div id="bottom-panel">
+    <div id="tab-bar">
+      <button class="tab-btn active" data-tab="generators">Generators</button>
+      <button class="tab-btn" data-tab="stats">Stats</button>
+      <button class="tab-btn" data-tab="achievements">Achievements</button>
+      <button class="tab-btn" data-tab="extinction">Extinction</button>
+    </div>
+    <div id="breakthrough">
+      <div id="bt-name">Breakthrough: Photosynthesis</div>
+      <div id="bt-bar-wrap"><div id="bt-bar"></div></div>
+      <div id="bt-progress">0 / 500</div>
+      <div id="bt-buttons">
+        <button id="bt-invest" disabled>Invest 10%</button>
+        <button id="bt-all" disabled>Invest All</button>
+      </div>
+    </div>
+    <div class="tab-content active" data-tab="generators">
+      <div id="buy-toggle">
+        <button class="active" data-amount="1">x1</button>
+        <button data-amount="10">x10</button>
+        <button data-amount="100">x100</button>
+      </div>
+      <div id="gen-list"></div>
+    </div>
+    <div class="tab-content" data-tab="stats">
+      <div class="panel-content" id="stats-panel"></div>
+    </div>
+    <div class="tab-content" data-tab="achievements">
+      <div class="panel-content" id="ach-panel"></div>
+    </div>
+    <div class="tab-content" data-tab="extinction">
+      <div class="panel-content" id="ext-panel"></div>
+    </div>
+  </div>
+</div>
+
+<div id="era-transition">
+  <h2 id="et-title"></h2>
+  <p id="et-lore"></p>
+  <button id="et-continue">Continue</button>
+</div>
+
+<script>
+// ============================================================
+// EPOCH TAP — Core Engine
+// ============================================================
+
+// ── Number formatting ──
+function fmt(n) {
+  if (n < 1000) return Math.floor(n).toString();
+  var suffixes = ['','K','M','B','T','Qa','Qi','Sx','Sp','Oc','No','Dc'];
+  var tier = Math.floor(Math.log10(Math.abs(n)) / 3);
+  if (tier >= suffixes.length) tier = suffixes.length - 1;
+  var scale = Math.pow(10, tier * 3);
+  var scaled = n / scale;
+  return (scaled < 10 ? scaled.toFixed(2) : scaled < 100 ? scaled.toFixed(1) : Math.floor(scaled)) + suffixes[tier];
+}
+
+// ── Era Data ──
+var ERAS = [
+  { name: 'Primordial Soup', tap: 'Tidepool', btName: 'Photosynthesis', btCost: 40000, mult: 1,
+    palette: {bg1:'#2a1a0a',bg2:'#4a2a1a',accent:'#ff6622',text:'#ffaa66'},
+    lore: 'For a billion years, chemistry tried every combination. Most failed. Some didn\'t.',
+    generators: [
+      {name:'Amino Acid Chain',icon:'🧬',base:0.1,cost:10,upgrades:[{name:'Stronger Bonds',mult:2,cost:100}]},
+      {name:'Lipid Bubble',icon:'🫧',base:0.5,cost:50,upgrades:[{name:'Membrane Stability',mult:2,cost:400}]},
+      {name:'RNA Strand',icon:'🔬',base:2,cost:200,upgrades:[{name:'Replication Speed',mult:3,cost:1500}]},
+      {name:'Single Cell',icon:'🦠',base:8,cost:800,upgrades:[{name:'Mitosis',mult:2,cost:5000}]},
+      {name:'Cell Colony',icon:'🟢',base:30,cost:3000,upgrades:[{name:'Specialisation',mult:2,cost:15000}]},
+    ],
+    wonder:{name:'Hydrothermal Vent',cost:120000,bonus:0.25,globalBonus:0},
+  },
+  { name: 'Ocean Life', tap: 'Trilobite', btName: 'Legs', btCost: 300000, mult: 5,
+    palette: {bg1:'#0a2a4a',bg2:'#1a4a6a',accent:'#44ccff',text:'#88ddff'},
+    lore: 'Something crawled out of the water. It didn\'t know it was changing everything.',
+    generators: [
+      {name:'Algae Bloom',icon:'🌿',base:50,cost:100,upgrades:[{name:'Chloroplast Efficiency',mult:2,cost:800}]},
+      {name:'Jellyfish Drift',icon:'🪼',base:200,cost:500,upgrades:[{name:'Bioluminescence',mult:2,cost:3000}]},
+      {name:'Fish School',icon:'🐟',base:800,cost:2000,upgrades:[{name:'Pack Hunting',mult:3,cost:12000}]},
+      {name:'Coral Reef',icon:'🪸',base:3000,cost:8000,upgrades:[{name:'Calcium Shells',mult:2,cost:40000}]},
+      {name:'Giant Squid',icon:'🦑',base:10000,cost:30000,upgrades:[{name:'Deep Pressure',mult:2,cost:120000}]},
+    ],
+    wonder:{name:'Great Barrier Reef',cost:900000,bonus:0.25,globalBonus:0.05},
+  },
+  { name: 'Land & Dinosaurs', tap: 'Dino Egg', btName: 'Survival', btCost: 9.6e6, mult: 25,
+    palette: {bg1:'#1a2a0a',bg2:'#3a4a2a',accent:'#88cc44',text:'#aadd66'},
+    lore: 'The sky burned. 75% of everything died. But in the ashes, something small and warm survived.',
+    generators: [
+      {name:'Fern Forest',icon:'🌿',base:15000,cost:5000,upgrades:[{name:'Seed Bearing',mult:2,cost:30000}]},
+      {name:'Insect Swarm',icon:'🦗',base:60000,cost:20000,upgrades:[{name:'Exoskeleton',mult:2,cost:100000}]},
+      {name:'Amphibian',icon:'🐸',base:200000,cost:80000,upgrades:[{name:'Egg Shell',mult:2,cost:400000}]},
+      {name:'Raptor Pack',icon:'🦖',base:800000,cost:300000,upgrades:[{name:'Warm Blood',mult:3,cost:2e6}]},
+      {name:'Brachiosaurus',icon:'🦕',base:3e6,cost:1.2e6,upgrades:[{name:'Herd Immunity',mult:2,cost:6e6}]},
+    ],
+    wonder:{name:'Pangaea',cost:30e6,bonus:0.25,globalBonus:0.05},
+  },
+  { name: 'Stone Age', tap: 'Flint', btName: 'Agriculture', btCost: 3e9, mult: 100,
+    palette: {bg1:'#2a1a0a',bg2:'#4a3a2a',accent:'#ff8844',text:'#ffaa66'},
+    lore: 'Someone dropped a seed. It grew. They dropped another. The world was never the same.',
+    generators: [
+      {name:'Gatherer',icon:'🧺',base:5e6,cost:2e6,upgrades:[{name:'Berry Knowledge',mult:2,cost:10e6}]},
+      {name:'Hunter',icon:'🏹',base:20e6,cost:8e6,upgrades:[{name:'Spear Thrower',mult:3,cost:50e6}]},
+      {name:'Fire Keeper',icon:'🔥',base:80e6,cost:30e6,upgrades:[{name:'Controlled Burn',mult:2,cost:150e6}]},
+      {name:'Tool Maker',icon:'🪨',base:300e6,cost:120e6,upgrades:[{name:'Hafted Tools',mult:2,cost:600e6}]},
+      {name:'Tribe',icon:'🏕',base:1e9,cost:500e6,upgrades:[{name:'Oral Tradition',mult:2,cost:2.5e9},{name:'Elder Council',mult:1.1,cost:5e9,global:true}]},
+    ],
+    wonder:{name:'Cave Painting',cost:10e9,bonus:0.25,globalBonus:0.05},
+  },
+  { name: 'Bronze Age', tap: 'Bronze Pour', btName: 'Iron Smelting', btCost: 1e12, mult: 500,
+    palette: {bg1:'#3a2a1a',bg2:'#5a4a3a',accent:'#cc8844',text:'#ddaa66'},
+    lore: 'They learned to write. The first thing they wrote was a beer recipe. Humanity hasn\'t changed.',
+    generators: [
+      {name:'Wheat Farm',icon:'🌾',base:2e9,cost:1e9,upgrades:[{name:'Irrigation',mult:3,cost:5e9}]},
+      {name:'Potter',icon:'🏺',base:8e9,cost:4e9,upgrades:[{name:'Kiln Firing',mult:2,cost:20e9}]},
+      {name:'Bronze Smith',icon:'⚒️',base:30e9,cost:15e9,upgrades:[{name:'Alloy Mastery',mult:2,cost:80e9}]},
+      {name:'Scribe',icon:'📜',base:120e9,cost:60e9,upgrades:[{name:'Cuneiform',mult:3,cost:300e9}]},
+      {name:'Ziggurat',icon:'🏛️',base:500e9,cost:250e9,upgrades:[{name:'Priesthood',mult:2,cost:1.2e12}]},
+    ],
+    wonder:{name:'Great Pyramid',cost:3.6e12,bonus:0.25,globalBonus:0.1},
+  },
+  { name: 'Iron Age & Classical', tap: 'Forge', btName: 'The Compass', btCost: 420e12, mult: 2500,
+    palette: {bg1:'#1a1a2a',bg2:'#2a2a3a',accent:'#aaaacc',text:'#ccccee'},
+    lore: 'An empire built roads to everywhere. When it fell, the roads remained. Ideas travel on roads.',
+    generators: [
+      {name:'Iron Mine',icon:'⛏️',base:800e9,cost:400e9,upgrades:[{name:'Steel Tempering',mult:2,cost:2e12}]},
+      {name:'Legion',icon:'🛡️',base:3e12,cost:1.5e12,upgrades:[{name:'Military Roads',mult:2,cost:8e12}]},
+      {name:'Aqueduct',icon:'🏗️',base:12e12,cost:6e12,upgrades:[{name:'Concrete',mult:3,cost:30e12}]},
+      {name:'Philosopher',icon:'📖',base:50e12,cost:25e12,upgrades:[{name:'Logic & Reason',mult:3,cost:120e12}]},
+      {name:'Colosseum',icon:'🏟️',base:200e12,cost:100e12,upgrades:[{name:'Bread & Circuses',mult:2,cost:500e12}]},
+    ],
+    wonder:{name:'Library of Alexandria',cost:1.3e15,bonus:0.25,globalBonus:0.1},
+  },
+  { name: 'Medieval', tap: 'Manuscript', btName: 'Printing Press', btCost: 15e15, mult: 15000,
+    palette: {bg1:'#2a1a2a',bg2:'#3a2a3a',accent:'#cc66aa',text:'#dd88cc'},
+    lore: 'One machine replaced ten thousand monks. Knowledge escaped the monastery. It never went back.',
+    generators: [
+      {name:'Windmill',icon:'🌀',base:30e12,cost:15e12,upgrades:[{name:'Crop Rotation',mult:2,cost:80e12}]},
+      {name:'Monastery',icon:'⛪',base:120e12,cost:60e12,upgrades:[{name:'Manuscript Copying',mult:3,cost:300e12}]},
+      {name:'Castle',icon:'🏰',base:500e12,cost:250e12,upgrades:[{name:'Fortification',mult:2,cost:1.2e15}]},
+      {name:'Guild Hall',icon:'🏠',base:2e15,cost:1e15,upgrades:[{name:'Trade Routes',mult:2,cost:5e15}]},
+      {name:'Cathedral',icon:'⛪',base:8e15,cost:4e15,upgrades:[{name:'Flying Buttress',mult:2,cost:20e15}]},
+    ],
+    wonder:{name:'Notre-Dame',cost:45e15,bonus:0.25,globalBonus:0.1},
+  },
+  { name: 'Renaissance', tap: 'Globe', btName: 'Steam Engine', btCost: 6e18, mult: 100000,
+    palette: {bg1:'#2a2a1a',bg2:'#4a4a2a',accent:'#ddcc44',text:'#eedd66'},
+    lore: 'Someone boiled water and watched the lid rattle. Then they built an empire on steam.',
+    generators: [
+      {name:'Printing Press',icon:'🖨️',base:15e15,cost:8e15,upgrades:[{name:'Movable Type',mult:3,cost:40e15}]},
+      {name:'Observatory',icon:'🔭',base:60e15,cost:30e15,upgrades:[{name:'Lens Grinding',mult:2,cost:150e15}]},
+      {name:'Galleon',icon:'⛵',base:250e15,cost:120e15,upgrades:[{name:'Navigation Charts',mult:2,cost:600e15}]},
+      {name:'Bank',icon:'🏦',base:1e18,cost:500e15,upgrades:[{name:'Compound Interest',mult:3,cost:2.5e18}]},
+      {name:'Academy',icon:'🎓',base:4e18,cost:2e18,upgrades:[{name:'Scientific Method',mult:3,cost:10e18}]},
+    ],
+    wonder:{name:'Sistine Chapel',cost:18e18,bonus:0.25,globalBonus:0.15},
+  },
+  { name: 'Industrial', tap: 'Piston', btName: 'Electricity', btCost: 2.4e21, mult: 1e6,
+    palette: {bg1:'#1a1a1a',bg2:'#2a2a2a',accent:'#cc4422',text:'#dd6644'},
+    lore: 'The night stopped being dark. The distance stopped being far. Everything accelerated.',
+    generators: [
+      {name:'Cotton Mill',icon:'🧵',base:8e18,cost:4e18,upgrades:[{name:'Power Loom',mult:2,cost:20e18}]},
+      {name:'Coal Mine',icon:'⛏️',base:30e18,cost:15e18,upgrades:[{name:'Deep Mining',mult:2,cost:80e18}]},
+      {name:'Steam Train',icon:'🚂',base:120e18,cost:60e18,upgrades:[{name:'Standard Gauge',mult:3,cost:300e18}]},
+      {name:'Steel Works',icon:'🏭',base:500e18,cost:250e18,upgrades:[{name:'Bessemer Process',mult:3,cost:1.2e21}]},
+      {name:'Telegraph',icon:'📡',base:2e21,cost:1e21,upgrades:[{name:'Morse Code',mult:2,cost:5e21}]},
+    ],
+    wonder:{name:'Eiffel Tower',cost:7.2e21,bonus:0.25,globalBonus:0.15},
+  },
+  { name: 'Modern', tap: 'Light Bulb', btName: 'Microchip', btCost: 1.05e24, mult: 15e6,
+    palette: {bg1:'#0a0a1a',bg2:'#1a1a3a',accent:'#4488ff',text:'#66aaff'},
+    lore: 'We put lightning in sand and taught it to think. Sort of.',
+    generators: [
+      {name:'Power Grid',icon:'⚡',base:4e21,cost:2e21,upgrades:[{name:'AC Current',mult:2,cost:10e21}]},
+      {name:'Auto Factory',icon:'🚗',base:15e21,cost:8e21,upgrades:[{name:'Assembly Line',mult:3,cost:40e21}]},
+      {name:'Television',icon:'📺',base:60e21,cost:30e21,upgrades:[{name:'Satellite Broadcast',mult:2,cost:150e21}]},
+      {name:'Jet Airliner',icon:'✈️',base:250e21,cost:120e21,upgrades:[{name:'Supersonic',mult:2,cost:600e21}]},
+      {name:'Nuclear Plant',icon:'☢️',base:1e24,cost:500e21,upgrades:[{name:'Chain Reaction',mult:3,cost:2.5e24}]},
+    ],
+    wonder:{name:'Moon Landing',cost:3.15e24,bonus:0.25,globalBonus:0.15},
+  },
+  { name: 'Digital', tap: 'Cursor', btName: 'Fusion Power', btCost: 4.5e26, mult: 500e6,
+    palette: {bg1:'#050510',bg2:'#0a0a20',accent:'#44ffaa',text:'#66ffcc'},
+    lore: 'All human knowledge, accessible to everyone, instantly. They used it to argue about cats.',
+    generators: [
+      {name:'Personal Computer',icon:'💻',base:2e24,cost:1e24,upgrades:[{name:'Moore\'s Law',mult:3,cost:5e24}]},
+      {name:'Internet Node',icon:'🌐',base:8e24,cost:4e24,upgrades:[{name:'Fibre Optics',mult:3,cost:20e24}]},
+      {name:'Smartphone',icon:'📱',base:30e24,cost:15e24,upgrades:[{name:'App Store',mult:2,cost:80e24}]},
+      {name:'Data Centre',icon:'🖥️',base:120e24,cost:60e24,upgrades:[{name:'Cloud Computing',mult:2,cost:300e24}]},
+      {name:'AI System',icon:'🧠',base:500e24,cost:250e24,upgrades:[{name:'Deep Learning',mult:3,cost:1.2e27}]},
+    ],
+    wonder:{name:'World Wide Web',cost:1.35e27,bonus:0.25,globalBonus:0.2},
+  },
+  { name: 'Space', tap: 'Rocket', btName: 'Galactic Seed', btCost: 4e29, mult: 50e9,
+    palette: {bg1:'#050508',bg2:'#0a0a15',accent:'#aa66ff',text:'#cc88ff'},
+    lore: 'You started as chemistry in a puddle. Now you\'re everywhere.',
+    generators: [
+      {name:'Space Station',icon:'🛸',base:1e27,cost:500e24,upgrades:[{name:'Orbital Manufacturing',mult:2,cost:2.5e27}]},
+      {name:'Moon Base',icon:'🌙',base:4e27,cost:2e27,upgrades:[{name:'Helium-3 Mining',mult:3,cost:10e27}]},
+      {name:'Mars Colony',icon:'🔴',base:15e27,cost:8e27,upgrades:[{name:'Terraforming',mult:3,cost:40e27}]},
+      {name:'Asteroid Miner',icon:'☄️',base:60e27,cost:30e27,upgrades:[{name:'Von Neumann Probes',mult:3,cost:150e27}]},
+      {name:'Generation Ship',icon:'🚀',base:250e27,cost:120e27,upgrades:[{name:'Cryogenics',mult:2,cost:600e27}]},
+      {name:'Dyson Sphere',icon:'☀️',base:1e30,cost:500e27,upgrades:[{name:'Matrioshka Brain',mult:3,cost:2.5e30}]},
+    ],
+    wonder:{name:'First Contact',cost:1.2e30,bonus:0.25,globalBonus:0.25},
+  },
+];
+
+// ── Achievements Data ──
+var ACHIEVEMENTS = [
+  {id:'first_spark',name:'First Spark',desc:'Generate your first Spark',check:function(g){return g.totalTaps>=1}},
+  {id:'era2',name:'Primordial Complete',desc:'Reach the Ocean',check:function(g){return g.era>=1}},
+  {id:'era3',name:'Out of the Water',desc:'Reach the land',check:function(g){return g.era>=2}},
+  {id:'era4',name:'Fire Starter',desc:'Reach the Stone Age',check:function(g){return g.era>=3}},
+  {id:'era5',name:'Civilisation',desc:'Reach the Bronze Age',check:function(g){return g.era>=4}},
+  {id:'era6',name:'Forged in Iron',desc:'Reach the Classical era',check:function(g){return g.era>=5}},
+  {id:'era7',name:'Dark Ages',desc:'Reach the Medieval era',check:function(g){return g.era>=6}},
+  {id:'era8',name:'New World',desc:'Reach the Renaissance',check:function(g){return g.era>=7}},
+  {id:'era9',name:'Full Steam',desc:'Reach the Industrial era',check:function(g){return g.era>=8}},
+  {id:'era10',name:'Switched On',desc:'Reach the Modern era',check:function(g){return g.era>=9}},
+  {id:'era11',name:'Connected',desc:'Reach the Digital era',check:function(g){return g.era>=10}},
+  {id:'era12',name:'Among the Stars',desc:'Reach Space',check:function(g){return g.era>=11}},
+  {id:'victory',name:'Galactic Seed',desc:'Complete the game',check:function(g){return g.victory}},
+  {id:'click100',name:'Click Apprentice',desc:'100 total taps',check:function(g){return g.lifetimeTaps>=100}},
+  {id:'click1k',name:'Click Master',desc:'1,000 total taps',check:function(g){return g.lifetimeTaps>=1000}},
+  {id:'click10k',name:'Click Legend',desc:'10,000 total taps',check:function(g){return g.lifetimeTaps>=10000}},
+  {id:'click100k',name:'Click God',desc:'100,000 total taps',check:function(g){return g.lifetimeTaps>=100000}},
+  {id:'million',name:'Millionaire',desc:'Accumulate 1M Spark',check:function(g){return g.lifetimeSpark>=1e6}},
+  {id:'billion',name:'Billionaire',desc:'1B total Spark',check:function(g){return g.lifetimeSpark>=1e9}},
+  {id:'trillion',name:'Trillionaire',desc:'1T total Spark',check:function(g){return g.lifetimeSpark>=1e12}},
+  {id:'beyond',name:'Beyond Counting',desc:'1Qi total Spark',check:function(g){return g.lifetimeSpark>=1e18}},
+  {id:'gen100',name:'Automator',desc:'Own 100 generators',check:function(g){return g.totalGens()>=100}},
+  {id:'gen500',name:'Industrialist',desc:'Own 500 generators',check:function(g){return g.totalGens()>=500}},
+  {id:'gen1000',name:'Empire Builder',desc:'Own 1,000 generators',check:function(g){return g.totalGens()>=1000}},
+  {id:'ext1',name:'First Extinction',desc:'Trigger extinction',check:function(g){return g.extinctions>=1}},
+  {id:'ext3',name:'Cycle of Life',desc:'3 extinction cycles',check:function(g){return g.extinctions>=3}},
+  {id:'ext10',name:'Eternal Return',desc:'10 extinction cycles',check:function(g){return g.extinctions>=10}},
+  {id:'patience',name:'Patience',desc:'Wait 5 min without tapping in Era 1',hidden:true,check:function(g){return g.idleTime>=300&&g.era===0}},
+  {id:'speed_space',name:'Speedrun: Space',desc:'Reach Space in under 25 min',check:function(g){return g.era>=11&&g.runTime<1500}},
+  {id:'speed_victory',name:'Speedrun: Victory',desc:'Complete in under 30 min',check:function(g){return g.victory&&g.runTime<1800}},
+];
+
+// ── Random Events ──
+var EVENTS = [
+  {era:0,name:'Lightning Strike',bonus:1.5,duration:10,icon:'⚡'},
+  {era:1,name:'Volcanic Vent',bonus:2,duration:5,icon:'🌋'},
+  {era:2,name:'Meteor Shower',bonus:1.3,duration:15,icon:'☄️'},
+  {era:3,name:'Mammoth Hunt',bonus:5,duration:10,icon:'🦣',tapOnly:true},
+  {era:4,name:'Trade Caravan',bonus:2,duration:10,icon:'🐪'},
+  {era:5,name:'Golden Age',bonus:3,duration:15,icon:'👑'},
+  {era:6,name:'Plague Recovery',bonus:1.5,duration:20,icon:'💀'},
+  {era:7,name:'Eureka!',bonus:5,duration:5,icon:'💡'},
+  {era:8,name:'Gold Rush',bonus:3,duration:10,icon:'🪙'},
+  {era:9,name:'Baby Boom',bonus:2,duration:20,icon:'👶'},
+  {era:10,name:'Viral Post',bonus:10,duration:3,icon:'❤️'},
+  {era:11,name:'Alien Signal',bonus:5,duration:10,icon:'👽'},
+];
+
+// ── Game State ──
+var G = {
+  spark: 0, era: 0, victory: false,
+  genOwned: [],   // genOwned[era][genIdx] = count
+  genMults: [],   // from upgrades
+  upgradeBought: [], // upgradeBought[era][genIdx][upgIdx] = bool
+  btProgress: 0,
+  wonderBuilt: [], // per era
+  // Prestige
+  legacyPoints: 0, extinctions: 0, permUnlocks: {},
+  // Stats
+  totalTaps: 0, lifetimeTaps: 0, lifetimeSpark: 0,
+  runTime: 0, totalPlaytime: 0, runStartTime: Date.now(),
+  idleTime: 0, lastTapTime: Date.now(),
+  bestRunTime: Infinity,
+  // Events
+  activeEvent: null, eventTimer: 0, eventCooldown: 30 + Math.random() * 30,
+  // Combo
+  comboCount: 0, comboTimer: 0, frenzy: false, frenzyTimer: 0,
+  // Achievements
+  achievementsUnlocked: {},
+  // Settings
+  buyAmount: 1,
+
+  totalGens: function() {
+    var t = 0;
+    for (var e = 0; e < this.genOwned.length; e++)
+      for (var i = 0; i < this.genOwned[e].length; i++) t += this.genOwned[e][i];
+    return t;
+  },
+
+  init: function() {
+    for (var e = 0; e < ERAS.length; e++) {
+      this.genOwned[e] = [];
+      this.genMults[e] = [];
+      this.upgradeBought[e] = [];
+      this.wonderBuilt[e] = false;
+      for (var i = 0; i < ERAS[e].generators.length; i++) {
+        this.genOwned[e][i] = 0;
+        this.genMults[e][i] = 1;
+        this.upgradeBought[e][i] = [];
+        for (var u = 0; u < ERAS[e].generators[i].upgrades.length; u++)
+          this.upgradeBought[e][i][u] = false;
+      }
+    }
+  },
+
+  getProduction: function() {
+    var total = 0;
+    var eraDef = ERAS[this.era];
+    var eraMult = eraDef.mult;
+    var lpMult = 1 + this.legacyPoints * 0.05;
+    var wonderGlobal = 1;
+    for (var e = 0; e < ERAS.length; e++) {
+      if (this.wonderBuilt[e]) wonderGlobal += ERAS[e].wonder.globalBonus;
+    }
+    var gens = eraDef.generators;
+    for (var i = 0; i < gens.length; i++) {
+      var count = this.genOwned[this.era][i];
+      if (count <= 0) continue;
+      total += gens[i].base * count * this.genMults[this.era][i];
+    }
+    var eventMult = (this.activeEvent && !this.activeEvent.tapOnly) ? this.activeEvent.bonus : 1;
+    return total * eraMult * lpMult * wonderGlobal * eventMult;
+  },
+
+  getTapPower: function() {
+    var eraDef = ERAS[this.era];
+    var base = 1 * eraDef.mult;
+    var genBonus = 1 + this.totalGens() * 0.01;
+    var lpMult = 1 + this.legacyPoints * 0.05;
+    var frenzyMult = this.frenzy ? 2 : 1;
+    var eventMult = (this.activeEvent && this.activeEvent.tapOnly) ? this.activeEvent.bonus : 1;
+    var wonderGlobal = 1;
+    for (var e = 0; e < ERAS.length; e++) {
+      if (this.wonderBuilt[e]) wonderGlobal += ERAS[e].wonder.globalBonus;
+    }
+    var power = base * genBonus * lpMult * frenzyMult * eventMult * wonderGlobal;
+    // Quantum Spark: taps are worth at least 1 second of production
+    if (this.permUnlocks.quantumSpark) {
+      var prod = this.getProduction();
+      if (prod > power) power = prod;
+    }
+    return power;
+  },
+
+  getGenCost: function(eraIdx, genIdx, amount) {
+    amount = amount || 1;
+    var base = ERAS[eraIdx].generators[genIdx].cost;
+    var owned = this.genOwned[eraIdx][genIdx];
+    var total = 0;
+    for (var i = 0; i < amount; i++) total += base * Math.pow(1.15, owned + i);
+    return total;
+  },
+
+  getLPForExtinction: function() {
+    if (this.era < 3) return 0;
+    if (this.victory) return 500;
+    return Math.pow(2, this.era - 3);
+  },
+};
+
+// ── Save / Load ──
+function saveGame() {
+  var data = {
+    spark: G.spark, era: G.era, victory: G.victory,
+    genOwned: G.genOwned, genMults: G.genMults, upgradeBought: G.upgradeBought,
+    btProgress: G.btProgress, wonderBuilt: G.wonderBuilt,
+    legacyPoints: G.legacyPoints, extinctions: G.extinctions, permUnlocks: G.permUnlocks,
+    totalTaps: G.totalTaps, lifetimeTaps: G.lifetimeTaps, lifetimeSpark: G.lifetimeSpark,
+    runTime: G.runTime, totalPlaytime: G.totalPlaytime, bestRunTime: G.bestRunTime,
+    achievementsUnlocked: G.achievementsUnlocked,
+    savedAt: Date.now(),
+  };
+  try { localStorage.setItem('epoch_tap_save', JSON.stringify(data)); } catch(e) {}
+}
+
+function loadGame() {
+  try {
+    var raw = localStorage.getItem('epoch_tap_save');
+    if (!raw) return false;
+    var d = JSON.parse(raw);
+    G.spark = d.spark || 0; G.era = d.era || 0; G.victory = d.victory || false;
+    G.genOwned = d.genOwned || []; G.genMults = d.genMults || []; G.upgradeBought = d.upgradeBought || [];
+    G.btProgress = d.btProgress || 0; G.wonderBuilt = d.wonderBuilt || [];
+    G.legacyPoints = d.legacyPoints || 0; G.extinctions = d.extinctions || 0; G.permUnlocks = d.permUnlocks || {};
+    G.totalTaps = d.totalTaps || 0; G.lifetimeTaps = d.lifetimeTaps || 0; G.lifetimeSpark = d.lifetimeSpark || 0;
+    G.runTime = d.runTime || 0; G.totalPlaytime = d.totalPlaytime || 0; G.bestRunTime = d.bestRunTime || Infinity;
+    G.achievementsUnlocked = d.achievementsUnlocked || {};
+    // Fill missing era data
+    for (var e = G.genOwned.length; e < ERAS.length; e++) {
+      G.genOwned[e] = []; G.genMults[e] = []; G.upgradeBought[e] = []; G.wonderBuilt[e] = false;
+      for (var i = 0; i < ERAS[e].generators.length; i++) {
+        G.genOwned[e][i] = 0; G.genMults[e][i] = 1; G.upgradeBought[e][i] = [];
+        for (var u = 0; u < ERAS[e].generators[i].upgrades.length; u++) G.upgradeBought[e][i][u] = false;
+      }
+    }
+    // Offline progress
+    if (d.savedAt) {
+      var elapsed = Math.min((Date.now() - d.savedAt) / 1000, 8 * 3600);
+      if (elapsed > 10) {
+        var offlineSpark = G.getProduction() * elapsed;
+        var offlineMult = G.permUnlocks.offlineBoost ? 2 : 1;
+        offlineSpark *= offlineMult;
+        G.spark += offlineSpark;
+        G.lifetimeSpark += offlineSpark;
+        if (offlineSpark > 0) setTimeout(function(){ showFloating('Welcome back! +' + fmt(offlineSpark), '#ffcc44'); }, 500);
+      }
+    }
+    return true;
+  } catch(e) { return false; }
+}
+
+// ── Canvas Drawing ──
+var canvas, ctx, cw, ch;
+
+function initCanvas() {
+  canvas = document.getElementById('canvas');
+  ctx = canvas.getContext('2d');
+  resizeCanvas();
+}
+
+function resizeCanvas() {
+  var rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width * devicePixelRatio;
+  canvas.height = rect.height * devicePixelRatio;
+  cw = rect.width; ch = rect.height;
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+
+var particles = [];
+
+// Seeded random for consistent background decorations
+function seededRng(s){return function(){s=(s*9301+49297)%233280;return s/233280;};}
+
+function drawBackground() {
+  var p = ERAS[G.era].palette;
+  var grad = ctx.createLinearGradient(0, 0, 0, ch);
+  grad.addColorStop(0, p.bg1);
+  grad.addColorStop(1, p.bg2);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, cw, ch);
+
+  var t = Date.now() / 1000;
+  var groundY = ch * 0.75;
+
+  if (G.era === 0) {
+    // PRIMORDIAL — volcanic landscape, lava rivers, steam vents
+    // Lava glow at horizon
+    ctx.globalAlpha = 0.3;
+    var lGrad = ctx.createLinearGradient(0, groundY - 20, 0, ch);
+    lGrad.addColorStop(0, '#ff4400'); lGrad.addColorStop(1, '#220800');
+    ctx.fillStyle = lGrad; ctx.fillRect(0, groundY - 20, cw, ch - groundY + 20);
+    ctx.globalAlpha = 1;
+    // Ground
+    ctx.fillStyle = '#1a0d05'; ctx.fillRect(0, groundY, cw, ch - groundY);
+    // Volcanoes
+    ctx.fillStyle = '#2a1508';
+    _triangle(cw*0.15, groundY, cw*0.08, groundY - ch*0.25);
+    _triangle(cw*0.75, groundY, cw*0.12, groundY - ch*0.35);
+    _triangle(cw*0.5, groundY, cw*0.06, groundY - ch*0.15);
+    // Lava rivers
+    ctx.globalAlpha = 0.5 + Math.sin(t * 2) * 0.2;
+    ctx.strokeStyle = '#ff4400'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(cw*0.75, groundY - ch*0.35);
+    ctx.quadraticCurveTo(cw*0.8, groundY - ch*0.1, cw*0.95, groundY);
+    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cw*0.15, groundY - ch*0.25);
+    ctx.quadraticCurveTo(cw*0.1, groundY - ch*0.05, cw*0.02, groundY);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    // Steam vents
+    for (var i = 0; i < 6; i++) {
+      var vx = cw * (0.1 + i * 0.16);
+      ctx.globalAlpha = 0.08 + Math.sin(t * 1.5 + i * 2) * 0.05;
+      ctx.fillStyle = '#ffaa66';
+      ctx.beginPath(); ctx.ellipse(vx, groundY - 5, 8, 15 + Math.sin(t + i) * 5, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Rising bubbles
+    for (var i = 0; i < 12; i++) {
+      var bx = (i * cw / 12 + Math.sin(t * 0.4 + i * 1.5) * 15) % cw;
+      var by = groundY - ((t * 20 + i * 30) % (groundY * 0.6));
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = '#ff8844';
+      ctx.beginPath(); ctx.arc(bx, by, 2 + (i % 3), 0, Math.PI * 2); ctx.fill();
+    }
+  } else if (G.era === 1) {
+    // OCEAN — underwater reef, jellyfish, light shafts
+    // Water gradient already set. Add depth bands
+    ctx.globalAlpha = 0.1;
+    ctx.fillStyle = '#003366'; ctx.fillRect(0, ch * 0.6, cw, ch * 0.4);
+    ctx.globalAlpha = 1;
+    // Light shafts from surface
+    for (var i = 0; i < 4; i++) {
+      var sx = cw * (0.15 + i * 0.22) + Math.sin(t * 0.3 + i) * 15;
+      ctx.globalAlpha = 0.06;
+      ctx.fillStyle = '#88ddff';
+      ctx.beginPath();
+      ctx.moveTo(sx - 10, 0); ctx.lineTo(sx + 20, 0);
+      ctx.lineTo(sx + 40 + i * 10, ch); ctx.lineTo(sx - 30 - i * 10, ch);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Seabed
+    ctx.fillStyle = '#0a2040'; ctx.fillRect(0, groundY, cw, ch - groundY);
+    // Coral shapes
+    var rng = seededRng(42);
+    for (var i = 0; i < 8; i++) {
+      var cx2 = rng() * cw; var cH = 10 + rng() * 25;
+      ctx.fillStyle = ['#cc4466','#44aa88','#ff8844','#aa44cc'][i % 4];
+      ctx.globalAlpha = 0.4;
+      ctx.beginPath(); ctx.ellipse(cx2, groundY, 6 + rng() * 8, cH, 0, Math.PI, 0); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Floating jellyfish
+    for (var i = 0; i < 5; i++) {
+      var jx = (cw * 0.1 + i * cw * 0.2 + Math.sin(t * 0.2 + i * 3) * 30) % cw;
+      var jy = ch * 0.15 + i * ch * 0.12 + Math.sin(t * 0.5 + i) * 10;
+      ctx.globalAlpha = 0.2;
+      ctx.fillStyle = '#cc88ff';
+      ctx.beginPath(); ctx.ellipse(jx, jy, 8, 6, 0, Math.PI, 0); ctx.fill();
+      ctx.strokeStyle = '#aa66dd'; ctx.lineWidth = 1;
+      for (var j = 0; j < 3; j++) {
+        ctx.beginPath(); ctx.moveTo(jx - 4 + j * 4, jy);
+        ctx.lineTo(jx - 4 + j * 4 + Math.sin(t * 2 + j) * 3, jy + 12 + Math.sin(t + j) * 4);
+        ctx.stroke();
+      }
+    }
+  } else if (G.era === 2) {
+    // DINOSAURS — jungle, volcano in distance, pterodactyls
+    ctx.fillStyle = '#1a3a0a'; ctx.fillRect(0, groundY, cw, ch - groundY);
+    // Distant volcano
+    ctx.fillStyle = '#2a2a3a'; _triangle(cw * 0.85, groundY, cw * 0.1, groundY - ch * 0.3);
+    ctx.fillStyle = '#ff4400'; ctx.globalAlpha = 0.3 + Math.sin(t) * 0.15;
+    ctx.beginPath(); ctx.arc(cw * 0.85, groundY - ch * 0.3, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Fern trees
+    var rng = seededRng(99);
+    for (var i = 0; i < 10; i++) {
+      var tx = rng() * cw; var tH = 30 + rng() * 50;
+      ctx.fillStyle = '#2a4a1a'; ctx.fillRect(tx, groundY - tH, 4, tH);
+      ctx.fillStyle = '#3a6a2a'; ctx.globalAlpha = 0.6;
+      for (var f = 0; f < 4; f++) {
+        ctx.beginPath(); ctx.ellipse(tx + 2, groundY - tH + f * 12, 12 + rng() * 8, 5, rng() * 0.5, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+    // Pterodactyls
+    for (var i = 0; i < 3; i++) {
+      var px = (cw * 0.2 + i * cw * 0.3 + t * 20 * (i + 1)) % (cw + 40) - 20;
+      var py = ch * 0.1 + i * ch * 0.08 + Math.sin(t * 2 + i) * 8;
+      ctx.strokeStyle = '#4a3a2a'; ctx.lineWidth = 2; ctx.globalAlpha = 0.4;
+      ctx.beginPath(); ctx.moveTo(px - 10, py + 3); ctx.quadraticCurveTo(px, py - 5 + Math.sin(t * 4 + i) * 3, px + 10, py + 3); ctx.stroke();
+    }
+  } else if (G.era === 3) {
+    // STONE AGE — savanna, caves, night sky with stars
+    // Starry sky
+    var rng = seededRng(77);
+    ctx.globalAlpha = 0.5;
+    for (var i = 0; i < 40; i++) { ctx.fillStyle = '#fff'; ctx.fillRect(rng() * cw, rng() * groundY * 0.8, 1 + rng(), 1 + rng()); }
+    ctx.globalAlpha = 1;
+    // Moon
+    ctx.fillStyle = '#ddddaa'; ctx.globalAlpha = 0.3;
+    ctx.beginPath(); ctx.arc(cw * 0.8, ch * 0.12, 15, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Hills
+    ctx.fillStyle = '#2a2010';
+    ctx.beginPath(); ctx.moveTo(0, groundY);
+    for (var i = 0; i <= 10; i++) ctx.lineTo(i * cw / 10, groundY - 15 - Math.sin(i * 0.8) * 20);
+    ctx.lineTo(cw, groundY); ctx.fill();
+    // Ground
+    ctx.fillStyle = '#1a1508'; ctx.fillRect(0, groundY, cw, ch - groundY);
+    // Cave
+    ctx.fillStyle = '#0a0804';
+    ctx.beginPath(); ctx.ellipse(cw * 0.12, groundY, 25, 20, 0, Math.PI, 0); ctx.fill();
+    // Grass tufts
+    ctx.strokeStyle = '#4a4020'; ctx.lineWidth = 1;
+    for (var i = 0; i < 15; i++) {
+      var gx = (i * cw / 15 + 10); ctx.beginPath();
+      ctx.moveTo(gx, groundY); ctx.lineTo(gx - 3, groundY - 6 - Math.sin(t + i) * 2);
+      ctx.moveTo(gx, groundY); ctx.lineTo(gx + 3, groundY - 5 - Math.sin(t + i + 1) * 2);
+      ctx.stroke();
+    }
+  } else if (G.era === 4) {
+    // BRONZE AGE — river valley, ziggurats, irrigation
+    ctx.fillStyle = '#3a2a18'; ctx.fillRect(0, groundY, cw, ch - groundY);
+    // River
+    ctx.fillStyle = '#1a4a6a'; ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.moveTo(0, groundY + 10);
+    ctx.quadraticCurveTo(cw * 0.3, groundY - 5, cw * 0.5, groundY + 15);
+    ctx.quadraticCurveTo(cw * 0.7, groundY + 30, cw, groundY + 5);
+    ctx.lineTo(cw, groundY + 25); ctx.lineTo(0, groundY + 25); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Ziggurats
+    ctx.fillStyle = '#5a4a30';
+    _ziggurat(cw * 0.3, groundY, 40, 35);
+    _ziggurat(cw * 0.7, groundY, 30, 25);
+    // Wheat fields
+    ctx.fillStyle = '#aa8830'; ctx.globalAlpha = 0.4;
+    for (var i = 0; i < 20; i++) {
+      var wx = cw * 0.4 + i * 8; var sway = Math.sin(t * 1.5 + i * 0.5) * 2;
+      ctx.fillRect(wx + sway, groundY - 8, 2, 8);
+      ctx.fillRect(wx + sway - 1, groundY - 10, 4, 3);
+    }
+    ctx.globalAlpha = 1;
+  } else if (G.era === 5) {
+    // CLASSICAL — columns, aqueduct, roads
+    ctx.fillStyle = '#1a1a28'; ctx.fillRect(0, groundY, cw, ch - groundY);
+    // Aqueduct
+    ctx.fillStyle = '#4a4a5a'; ctx.globalAlpha = 0.5;
+    for (var i = 0; i < 6; i++) {
+      var ax = cw * 0.05 + i * cw * 0.18;
+      ctx.fillRect(ax, groundY - 50, 6, 50);
+      ctx.fillRect(ax, groundY - 52, cw * 0.18, 4);
+      ctx.beginPath(); ctx.arc(ax + cw * 0.09, groundY - 30, cw * 0.07, Math.PI, 0); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Columns
+    ctx.fillStyle = '#8888aa';
+    for (var i = 0; i < 4; i++) {
+      var cx2 = cw * 0.2 + i * cw * 0.2;
+      ctx.fillRect(cx2 - 3, groundY - 40, 6, 40);
+      ctx.fillRect(cx2 - 6, groundY - 42, 12, 3);
+      ctx.fillRect(cx2 - 6, groundY, 12, 3);
+    }
+    // Road
+    ctx.fillStyle = '#3a3a4a';
+    ctx.fillRect(0, groundY + 5, cw, 8);
+  } else if (G.era === 6) {
+    // MEDIEVAL — castle, cathedral spires, village
+    ctx.fillStyle = '#1a1520'; ctx.fillRect(0, groundY, cw, ch - groundY);
+    // Castle
+    ctx.fillStyle = '#3a3040';
+    ctx.fillRect(cw * 0.05, groundY - 50, 15, 50); ctx.fillRect(cw * 0.05 - 3, groundY - 55, 21, 5);
+    ctx.fillRect(cw * 0.15, groundY - 40, 40, 40);
+    ctx.fillRect(cw * 0.15 + 15, groundY - 60, 10, 20);
+    ctx.fillRect(cw * 0.25, groundY - 50, 15, 50); ctx.fillRect(cw * 0.25 - 3, groundY - 55, 21, 5);
+    // Cathedral spire
+    ctx.fillStyle = '#4a3a4a';
+    _triangle(cw * 0.65, groundY, cw * 0.03, groundY - 70);
+    ctx.fillRect(cw * 0.62, groundY - 30, cw * 0.06, 30);
+    // Village huts
+    ctx.fillStyle = '#2a2020';
+    for (var i = 0; i < 4; i++) {
+      var hx = cw * 0.4 + i * cw * 0.08;
+      ctx.fillRect(hx, groundY - 12, 15, 12);
+      _triangle(hx + 7, groundY - 12, 10, groundY - 22);
+    }
+    // Windmill
+    ctx.fillStyle = '#3a3040'; ctx.fillRect(cw * 0.88, groundY - 30, 8, 30);
+    var wa = t * 1.5;
+    ctx.strokeStyle = '#5a5060'; ctx.lineWidth = 2;
+    for (var i = 0; i < 4; i++) {
+      var a = wa + i * Math.PI / 2;
+      ctx.beginPath(); ctx.moveTo(cw * 0.88 + 4, groundY - 28);
+      ctx.lineTo(cw * 0.88 + 4 + Math.cos(a) * 18, groundY - 28 + Math.sin(a) * 18);
+      ctx.stroke();
+    }
+  } else if (G.era === 7) {
+    // RENAISSANCE — port, tall ships, maps
+    ctx.fillStyle = '#2a2a18'; ctx.fillRect(0, groundY, cw, ch - groundY);
+    // Sea
+    ctx.fillStyle = '#1a3a5a'; ctx.globalAlpha = 0.5;
+    ctx.fillRect(0, groundY + 10, cw, ch - groundY);
+    ctx.globalAlpha = 1;
+    // Ships
+    for (var i = 0; i < 3; i++) {
+      var sx = cw * (0.2 + i * 0.3) + Math.sin(t * 0.5 + i) * 10;
+      var sy = groundY + 15 + Math.sin(t * 0.8 + i * 2) * 3;
+      ctx.fillStyle = '#5a3a1a';
+      ctx.beginPath(); ctx.moveTo(sx - 15, sy); ctx.lineTo(sx + 15, sy);
+      ctx.lineTo(sx + 10, sy + 8); ctx.lineTo(sx - 10, sy + 8); ctx.fill();
+      ctx.fillStyle = '#886644'; ctx.fillRect(sx - 1, sy - 25, 2, 25);
+      ctx.fillStyle = '#ddccaa'; ctx.globalAlpha = 0.6;
+      ctx.fillRect(sx, sy - 22, 10, 15);
+      ctx.globalAlpha = 1;
+    }
+    // Buildings on shore
+    ctx.fillStyle = '#4a3a20';
+    for (var i = 0; i < 5; i++) {
+      var bx = cw * 0.05 + i * cw * 0.15; var bh = 20 + (i % 3) * 10;
+      ctx.fillRect(bx, groundY - bh, 18, bh);
+    }
+  } else if (G.era === 8) {
+    // INDUSTRIAL — factory skyline, smoke, railway
+    ctx.fillStyle = '#1a1a1a'; ctx.fillRect(0, groundY, cw, ch - groundY);
+    // Factory buildings
+    ctx.fillStyle = '#2a2020';
+    for (var i = 0; i < 6; i++) {
+      var fx = i * cw / 6; var fh = 30 + (i * 17) % 30;
+      ctx.fillRect(fx, groundY - fh, cw / 6 - 4, fh);
+      // Chimneys
+      ctx.fillStyle = '#3a2a2a';
+      ctx.fillRect(fx + 5, groundY - fh - 20, 6, 20);
+      // Smoke
+      ctx.globalAlpha = 0.1 + Math.sin(t + i) * 0.05;
+      ctx.fillStyle = '#888';
+      for (var s = 0; s < 4; s++) {
+        ctx.beginPath();
+        ctx.arc(fx + 8 + Math.sin(t * 0.5 + s + i) * 8, groundY - fh - 25 - s * 10, 5 + s * 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1; ctx.fillStyle = '#2a2020';
+    }
+    // Railway
+    ctx.fillStyle = '#4a3a2a'; ctx.fillRect(0, groundY + 2, cw, 4);
+    ctx.strokeStyle = '#5a4a3a'; ctx.lineWidth = 1;
+    for (var i = 0; i < cw; i += 12) { ctx.beginPath(); ctx.moveTo(i, groundY); ctx.lineTo(i, groundY + 8); ctx.stroke(); }
+    // Red glow from furnaces
+    ctx.globalAlpha = 0.08;
+    for (var i = 0; i < 3; i++) {
+      ctx.fillStyle = '#ff4400';
+      ctx.beginPath(); ctx.arc(cw * (0.2 + i * 0.3), groundY - 10, 30, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  } else if (G.era === 9) {
+    // MODERN — city skyline, cars, neon
+    ctx.fillStyle = '#0a0a15'; ctx.fillRect(0, groundY, cw, ch - groundY);
+    // Buildings
+    var rng = seededRng(333);
+    for (var i = 0; i < 12; i++) {
+      var bx = i * cw / 12; var bh = 40 + rng() * 60; var bw = cw / 12 - 3;
+      ctx.fillStyle = '#1a1a2a';
+      ctx.fillRect(bx, groundY - bh, bw, bh);
+      // Windows
+      ctx.fillStyle = '#334466';
+      for (var wy = groundY - bh + 5; wy < groundY - 5; wy += 8) {
+        for (var wx = bx + 3; wx < bx + bw - 3; wx += 6) {
+          ctx.globalAlpha = 0.3 + rng() * 0.5;
+          ctx.fillRect(wx, wy, 3, 4);
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+    // Road
+    ctx.fillStyle = '#222'; ctx.fillRect(0, groundY + 2, cw, 10);
+    ctx.strokeStyle = '#ffcc44'; ctx.lineWidth = 1; ctx.setLineDash([8,8]);
+    ctx.beginPath(); ctx.moveTo(0, groundY + 7); ctx.lineTo(cw, groundY + 7); ctx.stroke();
+    ctx.setLineDash([]);
+    // Car headlights
+    for (var i = 0; i < 4; i++) {
+      var carX = ((t * 40 + i * 80) % (cw + 40)) - 20;
+      ctx.fillStyle = '#ffcc44'; ctx.globalAlpha = 0.4;
+      ctx.beginPath(); ctx.arc(carX, groundY + 7, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(carX + 8, groundY + 7, 2, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  } else if (G.era === 10) {
+    // DIGITAL — server room glow, data streams
+    // Grid lines
+    ctx.strokeStyle = '#112233'; ctx.lineWidth = 1; ctx.globalAlpha = 0.3;
+    for (var i = 0; i < cw; i += 30) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, ch); ctx.stroke(); }
+    for (var i = 0; i < ch; i += 30) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(cw, i); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+    // Data streams (falling characters)
+    ctx.font = '10px monospace'; ctx.globalAlpha = 0.15;
+    for (var i = 0; i < 15; i++) {
+      var dx = (i * cw / 15 + 5);
+      var dy = ((t * 50 + i * 70) % ch);
+      ctx.fillStyle = '#44ffaa';
+      ctx.fillText(String.fromCharCode(0x30 + (Math.floor(t * 3 + i * 7) % 10)), dx, dy);
+      ctx.fillText(String.fromCharCode(0x30 + (Math.floor(t * 5 + i * 3) % 10)), dx, dy + 14);
+    }
+    ctx.globalAlpha = 1;
+    // Server rack silhouettes
+    ctx.fillStyle = '#0a1a15';
+    for (var i = 0; i < 5; i++) {
+      ctx.fillRect(cw * (0.05 + i * 0.2), groundY - 40, cw * 0.08, 40);
+      // Blinking LEDs
+      ctx.fillStyle = (Math.sin(t * 5 + i * 2) > 0) ? '#44ff88' : '#114422';
+      ctx.fillRect(cw * (0.05 + i * 0.2) + 3, groundY - 35, 3, 2);
+      ctx.fillRect(cw * (0.05 + i * 0.2) + 3, groundY - 25, 3, 2);
+      ctx.fillStyle = '#0a1a15';
+    }
+  } else if (G.era === 11) {
+    // SPACE — star field, planets, nebula
+    // Stars
+    var rng = seededRng(777);
+    for (var i = 0; i < 80; i++) {
+      var sx = rng() * cw, sy = rng() * ch;
+      var bright = 0.3 + rng() * 0.7;
+      ctx.fillStyle = '#ffffff'; ctx.globalAlpha = bright * (0.7 + Math.sin(t * 2 + i) * 0.3);
+      ctx.fillRect(sx, sy, 1 + (bright > 0.8 ? 1 : 0), 1 + (bright > 0.8 ? 1 : 0));
+    }
+    ctx.globalAlpha = 1;
+    // Nebula
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = '#6633cc';
+    ctx.beginPath(); ctx.ellipse(cw * 0.3, ch * 0.3, cw * 0.25, ch * 0.15, 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#3366cc';
+    ctx.beginPath(); ctx.ellipse(cw * 0.7, ch * 0.6, cw * 0.2, ch * 0.1, -0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Planet
+    ctx.fillStyle = '#884422'; ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.arc(cw * 0.8, ch * 0.25, 20, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#aa6644'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(cw * 0.8, ch * 0.25, 35, 8, 0.3, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1;
+    // Earth (small, in distance)
+    ctx.fillStyle = '#4488cc'; ctx.globalAlpha = 0.4;
+    ctx.beginPath(); ctx.arc(cw * 0.15, ch * 0.7, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#44aa44'; ctx.beginPath(); ctx.arc(cw * 0.15 - 2, ch * 0.7 - 2, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.globalAlpha = 1;
+}
+
+function _triangle(baseX, baseY, halfW, peakY) {
+  ctx.beginPath(); ctx.moveTo(baseX - halfW, baseY); ctx.lineTo(baseX, peakY); ctx.lineTo(baseX + halfW, baseY); ctx.fill();
+}
+function _ziggurat(cx, baseY, w, h) {
+  var steps = 4;
+  for (var i = 0; i < steps; i++) {
+    var sw = w - i * (w / steps * 0.6);
+    var sy = baseY - i * (h / steps);
+    ctx.fillRect(cx - sw / 2, sy - h / steps, sw, h / steps);
+  }
+}
+
+function drawTapTarget() {
+  var p = ERAS[G.era].palette;
+  var cx = cw / 2, cy = ch * 0.42;
+  var r = Math.min(cw, ch) * 0.13;
+  var t = Date.now() / 1000;
+  var pulse = 1 + Math.sin(t * 3) * 0.04;
+
+  // Outer glow rings
+  for (var ring = 3; ring >= 1; ring--) {
+    ctx.globalAlpha = 0.04 * ring;
+    ctx.fillStyle = p.accent;
+    ctx.beginPath(); ctx.arc(cx, cy, r * (1 + ring * 0.3), 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Main orb with gradient
+  var orbGrad = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.2, r * 0.1, cx, cy, r * pulse);
+  orbGrad.addColorStop(0, p.text);
+  orbGrad.addColorStop(1, p.accent);
+  ctx.fillStyle = orbGrad;
+  ctx.beginPath(); ctx.arc(cx, cy, r * pulse, 0, Math.PI * 2); ctx.fill();
+
+  // Highlight
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.ellipse(cx - r * 0.2, cy - r * 0.25, r * 0.35, r * 0.2, -0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Icon
+  ctx.font = Math.round(r * 0.8) + 'px serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  var icons = ['🌊','🦐','🥚','🪨','⚱️','⚔️','📜','🌍','⚙️','💡','🖱️','🚀'];
+  ctx.fillText(icons[G.era] || '✨', cx, cy);
+
+  // Per-second rate below orb
+  ctx.fillStyle = p.text; ctx.globalAlpha = 0.6;
+  ctx.font = '11px "Segoe UI"';
+  ctx.fillText(fmt(G.getProduction()) + '/s', cx, cy + r + 16);
+  ctx.globalAlpha = 1;
+}
+
+function drawParticles(dt) {
+  for (var i = particles.length - 1; i >= 0; i--) {
+    var p = particles[i];
+    p.life -= dt;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 40 * dt;
+    var a = Math.min(1, p.life / p.maxLife);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function spawnTapParticles(x, y) {
+  var col = ERAS[G.era].palette.accent;
+  for (var i = 0; i < 8; i++) {
+    var angle = Math.random() * Math.PI * 2;
+    var speed = 30 + Math.random() * 60;
+    particles.push({
+      x: x, y: y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 30,
+      life: 0.4 + Math.random() * 0.3, maxLife: 0.7, size: 2 + Math.random() * 3, color: col
+    });
+  }
+}
+
+function draw(dt) {
+  drawBackground();
+  drawTapTarget();
+  drawParticles(dt);
+}
+
+// ── Floating numbers ──
+function showFloating(text, color) {
+  var tapArea = document.getElementById('tap-area');
+  var el = document.createElement('div');
+  el.className = 'float-num';
+  el.textContent = text;
+  el.style.color = color || '#ffcc44';
+  el.style.left = (cw / 2 - 30 + (Math.random() - 0.5) * 60) + 'px';
+  el.style.top = (ch / 2 - 20) + 'px';
+  tapArea.appendChild(el);
+  setTimeout(function() { el.remove(); }, 800);
+}
+
+// ── UI Updates ──
+function updateUI() {
+  var eraDef = ERAS[G.era];
+  document.getElementById('era-name').textContent = eraDef.name;
+  document.getElementById('era-name').style.color = eraDef.palette.text;
+  document.getElementById('spark-count').textContent = fmt(G.spark);
+  document.getElementById('per-sec').textContent = fmt(G.getProduction()) + '/s';
+  document.getElementById('run-num').textContent = G.extinctions + 1;
+  document.getElementById('lp-display').textContent = G.legacyPoints;
+
+  // Breakthrough
+  var btCost = eraDef.btCost;
+  var pct = Math.min(100, G.btProgress / btCost * 100);
+  document.getElementById('bt-name').textContent = G.era < ERAS.length - 1 ? 'Breakthrough: ' + eraDef.btName : (G.victory ? 'COMPLETE' : 'Final Goal: ' + eraDef.btName);
+  document.getElementById('bt-bar').style.width = pct + '%';
+  document.getElementById('bt-bar').style.background = 'linear-gradient(90deg,' + eraDef.palette.accent + ',' + eraDef.palette.text + ')';
+  document.getElementById('bt-progress').textContent = fmt(G.btProgress) + ' / ' + fmt(btCost);
+  var btDone = G.btProgress >= btCost;
+  var investAmt = Math.min(G.spark, btCost * 0.1, btCost - G.btProgress);
+  document.getElementById('bt-invest').disabled = investAmt <= 0 || G.victory || btDone;
+  document.getElementById('bt-invest').textContent = 'Invest ' + fmt(Math.max(0, investAmt));
+  var reserve = G.getGenCost(G.era, 0, 1) * 2;
+  var allAmt = Math.min(Math.max(0, G.spark - reserve), btCost - G.btProgress);
+  document.getElementById('bt-all').disabled = allAmt <= 0 || G.victory || btDone;
+  document.getElementById('bt-all').textContent = 'Invest All (' + fmt(Math.max(0, allAmt)) + ')';
+}
+
+function buildGenList() {
+  var list = document.getElementById('gen-list');
+  list.innerHTML = '';
+  var eraDef = ERAS[G.era];
+  var gens = eraDef.generators;
+
+  for (var i = 0; i < gens.length; i++) {
+    (function(idx) {
+      var gen = gens[idx];
+      var owned = G.genOwned[G.era][idx];
+      var cost = G.getGenCost(G.era, idx, G.buyAmount);
+      var affordable = G.spark >= cost;
+      var locked = idx > 0 && G.genOwned[G.era][idx - 1] <= 0;
+
+      var row = document.createElement('div');
+      row.className = 'gen-row' + (affordable && !locked ? ' affordable' : '') + (locked ? ' locked' : '');
+
+      var rate = gen.base * G.genMults[G.era][idx] * eraDef.mult * (1 + G.legacyPoints * 0.05);
+
+      row.innerHTML = '<div class="gen-icon" style="background:' + eraDef.palette.accent + '22">' + gen.icon + '</div>' +
+        '<div class="gen-info"><div class="gen-name">' + gen.name + '</div>' +
+        '<div class="gen-rate">' + fmt(rate) + '/s each</div></div>' +
+        '<div class="gen-count">' + owned + '</div>' +
+        '<button class="gen-buy" ' + ((!affordable || locked) ? 'disabled' : '') + '>' +
+        (locked ? '🔒' : fmt(cost)) + '</button>';
+
+      row.querySelector('.gen-buy').addEventListener('click', function(e) {
+        e.stopPropagation();
+        buyGen(idx);
+      });
+      list.appendChild(row);
+
+      // Upgrades
+      for (var u = 0; u < gen.upgrades.length; u++) {
+        (function(uIdx) {
+          var upg = gen.upgrades[uIdx];
+          var bought = G.upgradeBought[G.era][idx][uIdx];
+          var canBuy = !bought && G.spark >= upg.cost && owned > 0;
+          var uRow = document.createElement('div');
+          uRow.className = 'upgrade-row' + (bought ? ' bought' : '');
+          uRow.innerHTML = '<div class="upgrade-name">⬆ ' + upg.name + ' (x' + upg.mult + ')' + (bought ? ' ✓' : '') + '</div>' +
+            (bought ? '' : '<button class="upgrade-buy" data-cost="' + upg.cost + '" ' + (!canBuy ? 'disabled' : '') + '>' + fmt(upg.cost) + '</button>');
+          if (!bought) {
+            var btn = uRow.querySelector('.upgrade-buy');
+            if (btn) btn.addEventListener('click', function(e) {
+              e.stopPropagation();
+              buyUpgrade(idx, uIdx);
+            });
+          }
+          list.appendChild(uRow);
+        })(u);
+      }
+    })(i);
+  }
+
+  // Wonder button at end of generator list
+  var wonder = eraDef.wonder;
+  var wBuilt = G.wonderBuilt[G.era];
+  var wRow = document.createElement('div');
+  wRow.className = 'gen-row' + (wBuilt ? '' : (G.spark >= wonder.cost ? ' affordable' : ''));
+  wRow.style.borderColor = 'rgba(255,200,50,0.3)';
+  wRow.innerHTML = '<div class="gen-icon" style="background:rgba(255,200,50,0.15)">🏛️</div>' +
+    '<div class="gen-info"><div class="gen-name" style="color:#ffcc44">⭐ ' + wonder.name + '</div>' +
+    '<div class="gen-rate">' + (wBuilt ? 'BUILT — +' + Math.round(wonder.globalBonus * 100) + '% global' : 'Wonder — +' + Math.round(wonder.bonus * 100) + '% era, +' + Math.round(wonder.globalBonus * 100) + '% global') + '</div></div>' +
+    '<div class="gen-count">' + (wBuilt ? '✓' : '') + '</div>' +
+    (wBuilt ? '' : '<button class="gen-buy" style="background:rgba(255,200,50,0.2)" ' + (G.spark < wonder.cost ? 'disabled' : '') + '>' + fmt(wonder.cost) + '</button>');
+  if (!wBuilt) {
+    var wBtn = wRow.querySelector('.gen-buy');
+    if (wBtn) wBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      buyWonder();
+    });
+  }
+  list.appendChild(wRow);
+}
+
+function buyWonder() {
+  var wonder = ERAS[G.era].wonder;
+  if (G.spark < wonder.cost || G.wonderBuilt[G.era]) return;
+  G.spark -= wonder.cost;
+  G.wonderBuilt[G.era] = true;
+  showFloating('⭐ ' + wonder.name + ' built!', '#ffcc44');
+  playSound('era');
+  buildGenList();
+}
+
+function updateGenButtons() {
+  var eraDef = ERAS[G.era];
+  var rows = document.querySelectorAll('.gen-row');
+  var gens = eraDef.generators;
+  for (var i = 0; i < gens.length && i < rows.length; i++) {
+    var cost = G.getGenCost(G.era, i, G.buyAmount);
+    var affordable = G.spark >= cost;
+    var locked = i > 0 && G.genOwned[G.era][i - 1] <= 0;
+    var row = rows[i];
+    row.className = 'gen-row' + (affordable && !locked ? ' affordable' : '') + (locked ? ' locked' : '');
+    var btn = row.querySelector('.gen-buy');
+    if (btn) { btn.disabled = !affordable || locked; btn.textContent = locked ? '🔒' : fmt(cost); }
+    var countEl = row.querySelector('.gen-count');
+    if (countEl) countEl.textContent = G.genOwned[G.era][i];
+  }
+  // Update upgrade buttons
+  var uBtns = document.querySelectorAll('.upgrade-buy');
+  uBtns.forEach(function(btn) {
+    if (btn.dataset.cost) btn.disabled = G.spark < parseFloat(btn.dataset.cost);
+  });
+}
+
+function updateStatsPanel() {
+  var html = '<h3>Current Run</h3>';
+  html += '<div class="stat-line"><span>Era</span><span class="val">' + ERAS[G.era].name + '</span></div>';
+  html += '<div class="stat-line"><span>Run Time</span><span class="val">' + fmtTime(G.runTime) + '</span></div>';
+  html += '<div class="stat-line"><span>Taps (run)</span><span class="val">' + fmt(G.totalTaps) + '</span></div>';
+  html += '<div class="stat-line"><span>Production</span><span class="val">' + fmt(G.getProduction()) + '/s</span></div>';
+  html += '<div class="stat-line"><span>Tap Power</span><span class="val">' + fmt(G.getTapPower()) + '</span></div>';
+  html += '<div class="stat-line"><span>Generators</span><span class="val">' + G.totalGens() + '</span></div>';
+  html += '<h3>Lifetime</h3>';
+  html += '<div class="stat-line"><span>Total Playtime</span><span class="val">' + fmtTime(G.totalPlaytime) + '</span></div>';
+  html += '<div class="stat-line"><span>Total Taps</span><span class="val">' + fmt(G.lifetimeTaps) + '</span></div>';
+  html += '<div class="stat-line"><span>Total Spark</span><span class="val">' + fmt(G.lifetimeSpark) + '</span></div>';
+  html += '<div class="stat-line"><span>Extinctions</span><span class="val">' + G.extinctions + '</span></div>';
+  html += '<div class="stat-line"><span>Legacy Points</span><span class="val">' + G.legacyPoints + '</span></div>';
+  if (G.bestRunTime < Infinity) html += '<div class="stat-line"><span>Best Run</span><span class="val">' + fmtTime(G.bestRunTime) + '</span></div>';
+  document.getElementById('stats-panel').innerHTML = html;
+}
+
+function updateAchPanel() {
+  var html = '<h3>Achievements (' + Object.keys(G.achievementsUnlocked).length + '/' + ACHIEVEMENTS.length + ')</h3><div class="ach-grid">';
+  for (var i = 0; i < ACHIEVEMENTS.length; i++) {
+    var a = ACHIEVEMENTS[i];
+    if (a.hidden && !G.achievementsUnlocked[a.id]) continue;
+    var unlocked = G.achievementsUnlocked[a.id];
+    html += '<div class="ach-item' + (unlocked ? ' unlocked' : '') + '">' +
+      '<div class="ach-name">' + (unlocked ? '🏆 ' : '🔒 ') + a.name + '</div>' +
+      '<div class="ach-desc">' + a.desc + '</div></div>';
+  }
+  html += '</div>';
+  document.getElementById('ach-panel').innerHTML = html;
+}
+
+var PERM_UNLOCKS = [
+  {id:'autoTap',name:'Auto-Tap',desc:'1 tap/sec automatic',cost:10},
+  {id:'speedStart',name:'Speed Start',desc:'Begin each run with 100 Spark',cost:25},
+  {id:'bulkBuy',name:'Bulk Buy Max',desc:'x1000 buy button',cost:50},
+  {id:'offlineBoost',name:'Offline x2',desc:'Double offline progress',cost:100},
+  {id:'eraSkip',name:'Era Skip',desc:'Skip Era 1 on new runs',cost:200},
+  {id:'cosmicAwareness',name:'Cosmic Awareness',desc:'See all era generators (greyed)',cost:500},
+  {id:'quantumSpark',name:'Quantum Spark',desc:'Taps = 1 second of production',cost:1000},
+];
+
+function updateExtPanel() {
+  var lp = G.getLPForExtinction();
+  var html = '<h3>Extinction Event</h3>';
+  html += '<p style="color:#aaa;font-size:12px;margin:8px 0">Reset progress. Keep Legacy Points and Wonders.</p>';
+  html += '<div class="lp-preview">+' + lp + ' LP</div>';
+  html += '<p style="color:#888;font-size:11px">Current LP: ' + G.legacyPoints + ' (each = +5% production)</p>';
+  if (lp <= 0) html += '<p style="color:#ff6644;margin-top:8px;font-size:12px">Reach the Stone Age first</p>';
+  else html += '<button id="ext-btn" onclick="triggerExtinction()">TRIGGER EXTINCTION</button>';
+
+  // Permanent unlocks shop
+  html += '<h3 style="margin-top:16px">Permanent Unlocks</h3>';
+  for (var i = 0; i < PERM_UNLOCKS.length; i++) {
+    var pu = PERM_UNLOCKS[i];
+    var owned = G.permUnlocks[pu.id];
+    var canBuy = !owned && G.legacyPoints >= pu.cost;
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 4px;border-bottom:1px solid rgba(255,255,255,0.04)">';
+    html += '<div><div style="font-size:12px;font-weight:600;color:' + (owned ? '#ffcc44' : '#ccc') + '">' + (owned ? '✓ ' : '') + pu.name + '</div>';
+    html += '<div style="font-size:10px;color:#888">' + pu.desc + '</div></div>';
+    if (owned) {
+      html += '<span style="font-size:10px;color:#666">Owned</span>';
+    } else {
+      html += '<button onclick="buyPermUnlock(\'' + pu.id + '\',' + pu.cost + ')" style="padding:4px 10px;border-radius:4px;border:none;font-size:10px;cursor:pointer;background:' + (canBuy ? 'rgba(255,200,50,0.2)' : 'rgba(255,255,255,0.05)') + ';color:' + (canBuy ? '#ffcc44' : '#555') + '" ' + (canBuy ? '' : 'disabled') + '>' + pu.cost + ' LP</button>';
+    }
+    html += '</div>';
+  }
+
+  document.getElementById('ext-panel').innerHTML = html;
+}
+
+function buyPermUnlock(id, cost) {
+  if (G.permUnlocks[id] || G.legacyPoints < cost) return;
+  G.legacyPoints -= cost;
+  G.permUnlocks[id] = true;
+  showFloating('Unlocked!', '#ffcc44');
+  playSound('upgrade');
+  updateExtPanel();
+  saveGame();
+  // Apply bulk buy immediately if unlocked
+  if (id === 'bulkBuy') {
+    var toggle = document.getElementById('buy-toggle');
+    if (toggle && !toggle.querySelector('[data-amount="1000"]')) {
+      var btn = document.createElement('button');
+      btn.dataset.amount = '1000'; btn.textContent = 'x1000';
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('#buy-toggle button').forEach(function(b){b.classList.remove('active');});
+        btn.classList.add('active'); G.buyAmount = 1000; buildGenList();
+      });
+      toggle.appendChild(btn);
+    }
+  }
+}
+
+function fmtTime(s) {
+  s = Math.floor(s);
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+  return Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm';
+}
+
+// ── Game Actions ──
+function doTap(x, y) {
+  var power = G.getTapPower();
+  G.spark += power;
+  G.lifetimeSpark += power;
+  G.totalTaps++;
+  G.lifetimeTaps++;
+  G.lastTapTime = Date.now();
+  G.idleTime = 0;
+
+  showFloating('+' + fmt(power), ERAS[G.era].palette.accent);
+  spawnTapParticles(x, y);
+
+  // Combo
+  G.comboCount++;
+  G.comboTimer = 3;
+  if (G.comboCount >= 10 && !G.frenzy) {
+    G.frenzy = true;
+    G.frenzyTimer = 5;
+    document.getElementById('combo').textContent = 'FRENZY! x2';
+    document.getElementById('combo').style.display = 'block';
+    setTimeout(function() { document.getElementById('combo').style.display = 'none'; }, 2000);
+  }
+
+  // Auto-tap achievement check
+  checkAchievements();
+}
+
+function buyGen(idx) {
+  var cost = G.getGenCost(G.era, idx, G.buyAmount);
+  if (G.spark < cost) return;
+  var locked = idx > 0 && G.genOwned[G.era][idx - 1] <= 0;
+  if (locked) return;
+  G.spark -= cost;
+  G.genOwned[G.era][idx] += G.buyAmount;
+  buildGenList();
+  playSound('buy');
+}
+
+function buyUpgrade(genIdx, upgIdx) {
+  var upg = ERAS[G.era].generators[genIdx].upgrades[upgIdx];
+  if (G.spark < upg.cost || G.upgradeBought[G.era][genIdx][upgIdx]) return;
+  G.spark -= upg.cost;
+  G.upgradeBought[G.era][genIdx][upgIdx] = true;
+  G.genMults[G.era][genIdx] *= upg.mult;
+  buildGenList();
+  playSound('upgrade');
+}
+
+function investBreakthrough(all) {
+  var btCost = ERAS[G.era].btCost;
+  var remaining = btCost - G.btProgress;
+  // Keep enough to buy the cheapest affordable generator
+  var reserve = G.getGenCost(G.era, 0, 1) * 2;
+  var available = Math.max(0, G.spark - reserve);
+  var tenPct = btCost * 0.1;
+  var amount = all ? Math.min(available, remaining) : Math.min(G.spark, tenPct, remaining);
+  if (amount <= 0) return;
+  G.spark -= amount;
+  G.btProgress += amount;
+  if (G.btProgress >= btCost) {
+    G.btProgress = btCost;
+    advanceEra();
+  }
+}
+
+function advanceEra() {
+  if (G.era >= ERAS.length - 1) {
+    // Victory!
+    G.victory = true;
+    if (G.runTime < G.bestRunTime) G.bestRunTime = G.runTime;
+    showEraTransition('GALACTIC SEED', ERAS[G.era].lore);
+    checkAchievements();
+    saveGame();
+    return;
+  }
+  var nextEra = G.era + 1;
+  // Special: asteroid event for Era 2→3 (Dinosaurs → Stone Age)
+  if (G.era === 2) {
+    showAsteroidEvent(function() {
+      showEraTransition(ERAS[nextEra].name, ERAS[G.era].lore);
+    });
+    return;
+  }
+  showEraTransition(ERAS[nextEra].name, ERAS[G.era].lore);
+}
+
+function showAsteroidEvent(callback) {
+  // Flash white, shake, pause production for 3 seconds
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:200;pointer-events:none';
+  document.body.appendChild(overlay);
+
+  // Phase 1: Bright flash
+  overlay.style.background = 'rgba(255,255,200,0.9)';
+  playSound('extinction');
+
+  // Phase 2: Red fire
+  setTimeout(function() {
+    overlay.style.background = 'rgba(255,80,0,0.6)';
+    overlay.style.transition = 'background 2s';
+  }, 300);
+
+  // Phase 3: Fade to dark
+  setTimeout(function() {
+    overlay.style.background = 'rgba(0,0,0,0.95)';
+    // Show text
+    var text = document.createElement('div');
+    text.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#ff8844;font-size:18px;font-weight:700;opacity:0;transition:opacity 1s';
+    text.innerHTML = '☄️<br><br>The sky burned.<br>75% of everything died.<br><br><span style="color:#88ccff;font-size:14px">But something survived.</span>';
+    overlay.appendChild(text);
+    setTimeout(function() { text.style.opacity = '1'; }, 100);
+  }, 1500);
+
+  // Phase 4: Clear and continue
+  setTimeout(function() {
+    overlay.style.transition = 'opacity 1s';
+    overlay.style.opacity = '0';
+    setTimeout(function() {
+      overlay.remove();
+      callback();
+    }, 1000);
+  }, 5000);
+}
+
+function showEraTransition(title, lore) {
+  var overlay = document.getElementById('era-transition');
+  document.getElementById('et-title').textContent = title;
+  document.getElementById('et-lore').textContent = lore;
+  overlay.style.display = 'flex';
+  document.getElementById('et-continue').onclick = function() {
+    overlay.style.display = 'none';
+    if (!G.victory) {
+      G.era++;
+      G.btProgress = 0;
+      // Reset Spark to starter amount — you don't carry wealth between eras
+      // This prevents skipping eras by hoarding Spark
+      var startBonus = ERAS[G.era].generators[0].cost * 5;
+      G.spark = startBonus;
+      buildGenList();
+      checkAchievements();
+      saveGame();
+    }
+  };
+  playSound('era');
+}
+
+function triggerExtinction() {
+  var lp = G.getLPForExtinction();
+  if (lp <= 0) return;
+  if (!confirm('Trigger extinction? You\'ll earn ' + lp + ' Legacy Points.')) return;
+  G.legacyPoints += lp;
+  G.extinctions++;
+  // Reset run state
+  G.spark = 0; G.era = 0; G.victory = false; G.btProgress = 0;
+  G.totalTaps = 0; G.runTime = 0; G.runStartTime = Date.now();
+  G.idleTime = 0; G.comboCount = 0; G.frenzy = false;
+  for (var e = 0; e < ERAS.length; e++) {
+    for (var i = 0; i < ERAS[e].generators.length; i++) {
+      G.genOwned[e][i] = 0;
+      G.genMults[e][i] = 1;
+      for (var u = 0; u < ERAS[e].generators[i].upgrades.length; u++)
+        G.upgradeBought[e][i][u] = false;
+    }
+    // Wonders persist!
+  }
+  // Apply speed start if unlocked
+  if (G.permUnlocks.speedStart) G.spark = 100;
+  // Era Skip: start at Era 2 with a boost
+  if (G.permUnlocks.eraSkip && G.era === 0) {
+    G.era = 1;
+    var startBonus = ERAS[1].generators[0].cost * 5;
+    if (G.spark < startBonus) G.spark = startBonus;
+  }
+  buildGenList();
+  checkAchievements();
+  saveGame();
+  playSound('extinction');
+}
+
+function checkAchievements() {
+  for (var i = 0; i < ACHIEVEMENTS.length; i++) {
+    var a = ACHIEVEMENTS[i];
+    if (!G.achievementsUnlocked[a.id] && a.check(G)) {
+      G.achievementsUnlocked[a.id] = true;
+      showFloating('🏆 ' + a.name, '#ffcc44');
+      playSound('achievement');
+    }
+  }
+}
+
+// ── Events ──
+function tickEvent(dt) {
+  if (G.activeEvent) {
+    G.eventTimer -= dt;
+    if (G.eventTimer <= 0) {
+      G.activeEvent = null;
+      document.getElementById('event-banner').style.display = 'none';
+    } else {
+      document.getElementById('event-banner').textContent = G.activeEvent.icon + ' ' + G.activeEvent.name + '! ' + Math.ceil(G.eventTimer) + 's';
+    }
+    return;
+  }
+  G.eventCooldown -= dt;
+  if (G.eventCooldown <= 0) {
+    // Spawn event
+    var evt = EVENTS[Math.min(G.era, EVENTS.length - 1)];
+    G.activeEvent = evt;
+    G.eventTimer = evt.duration;
+    G.eventCooldown = 30 + Math.random() * 30;
+    var banner = document.getElementById('event-banner');
+    banner.style.display = 'block';
+    banner.textContent = evt.icon + ' ' + evt.name + '! TAP ' + evt.duration + 's';
+    playSound('event');
+  }
+}
+
+// ── Sound ──
+var audioCtx = null;
+function getAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); return audioCtx; }
+function playSound(type) {
+  try {
+    var a = getAudio(); var o = a.createOscillator(); var g = a.createGain();
+    o.connect(g); g.connect(a.destination);
+    if (type === 'tap') { o.frequency.value = 800; g.gain.value = 0.05; o.start(); o.stop(a.currentTime + 0.03); }
+    else if (type === 'buy') { o.frequency.value = 600; g.gain.value = 0.08; o.start(); o.frequency.linearRampToValueAtTime(900, a.currentTime + 0.1); o.stop(a.currentTime + 0.1); }
+    else if (type === 'upgrade') { o.frequency.value = 500; g.gain.value = 0.08; o.start(); o.frequency.linearRampToValueAtTime(1200, a.currentTime + 0.15); o.stop(a.currentTime + 0.15); }
+    else if (type === 'era') { o.frequency.value = 300; o.type = 'triangle'; g.gain.value = 0.12; o.start(); o.frequency.linearRampToValueAtTime(1000, a.currentTime + 0.5); g.gain.linearRampToValueAtTime(0, a.currentTime + 0.6); o.stop(a.currentTime + 0.6); }
+    else if (type === 'achievement') { o.frequency.value = 1000; o.type = 'sine'; g.gain.value = 0.06; o.start(); o.frequency.linearRampToValueAtTime(1500, a.currentTime + 0.15); o.stop(a.currentTime + 0.2); }
+    else if (type === 'event') { o.frequency.value = 1200; o.type = 'sine'; g.gain.value = 0.05; o.start(); o.stop(a.currentTime + 0.05); var o2 = a.createOscillator(); o2.connect(g); o2.frequency.value = 1600; o2.start(a.currentTime + 0.08); o2.stop(a.currentTime + 0.13); }
+    else if (type === 'extinction') { o.frequency.value = 200; o.type = 'sawtooth'; g.gain.value = 0.15; o.start(); o.frequency.linearRampToValueAtTime(50, a.currentTime + 1); g.gain.linearRampToValueAtTime(0, a.currentTime + 1.2); o.stop(a.currentTime + 1.2); }
+  } catch(e) {}
+}
+
+// ── Main Loop ──
+var lastTime = 0;
+var saveTimer = 0;
+var uiTimer = 0;
+
+function loop(timestamp) {
+  var dt = lastTime ? Math.min((timestamp - lastTime) / 1000, 0.1) : 0;
+  lastTime = timestamp;
+
+  // Production
+  var produced = G.getProduction() * dt;
+  G.spark += produced;
+  G.lifetimeSpark += produced;
+
+  // Auto-tap
+  if (G.permUnlocks.autoTap) {
+    var atPower = G.getTapPower();
+    G.spark += atPower * dt;
+    G.lifetimeSpark += atPower * dt;
+  }
+
+  // Timers
+  G.runTime += dt;
+  G.totalPlaytime += dt;
+  G.idleTime += dt;
+  if (G.comboTimer > 0) { G.comboTimer -= dt; if (G.comboTimer <= 0) G.comboCount = 0; }
+  if (G.frenzy) { G.frenzyTimer -= dt; if (G.frenzyTimer <= 0) G.frenzy = false; }
+
+  // Events
+  tickEvent(dt);
+
+  // Draw
+  draw(dt);
+
+  // UI updates (throttled)
+  uiTimer += dt;
+  if (uiTimer >= 0.5) {
+    uiTimer = 0;
+    updateUI();
+    updateGenButtons();
+  }
+
+  // Save (every 10s)
+  saveTimer += dt;
+  if (saveTimer >= 10) { saveTimer = 0; saveGame(); }
+
+  requestAnimationFrame(loop);
+}
+
+// ── Init ──
+function init() {
+  G.init();
+  var loaded = loadGame();
+  initCanvas();
+  window.addEventListener('resize', function() { resizeCanvas(); });
+
+  // Tab switching
+  document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+      btn.classList.add('active');
+      document.querySelector('.tab-content[data-tab="' + btn.dataset.tab + '"]').classList.add('active');
+      if (btn.dataset.tab === 'stats') updateStatsPanel();
+      if (btn.dataset.tab === 'achievements') updateAchPanel();
+      if (btn.dataset.tab === 'extinction') updateExtPanel();
+    });
+  });
+
+  // Buy amount toggle
+  document.querySelectorAll('#buy-toggle button').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('#buy-toggle button').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      G.buyAmount = parseInt(btn.dataset.amount);
+      buildGenList();
+    });
+  });
+
+  // Add x1000 button if perm unlock owned
+  if (G.permUnlocks.bulkBuy) {
+    var toggle = document.getElementById('buy-toggle');
+    var btn = document.createElement('button');
+    btn.dataset.amount = '1000'; btn.textContent = 'x1000';
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('#buy-toggle button').forEach(function(b){b.classList.remove('active');});
+      btn.classList.add('active'); G.buyAmount = 1000; buildGenList();
+    });
+    toggle.appendChild(btn);
+  }
+
+  // Tap
+  document.getElementById('tap-area').addEventListener('click', function(e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = e.clientX - rect.left, y = e.clientY - rect.top;
+    doTap(x, y);
+    playSound('tap');
+  });
+
+  // Breakthrough buttons
+  document.getElementById('bt-invest').addEventListener('click', function() { investBreakthrough(false); });
+  document.getElementById('bt-all').addEventListener('click', function() { investBreakthrough(true); });
+
+  buildGenList();
+  updateUI();
+  requestAnimationFrame(loop);
+}
+
+init();
+</script>
+<div id="visitor-counter" style="position:fixed;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);color:#aaa;font:12px Segoe UI,Arial,sans-serif;padding:4px 14px;border-radius:12px;z-index:9999;pointer-events:none;white-space:nowrap;letter-spacing:0.3px"><span id="vc-count">...</span> Explorers</div>
+<script>
+(function(){var G="epoch-tap",SU="https://ivhpqkqnfqcgrfrsvszf.supabase.co",SK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM";function hdr(){return{"apikey":SK,"Authorization":"Bearer "+SK,"Content-Type":"application/json"}}async function vh(){try{var d=navigator.userAgent+screen.width+screen.height+new Date().getTimezoneOffset();var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(d));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("").slice(0,32)}catch(e){return"anon-"+Math.random().toString(36).slice(2,10)}}async function run(){var h=await vh();try{await fetch(SU+"/rest/v1/game_visits",{method:"POST",headers:Object.assign(hdr(),{"Prefer":"resolution=merge-duplicates,return=minimal"}),body:JSON.stringify({game:G,visitor_hash:h})})}catch(e){}try{var r=await fetch(SU+"/rest/v1/game_visits?game=eq."+G+"&select=id",{headers:Object.assign(hdr(),{"Prefer":"count=exact"})});var c=r.headers.get("content-range");if(c){var n=c.split("/")[1];if(n&&n!=="*")document.getElementById("vc-count").textContent=Number(n).toLocaleString()}}catch(e){}}run()})();
+</script>
+</body>
+</html>

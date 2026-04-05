@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Soup Shop</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;overflow:hidden;background:#2a2018;touch-action:none;}
+canvas{display:block;width:100vw;height:100vh;image-rendering:pixelated;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+// ============================================================
+// SOUP SHOP — Cozy cooking arcade
+// ============================================================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// Fixed internal resolution
+const W = 960, H = 600;
+canvas.width = W; canvas.height = H;
+
+// Scaling
+function resize() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const scale = Math.min(vw / W, vh / H);
+  canvas.style.width = Math.floor(W * scale) + 'px';
+  canvas.style.height = Math.floor(H * scale) + 'px';
+  canvas.style.position = 'absolute';
+  canvas.style.left = Math.floor((vw - W * scale) / 2) + 'px';
+  canvas.style.top = Math.floor((vh - H * scale) / 2) + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+function canvasXY(e) {
+  const r = canvas.getBoundingClientRect();
+  const cx = (e.clientX !== undefined ? e.clientX : e.touches[0].clientX);
+  const cy = (e.clientY !== undefined ? e.clientY : e.touches[0].clientY);
+  return { x: (cx - r.left) / r.width * W, y: (cy - r.top) / r.height * H };
+}
+
+// ============================================================
+// LIGHTING FUNCTIONS
+// ============================================================
+const lx = -0.5, ly = -0.6, lz = 0.63;
+
+function sphereV(x, y, cx, cy, r) {
+  const nx = (x - cx) / r, ny = (y - cy) / r;
+  const nz2 = 1 - nx * nx - ny * ny;
+  if (nz2 < 0) return -1;
+  const nz = Math.sqrt(nz2);
+  const NdotL = nx * lx + ny * ly + nz * lz;
+  let v = 0.04 + Math.max(0, NdotL) * 0.68 + Math.pow(Math.max(0, 2 * NdotL * nz - lz), 35) * 0.2 + Math.max(0, ny * 0.3) * 0.1;
+  v = v * v * (3 - 2 * v);
+  return Math.max(0.02, Math.min(1, v));
+}
+
+function cylinderV(x, cx, halfW) {
+  const nx = (x - cx) / (halfW + 0.5);
+  const nz = Math.sqrt(Math.max(0.05, 1 - nx * nx));
+  const NdotL = nx * lx + nz * lz;
+  let v = 0.06 + Math.max(0, NdotL) * 0.62 + Math.pow(Math.max(0, 2 * NdotL * nz - lz), 30) * 0.15 + 0.04;
+  v = v * v * (3 - 2 * v);
+  return Math.max(0.02, Math.min(1, v));
+}
+
+function metalCylV(x, cx, halfW) {
+  const nx = (x - cx) / (halfW + 0.5);
+  const nz = Math.sqrt(Math.max(0.05, 1 - nx * nx));
+  const NdotL = nx * lx + nz * lz;
+  let v = 0.06 + Math.max(0, NdotL) * 0.62 + Math.pow(Math.max(0, 2 * NdotL * nz - lz), 60) * 0.3 + 0.04;
+  // quintic S-curve for metal
+  const t = v * v * (3 - 2 * v);
+  v = t * t * (3 - 2 * t);
+  return Math.max(0.02, Math.min(1, v));
+}
+
+function dualColor(litR, litG, litB, shdR, shdG, shdB, v) {
+  if (v > 0.38) {
+    const t = Math.min(1, v);
+    return [Math.round(shdR + (litR - shdR) * t), Math.round(shdG + (litG - shdG) * t), Math.round(shdB + (litB - shdB) * t)];
+  } else {
+    const t = Math.max(0, v * 1.2);
+    return [Math.round(shdR * t), Math.round(shdG * t), Math.round(shdB * t)];
+  }
+}
+
+// ============================================================
+// SPRITE CACHE — pre-render all sprites to offscreen canvases
+// ============================================================
+const spriteCache = {};
+
+function createSprite(name, w, h, drawFn) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const cx = c.getContext('2d');
+  const imgData = cx.createImageData(w, h);
+  const d = imgData.data;
+  drawFn(d, w, h);
+  cx.putImageData(imgData, 0, 0);
+  spriteCache[name] = c;
+}
+
+function setPixel(d, w, x, y, r, g, b, a) {
+  if (x < 0 || y < 0 || x >= w) return;
+  const i = (y * w + x) * 4;
+  d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = a || 255;
+}
+
+function setPixelRGB(d, w, x, y, rgb) {
+  setPixel(d, w, x, y, rgb[0], rgb[1], rgb[2], 255);
+}
+
+// ============================================================
+// CHARACTER RENDERING
+// ============================================================
+
+// Colour palettes
+const SKIN = { lit: [0xF2, 0xC4, 0xA0], shd: [0x9B, 0x7B, 0x8A] };
+const PANTS = { lit: [0x7A, 0x7A, 0x6E], shd: [0x3E, 0x42, 0x52] };
+const SHOES = { lit: [0x5A, 0x40, 0x30], shd: [0x2A, 0x20, 0x35] };
+const CLOTH = { lit: [0xE8, 0xE0, 0xD0], shd: [0x9A, 0x95, 0xA8] };
+
+const CHEF_HAIR = { lit: [0x8B, 0x65, 0x42], shd: [0x4A, 0x3B, 0x5A] };
+const CHEF_SHIRT = { lit: [0x5B, 0x8E, 0xC2], shd: [0x2E, 0x3E, 0x6A] };
+
+const CUST1_HAIR = { lit: [0xD4, 0xB0, 0x60], shd: [0x7A, 0x68, 0x48] };
+const CUST1_SHIRT = { lit: [0xC8, 0x50, 0x40], shd: [0x6A, 0x28, 0x40] };
+
+const CUST2_HAIR = { lit: [0x3A, 0x35, 0x30], shd: [0x1A, 0x18, 0x28] };
+const CUST2_SHIRT = { lit: [0x5A, 0xAA, 0x60], shd: [0x2A, 0x5A, 0x40] };
+
+const CUST3_HAIR = { lit: [0xA8, 0xA0, 0xA0], shd: [0x60, 0x58, 0x68] };
+const CUST3_SHIRT = { lit: [0x8A, 0x5A, 0x8A], shd: [0x4A, 0x2A, 0x5A] };
+
+function drawMiniChar(d, w, h, hairPal, shirtPal, hasApron, hasToque) {
+  // Character is ~24px wide, ~40px tall, centered in canvas
+  const midX = Math.floor(w / 2);
+  const headCY = 10, headR = 8;
+  const bodyCY = 24, bodyH = 10, bodyHW = 6;
+  const legTop = 30, legH = 6, legHW = 3;
+  const shoeTop = 36, shoeH = 3;
+
+  // Draw shoes
+  for (let y = shoeTop; y < shoeTop + shoeH && y < h; y++) {
+    for (let x = midX - 7; x <= midX + 7; x++) {
+      if (x < 0 || x >= w) continue;
+      // Left shoe
+      if (x >= midX - 7 && x <= midX - 3) {
+        const v = cylinderV(x, midX - 5, 2);
+        setPixelRGB(d, w, x, y, dualColor(...SHOES.lit, ...SHOES.shd, v));
+      }
+      // Right shoe
+      if (x >= midX + 3 && x <= midX + 7) {
+        const v = cylinderV(x, midX + 5, 2);
+        setPixelRGB(d, w, x, y, dualColor(...SHOES.lit, ...SHOES.shd, v));
+      }
+    }
+  }
+
+  // Draw legs (pants)
+  for (let y = legTop; y < legTop + legH && y < h; y++) {
+    // Left leg
+    for (let x = midX - 6; x <= midX - 2; x++) {
+      if (x < 0 || x >= w) continue;
+      const v = cylinderV(x, midX - 4, legHW);
+      setPixelRGB(d, w, x, y, dualColor(...PANTS.lit, ...PANTS.shd, v));
+    }
+    // Right leg
+    for (let x = midX + 2; x <= midX + 6; x++) {
+      if (x < 0 || x >= w) continue;
+      const v = cylinderV(x, midX + 4, legHW);
+      setPixelRGB(d, w, x, y, dualColor(...PANTS.lit, ...PANTS.shd, v));
+    }
+  }
+
+  // Draw body (shirt)
+  for (let y = bodyCY - bodyH / 2; y < bodyCY + bodyH / 2 && y < h; y++) {
+    for (let x = midX - bodyHW; x <= midX + bodyHW; x++) {
+      if (x < 0 || x >= w || y < 0) continue;
+      const v = cylinderV(x, midX, bodyHW);
+      setPixelRGB(d, w, x, y, dualColor(...shirtPal.lit, ...shirtPal.shd, v));
+    }
+  }
+
+  // Arms (thin cylinders on sides of torso)
+  const armTop = Math.floor(bodyCY - bodyH / 2) + 1;
+  const armH = 6, armW = 2;
+  for (let y = armTop; y < armTop + armH && y < h; y++) {
+    // Left arm (shadow side)
+    for (let dx = 0; dx < armW; dx++) {
+      const ax = midX - bodyHW - armW + dx;
+      if (ax >= 0 && ax < w && y >= 0) {
+        const v = cylinderV(ax, midX - bodyHW - armW / 2, armW / 2) * 0.7;
+        setPixelRGB(d, w, ax, y, dualColor(...shirtPal.lit, ...shirtPal.shd, v));
+      }
+    }
+    // Right arm (lit side)
+    for (let dx = 0; dx < armW; dx++) {
+      const ax = midX + bodyHW + 1 + dx;
+      if (ax >= 0 && ax < w && y >= 0) {
+        const v = cylinderV(ax, midX + bodyHW + 1 + armW / 2, armW / 2);
+        setPixelRGB(d, w, ax, y, dualColor(...shirtPal.lit, ...shirtPal.shd, v));
+      }
+    }
+  }
+  // Hands (skin)
+  for (let y = armTop + armH; y < armTop + armH + 2 && y < h; y++) {
+    for (let dx = 0; dx < armW; dx++) {
+      const lx2 = midX - bodyHW - armW + dx, rx2 = midX + bodyHW + 1 + dx;
+      if (lx2 >= 0 && lx2 < w && y >= 0) setPixelRGB(d, w, lx2, y, dualColor(...SKIN.lit, ...SKIN.shd, 0.3));
+      if (rx2 >= 0 && rx2 < w && y >= 0) setPixelRGB(d, w, rx2, y, dualColor(...SKIN.lit, ...SKIN.shd, 0.6));
+    }
+  }
+
+  // Apron over body
+  if (hasApron) {
+    for (let y = bodyCY - 4; y < bodyCY + 6 && y < h; y++) {
+      for (let x = midX - 5; x <= midX + 5; x++) {
+        if (x < 0 || x >= w || y < 0) continue;
+        const v = cylinderV(x, midX, 5);
+        setPixelRGB(d, w, x, y, dualColor(...CLOTH.lit, ...CLOTH.shd, v));
+      }
+    }
+  }
+
+  // Neck
+  for (let y = headCY + headR - 1; y < headCY + headR + 3 && y < h; y++) {
+    for (let x = midX - 2; x <= midX + 2; x++) {
+      if (x < 0 || x >= w || y < 0) continue;
+      const v = cylinderV(x, midX, 2.5);
+      setPixelRGB(d, w, x, y, dualColor(...SKIN.lit, ...SKIN.shd, v));
+    }
+  }
+
+  // Head (sphere with face bias)
+  for (let y = headCY - headR; y <= headCY + headR && y < h; y++) {
+    for (let x = midX - headR; x <= midX + headR; x++) {
+      if (x < 0 || x >= w || y < 0) continue;
+      let v = sphereV(x, y, midX, headCY, headR);
+      if (v < 0) continue;
+      const nx = (x - midX) / headR, ny = (y - headCY) / headR;
+      const nz2 = 1 - nx * nx - ny * ny;
+      const nz = nz2 > 0 ? Math.sqrt(nz2) : 0;
+      // Face bias
+      if (ny > -0.2 && ny < 0.7 && Math.abs(nx) < 0.55 && nz > 0.6) {
+        v = 0.5 + v * 0.5;
+      }
+      setPixelRGB(d, w, x, y, dualColor(...SKIN.lit, ...SKIN.shd, v));
+    }
+  }
+
+  // Hair on top portion of head
+  for (let y = headCY - headR; y <= headCY - 1 && y < h; y++) {
+    for (let x = midX - headR; x <= midX + headR; x++) {
+      if (x < 0 || x >= w || y < 0) continue;
+      const v = sphereV(x, y, midX, headCY, headR);
+      if (v < 0) continue;
+      const ny = (y - headCY) / headR;
+      if (ny < 0.1) {
+        setPixelRGB(d, w, x, y, dualColor(...hairPal.lit, ...hairPal.shd, v));
+      }
+    }
+  }
+
+  // Toque (chef hat)
+  if (hasToque) {
+    // Hat brim
+    for (let y = headCY - headR - 1; y <= headCY - headR + 1 && y < h; y++) {
+      for (let x = midX - headR + 1; x <= midX + headR - 1; x++) {
+        if (x < 0 || x >= w || y < 0) continue;
+        const v = cylinderV(x, midX, headR - 1);
+        setPixelRGB(d, w, x, y, dualColor(...CLOTH.lit, ...CLOTH.shd, v));
+      }
+    }
+    // Hat puff
+    const toqueR = 6, toqueCY = headCY - headR - 5;
+    for (let y = toqueCY - toqueR; y <= toqueCY + toqueR && y < h; y++) {
+      for (let x = midX - toqueR; x <= midX + toqueR; x++) {
+        if (x < 0 || x >= w || y < 0) continue;
+        const v = sphereV(x, y, midX, toqueCY, toqueR);
+        if (v < 0) continue;
+        setPixelRGB(d, w, x, y, dualColor(...CLOTH.lit, ...CLOTH.shd, v));
+      }
+    }
+  }
+
+  // Eyes (3x3 each)
+  const eyeY = headCY + 1;
+  const eyeLX = midX - 3, eyeRX = midX + 3;
+  // White
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (eyeY + dy >= 0 && eyeY + dy < h) {
+        setPixel(d, w, eyeLX + dx, eyeY + dy, 0xEE, 0xEE, 0xF0, 255);
+        setPixel(d, w, eyeRX + dx, eyeY + dy, 0xEE, 0xEE, 0xF0, 255);
+      }
+    }
+  }
+  // Iris
+  setPixel(d, w, eyeLX, eyeY, 0x44, 0x88, 0xBB, 255);
+  setPixel(d, w, eyeRX, eyeY, 0x44, 0x88, 0xBB, 255);
+  // Pupil
+  setPixel(d, w, eyeLX, eyeY + 1, 0x18, 0x18, 0x28, 255);
+  setPixel(d, w, eyeRX, eyeY + 1, 0x18, 0x18, 0x28, 255);
+  // Specular
+  setPixel(d, w, eyeLX - 1, eyeY - 1, 0xFF, 0xFF, 0xFF, 255);
+  setPixel(d, w, eyeRX - 1, eyeY - 1, 0xFF, 0xFF, 0xFF, 255);
+
+  // Mouth — small line
+  setPixel(d, w, midX - 1, headCY + 4, 0x9B, 0x60, 0x60, 255);
+  setPixel(d, w, midX, headCY + 4, 0x9B, 0x60, 0x60, 255);
+  setPixel(d, w, midX + 1, headCY + 4, 0x9B, 0x60, 0x60, 255);
+}
+
+function drawHappyEyes(d, w, headCY, midX) {
+  // ^^ eyes for happy reaction
+  const eyeY = headCY + 1;
+  const eyeLX = midX - 3, eyeRX = midX + 3;
+  // Overwrite eye area with happy ^^ eyes
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      // Clear first — draw skin colour
+      setPixel(d, w, eyeLX + dx, eyeY + dy, 0xF2, 0xC4, 0xA0, 255);
+      setPixel(d, w, eyeRX + dx, eyeY + dy, 0xF2, 0xC4, 0xA0, 255);
+    }
+  }
+  // ^^ shape
+  const col = [0x18, 0x18, 0x28];
+  setPixel(d, w, eyeLX - 1, eyeY, ...col, 255);
+  setPixel(d, w, eyeLX, eyeY - 1, ...col, 255);
+  setPixel(d, w, eyeLX + 1, eyeY, ...col, 255);
+  setPixel(d, w, eyeRX - 1, eyeY, ...col, 255);
+  setPixel(d, w, eyeRX, eyeY - 1, ...col, 255);
+  setPixel(d, w, eyeRX + 1, eyeY, ...col, 255);
+}
+
+// Build all characters
+function buildChef() {
+  createSprite('chef', 28, 44, (d, w, h) => {
+    drawMiniChar(d, w, h, CHEF_HAIR, CHEF_SHIRT, true, true);
+  });
+  // Happy variant
+  createSprite('chef_happy', 28, 44, (d, w, h) => {
+    drawMiniChar(d, w, h, CHEF_HAIR, CHEF_SHIRT, true, true);
+    drawHappyEyes(d, w, 10, 14);
+  });
+}
+
+function buildCustomer(name, hairPal, shirtPal) {
+  createSprite(name, 28, 44, (d, w, h) => {
+    drawMiniChar(d, w, h, hairPal, shirtPal, false, false);
+  });
+  createSprite(name + '_happy', 28, 44, (d, w, h) => {
+    drawMiniChar(d, w, h, hairPal, shirtPal, false, false);
+    drawHappyEyes(d, w, 10, 14);
+  });
+}
+
+// ============================================================
+// INGREDIENT SPRITES (20x20 each)
+// ============================================================
+const INGR = {
+  tomato:   { lit: [0xDD, 0x44, 0x33], shd: [0x88, 0x22, 0x22], name: 'Tomato' },
+  carrot:   { lit: [0xDD, 0x88, 0x33], shd: [0x88, 0x55, 0x22], name: 'Carrot' },
+  onion:    { lit: [0xCC, 0x99, 0xDD], shd: [0x77, 0x55, 0x88], name: 'Onion' },
+  mushroom: { lit: [0xCC, 0xAA, 0x88], shd: [0x88, 0x66, 0x44], name: 'Mushroom' },
+  potato:   { lit: [0xCC, 0xAA, 0x77], shd: [0x88, 0x77, 0x55], name: 'Potato' },
+  pepper:   { lit: [0xDD, 0x44, 0x44], shd: [0x88, 0x33, 0x22], name: 'Pepper' },
+  broccoli: { lit: [0x44, 0x88, 0x33], shd: [0x33, 0x66, 0x22], name: 'Broccoli', unlock: 50 },
+  corn:     { lit: [0xDD, 0xAA, 0x33], shd: [0x88, 0x66, 0x22], name: 'Corn', unlock: 100 },
+};
+
+function buildTomato() {
+  createSprite('tomato', 20, 20, (d, w, h) => {
+    const cx = 10, cy = 11, r = 7;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const v = sphereV(x, y, cx, cy, r);
+      if (v >= 0) setPixelRGB(d, w, x, y, dualColor(...INGR.tomato.lit, ...INGR.tomato.shd, v));
+    }
+    // Green stem
+    setPixel(d, w, 10, 3, 0x33, 0x88, 0x22, 255);
+    setPixel(d, w, 9, 4, 0x44, 0x99, 0x33, 255);
+    setPixel(d, w, 10, 4, 0x44, 0x99, 0x33, 255);
+    setPixel(d, w, 11, 4, 0x44, 0x99, 0x33, 255);
+  });
+}
+
+function buildCarrot() {
+  createSprite('carrot', 20, 20, (d, w, h) => {
+    // Horizontal tapered carrot shape
+    const cy = 10;
+    for (let x = 3; x < 18; x++) {
+      const t = (x - 3) / 14;
+      const halfH = Math.max(1, Math.floor((1 - t) * 4 + 1));
+      for (let y = cy - halfH; y <= cy + halfH; y++) {
+        if (y < 0 || y >= h) continue;
+        const v = cylinderV(y, cy, halfH);
+        // Taper colour slightly toward tip
+        const litR = 0xDD - Math.floor(t * 30), litG = 0x88 - Math.floor(t * 20);
+        setPixelRGB(d, w, x, y, dualColor(litR, litG, 0x33, ...INGR.carrot.shd, v));
+      }
+    }
+    // Green top
+    setPixel(d, w, 2, 8, 0x44, 0x99, 0x33, 255);
+    setPixel(d, w, 2, 9, 0x44, 0x99, 0x33, 255);
+    setPixel(d, w, 2, 10, 0x44, 0x99, 0x33, 255);
+    setPixel(d, w, 1, 9, 0x33, 0x88, 0x22, 255);
+    setPixel(d, w, 1, 11, 0x33, 0x88, 0x22, 255);
+  });
+}
+
+function buildOnion() {
+  createSprite('onion', 20, 20, (d, w, h) => {
+    const cx = 10, cy = 11, r = 7;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const v = sphereV(x, y, cx, cy, r);
+      if (v >= 0) {
+        // Layer lines for onion texture
+        const layerV = v + Math.sin((y - cy) * 1.5) * 0.05;
+        setPixelRGB(d, w, x, y, dualColor(...INGR.onion.lit, ...INGR.onion.shd, layerV));
+      }
+    }
+    // Pointed top
+    setPixel(d, w, 10, 3, 0xAA, 0x88, 0xBB, 255);
+    setPixel(d, w, 10, 2, 0x99, 0x77, 0xAA, 255);
+  });
+}
+
+function buildMushroom() {
+  createSprite('mushroom', 20, 20, (d, w, h) => {
+    // Cap (dome)
+    const capCX = 10, capCY = 9, capR = 7;
+    for (let y = capCY - capR; y <= capCY; y++) {
+      for (let x = 0; x < w; x++) {
+        const v = sphereV(x, y, capCX, capCY, capR);
+        if (v >= 0) setPixelRGB(d, w, x, y, dualColor(...INGR.mushroom.lit, ...INGR.mushroom.shd, v));
+      }
+    }
+    // Stem
+    for (let y = 10; y < 18; y++) {
+      for (let x = 8; x <= 12; x++) {
+        const v = cylinderV(x, 10, 2);
+        setPixelRGB(d, w, x, y, dualColor(0xEE, 0xE8, 0xDD, 0xAA, 0x99, 0x88, v));
+      }
+    }
+  });
+}
+
+function buildPotato() {
+  createSprite('potato', 20, 20, (d, w, h) => {
+    const cx = 10, cy = 10;
+    // Lumpy oval
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const dx = (x - cx) / 8, dy = (y - cy) / 6;
+      // Add lumpiness
+      const lump = Math.sin(x * 0.8) * 0.15 + Math.cos(y * 0.9) * 0.1;
+      const dist2 = dx * dx + dy * dy + lump;
+      if (dist2 > 1) continue;
+      const nz = Math.sqrt(Math.max(0, 1 - dist2));
+      const nx = dx, ny = dy;
+      const NdotL = nx * lx + ny * ly + nz * lz;
+      let v = 0.04 + Math.max(0, NdotL) * 0.68 + Math.pow(Math.max(0, 2 * NdotL * nz - lz), 35) * 0.15;
+      v = v * v * (3 - 2 * v);
+      v = Math.max(0.02, Math.min(1, v));
+      setPixelRGB(d, w, x, y, dualColor(...INGR.potato.lit, ...INGR.potato.shd, v));
+    }
+  });
+}
+
+function buildPepper() {
+  createSprite('pepper', 20, 20, (d, w, h) => {
+    // Bell pepper shape — wider at top, narrowing
+    const cx = 10, cy = 10;
+    for (let y = 3; y < 18; y++) {
+      const t = (y - 3) / 14;
+      const rr = Math.sin(t * Math.PI) * 7 + 2;
+      for (let x = 0; x < w; x++) {
+        const dx = (x - cx) / rr;
+        if (Math.abs(dx) > 1) continue;
+        const v = cylinderV(x, cx, rr);
+        setPixelRGB(d, w, x, y, dualColor(...INGR.pepper.lit, ...INGR.pepper.shd, v));
+      }
+    }
+    // Green stem
+    setPixel(d, w, 10, 2, 0x33, 0x88, 0x22, 255);
+    setPixel(d, w, 10, 3, 0x44, 0x99, 0x33, 255);
+    setPixel(d, w, 9, 3, 0x44, 0x99, 0x33, 255);
+  });
+}
+
+function buildBroccoli() {
+  createSprite('broccoli', 20, 20, (d, w, h) => {
+    // Tree-like top (cluster of small spheres)
+    const centres = [[10, 6, 5], [7, 8, 4], [13, 8, 4], [10, 10, 4]];
+    for (const [scx, scy, sr] of centres) {
+      for (let y = scy - sr; y <= scy + sr; y++) {
+        for (let x = scx - sr; x <= scx + sr; x++) {
+          if (x < 0 || x >= w || y < 0 || y >= h) continue;
+          const v = sphereV(x, y, scx, scy, sr);
+          if (v >= 0) setPixelRGB(d, w, x, y, dualColor(...INGR.broccoli.lit, ...INGR.broccoli.shd, v));
+        }
+      }
+    }
+    // Stem
+    for (let y = 12; y < 18; y++) {
+      for (let x = 8; x <= 12; x++) {
+        const v = cylinderV(x, 10, 2);
+        setPixelRGB(d, w, x, y, dualColor(0x66, 0x99, 0x44, 0x33, 0x55, 0x22, v));
+      }
+    }
+  });
+}
+
+function buildCorn() {
+  createSprite('corn', 20, 20, (d, w, h) => {
+    // Oval cob
+    const cx = 10, cy = 10;
+    for (let y = 3; y < 17; y++) {
+      for (let x = 5; x < 15; x++) {
+        const dx = (x - cx) / 5, dy = (y - cy) / 7;
+        const dist2 = dx * dx + dy * dy;
+        if (dist2 > 1) continue;
+        const nz = Math.sqrt(Math.max(0, 1 - dist2));
+        const NdotL = dx * lx + dy * ly + nz * lz;
+        let v = 0.04 + Math.max(0, NdotL) * 0.68 + Math.pow(Math.max(0, 2 * NdotL * nz - lz), 35) * 0.15;
+        v = v * v * (3 - 2 * v);
+        v = Math.max(0.02, Math.min(1, v));
+        // Kernel pattern
+        const kx = (x + y) % 3 === 0;
+        const vv = kx ? v * 0.85 : v;
+        setPixelRGB(d, w, x, y, dualColor(...INGR.corn.lit, ...INGR.corn.shd, vv));
+      }
+    }
+    // Husk leaves
+    setPixel(d, w, 6, 2, 0x66, 0xAA, 0x33, 255);
+    setPixel(d, w, 7, 2, 0x66, 0xAA, 0x33, 255);
+    setPixel(d, w, 5, 3, 0x55, 0x99, 0x22, 255);
+  });
+}
+
+// ============================================================
+// POT SPRITE
+// ============================================================
+function buildPot() {
+  createSprite('pot', 80, 60, (d, w, h) => {
+    const cx = 40, bodyTop = 12, bodyBot = 50, halfW = 30;
+    // Body — copper cylinder
+    for (let y = bodyTop; y < bodyBot; y++) {
+      // Taper slightly at bottom
+      const t = (y - bodyTop) / (bodyBot - bodyTop);
+      const hw = halfW - t * 4;
+      for (let x = cx - hw; x <= cx + hw; x++) {
+        if (x < 0 || x >= w) continue;
+        const v = metalCylV(x, cx, hw);
+        // Copper palette
+        setPixelRGB(d, w, x, y, dualColor(0xCC, 0x77, 0x33, 0x66, 0x33, 0x18, v));
+      }
+    }
+    // Interior (dark ellipse at top)
+    for (let y = bodyTop - 2; y < bodyTop + 8; y++) {
+      for (let x = cx - halfW + 3; x <= cx + halfW - 3; x++) {
+        if (x < 0 || x >= w || y < 0) continue;
+        const dx = (x - cx) / (halfW - 3), dy = (y - (bodyTop + 3)) / 5;
+        if (dx * dx + dy * dy < 1) {
+          const depth = 0.1 + dy * 0.05;
+          setPixelRGB(d, w, x, y, [Math.floor(30 * depth), Math.floor(20 * depth), Math.floor(15 * depth)]);
+        }
+      }
+    }
+    // Rim
+    for (let y = bodyTop - 3; y < bodyTop + 2; y++) {
+      for (let x = cx - halfW - 2; x <= cx + halfW + 2; x++) {
+        if (x < 0 || x >= w || y < 0) continue;
+        const dx = (x - cx) / (halfW + 2), dy = (y - bodyTop) / 3;
+        if (dx * dx + dy * dy < 1) {
+          const v = metalCylV(x, cx, halfW + 2);
+          setPixelRGB(d, w, x, y, dualColor(0xDD, 0x88, 0x44, 0x77, 0x44, 0x22, v));
+        }
+      }
+    }
+    // Handles
+    for (let side = -1; side <= 1; side += 2) {
+      const hx = cx + side * (halfW + 4);
+      for (let y = bodyTop + 8; y < bodyTop + 20; y++) {
+        for (let x = hx - 3; x <= hx + 3; x++) {
+          if (x < 0 || x >= w || y < 0 || y >= h) continue;
+          const dx = (x - hx) / 3, dy = (y - (bodyTop + 14)) / 6;
+          if (dx * dx + dy * dy < 1) {
+            const v = metalCylV(x, hx, 3);
+            setPixelRGB(d, w, x, y, dualColor(0xBB, 0x66, 0x33, 0x55, 0x33, 0x18, v));
+          }
+        }
+      }
+    }
+  });
+}
+
+// ============================================================
+// COIN SPRITE
+// ============================================================
+function buildCoin() {
+  createSprite('coin', 16, 16, (d, w, h) => {
+    const cx = 8, cy = 8, r = 6;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const v = sphereV(x, y, cx, cy, r);
+      if (v >= 0) setPixelRGB(d, w, x, y, dualColor(0xFF, 0xDD, 0x44, 0xAA, 0x77, 0x22, v));
+    }
+  });
+}
+
+// ============================================================
+// BUILD ALL SPRITES
+// ============================================================
+buildChef();
+buildCustomer('cust1', CUST1_HAIR, CUST1_SHIRT);
+buildCustomer('cust2', CUST2_HAIR, CUST2_SHIRT);
+buildCustomer('cust3', CUST3_HAIR, CUST3_SHIRT);
+buildTomato();
+buildCarrot();
+buildOnion();
+buildMushroom();
+buildPotato();
+buildPepper();
+buildBroccoli();
+buildCorn();
+buildPot();
+buildCoin();
+
+// ============================================================
+// WEB AUDIO SFX
+// ============================================================
+let audioCtx = null;
+let audioUnlocked = false;
+function ensureAudio() {
+  if (!audioUnlocked) return false;
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return true;
+}
+// Unlock audio on first user gesture
+['click','touchstart','keydown'].forEach(e => window.addEventListener(e, () => { audioUnlocked = true; }, { once: false }));
+
+function playChop() {
+  if (!ensureAudio()) return;
+  const buf = audioCtx.createBuffer(1, 1200, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) {
+    d[i] = (Math.random() * 2 - 1) * Math.exp(-i / 200) * 0.3;
+  }
+  const s = audioCtx.createBufferSource();
+  s.buffer = buf;
+  s.connect(audioCtx.destination);
+  s.start();
+}
+
+function playDing() {
+  if (!ensureAudio()) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.1);
+  gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.4);
+}
+
+function playCoinSfx() {
+  if (!ensureAudio()) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(2000, audioCtx.currentTime + 0.05);
+  gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.15);
+}
+
+function playWhoosh() {
+  if (!ensureAudio()) return;
+  const buf = audioCtx.createBuffer(1, 4000, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) {
+    const t = i / d.length;
+    d[i] = (Math.random() * 2 - 1) * Math.sin(t * Math.PI) * 0.12;
+  }
+  const s = audioCtx.createBufferSource();
+  s.buffer = buf;
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'bandpass';
+  filt.frequency.value = 600;
+  filt.Q.value = 2;
+  s.connect(filt);
+  filt.connect(audioCtx.destination);
+  s.start();
+}
+
+// ============================================================
+// GAME STATE
+// ============================================================
+const BASE_INGREDIENTS = ['tomato', 'carrot', 'onion', 'mushroom', 'potato', 'pepper'];
+const UNLOCK_INGREDIENTS = [
+  { key: 'broccoli', cost: 50 },
+  { key: 'corn', cost: 100 }
+];
+
+let coins = parseInt(localStorage.getItem('soupshop_coins') || '0');
+let totalCoins = parseInt(localStorage.getItem('soupshop_total') || '0');
+let unlocks = JSON.parse(localStorage.getItem('soupshop_unlocks') || '[]');
+let customersServed = parseInt(localStorage.getItem('soupshop_served') || '0');
+
+function saveState() {
+  localStorage.setItem('soupshop_coins', coins);
+  localStorage.setItem('soupshop_total', totalCoins);
+  localStorage.setItem('soupshop_unlocks', JSON.stringify(unlocks));
+  localStorage.setItem('soupshop_served', customersServed);
+}
+
+function getAvailableIngredients() {
+  const avail = [...BASE_INGREDIENTS];
+  for (const u of UNLOCK_INGREDIENTS) {
+    if (unlocks.includes(u.key)) avail.push(u.key);
+  }
+  return avail;
+}
+
+// Pot contents
+let potContents = [];
+
+// Customer queue
+let customers = [];
+let customerTimer = 0;
+
+// Toss animations
+let tossAnims = [];
+
+// Coin pop animations
+let coinPops = [];
+
+// Steam particles
+let steamParts = [];
+
+// Game time
+let gameTime = 0;
+let lastTime = 0;
+
+// ============================================================
+// CUSTOMER
+// ============================================================
+const CUSTOMER_TYPES = ['cust1', 'cust2', 'cust3'];
+
+function randomRecipe() {
+  const avail = getAvailableIngredients();
+  const count = Math.min(avail.length, 1 + Math.floor(Math.random() * Math.min(3, 1 + Math.floor(customersServed / 3))));
+  const recipe = [];
+  const pool = [...avail];
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    recipe.push(pool[idx]);
+    pool.splice(idx, 1);
+    if (pool.length === 0) break;
+  }
+  return recipe;
+}
+
+function spawnCustomer() {
+  if (customers.length >= 3) return;
+  const type = CUSTOMER_TYPES[Math.floor(Math.random() * CUSTOMER_TYPES.length)];
+  customers.push({
+    type,
+    recipe: randomRecipe(),
+    spawnTime: gameTime,
+    happy: false,
+    happyTimer: 0,
+    leaving: false,
+    leaveTimer: 0,
+    slideIn: 0, // animation progress 0-1
+  });
+  playWhoosh();
+}
+
+// ============================================================
+// LAYOUT (responsive to W x H)
+// ============================================================
+const SHELF_Y = H - 70;
+const SHELF_ITEM_SIZE = 48;
+const POT_X = W * 0.38, POT_Y = H * 0.45;
+const CHEF_X = W * 0.18, CHEF_Y = H * 0.42;
+const CUST_X = W * 0.78;
+const CUST_START_Y = H * 0.18;
+const CUST_SPACING = 100;
+
+function getShelfItems() {
+  const avail = getAvailableIngredients();
+  const totalW = avail.length * (SHELF_ITEM_SIZE + 12) - 12;
+  const startX = (W - totalW) / 2;
+  return avail.map((key, i) => ({
+    key,
+    x: startX + i * (SHELF_ITEM_SIZE + 12),
+    y: SHELF_Y,
+    w: SHELF_ITEM_SIZE,
+    h: SHELF_ITEM_SIZE,
+  }));
+}
+
+function getServeButton() {
+  return { x: W * 0.78, y: SHELF_Y, w: 100, h: 50 };
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+function handleClick(mx, my) {
+  ensureAudio();
+
+  // Check ingredient shelf
+  const items = getShelfItems();
+  for (const item of items) {
+    if (mx >= item.x && mx <= item.x + item.w && my >= item.y && my <= item.y + item.h) {
+      // Add to pot with toss animation
+      tossAnims.push({
+        key: item.key,
+        sx: item.x + item.w / 2,
+        sy: item.y + item.h / 2,
+        tx: POT_X,
+        ty: POT_Y - 10,
+        t: 0,
+        duration: 0.4,
+      });
+      playChop();
+      return;
+    }
+  }
+
+  // Check serve button
+  if (potContents.length > 0 && customers.length > 0) {
+    const btn = getServeButton();
+    if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+      serveCustomer();
+      return;
+    }
+  }
+
+  // Check pot — tap pot to clear
+  if (potContents.length > 0 && mx >= POT_X - 40 && mx <= POT_X + 40 && my >= POT_Y - 30 && my <= POT_Y + 30) {
+    potContents = [];
+    return;
+  }
+}
+
+canvas.addEventListener('click', (e) => {
+  const p = canvasXY(e);
+  handleClick(p.x, p.y);
+});
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const p = canvasXY(e);
+  handleClick(p.x, p.y);
+}, { passive: false });
+
+// ============================================================
+// SERVE LOGIC
+// ============================================================
+function serveCustomer() {
+  if (customers.length === 0 || potContents.length === 0) return;
+
+  const cust = customers[0];
+  if (cust.leaving) return;
+
+  // Check recipe match (order doesn't matter, extras OK)
+  const potCopy = [...potContents];
+  let matched = 0;
+  for (const needed of cust.recipe) {
+    const idx = potCopy.indexOf(needed);
+    if (idx >= 0) {
+      matched++;
+      potCopy.splice(idx, 1);
+    }
+  }
+
+  const perfect = matched === cust.recipe.length;
+  let earned = 0;
+  if (perfect) {
+    earned = cust.recipe.length * 10;
+    // Speed bonus
+    const elapsed = gameTime - cust.spawnTime;
+    if (elapsed < 8) earned += 5;
+    cust.happy = true;
+    cust.happyTimer = 1.0;
+    playDing();
+  } else {
+    earned = 1;
+  }
+
+  coins += earned;
+  totalCoins += earned;
+  customersServed++;
+
+  // Coin pop
+  coinPops.push({
+    x: CUST_X, y: CUST_START_Y + 20,
+    amount: earned,
+    t: 0,
+    duration: 1.5,
+  });
+  playCoinSfx();
+
+  // Check unlocks
+  for (const u of UNLOCK_INGREDIENTS) {
+    if (!unlocks.includes(u.key) && totalCoins >= u.cost) {
+      unlocks.push(u.key);
+    }
+  }
+
+  // Clear pot
+  potContents = [];
+
+  // Customer leaves
+  cust.leaving = true;
+  cust.leaveTimer = perfect ? 1.0 : 0.5;
+
+  saveState();
+}
+
+// ============================================================
+// UPDATE
+// ============================================================
+function update(dt) {
+  gameTime += dt;
+
+  // Toss animations
+  for (let i = tossAnims.length - 1; i >= 0; i--) {
+    const a = tossAnims[i];
+    a.t += dt / a.duration;
+    if (a.t >= 1) {
+      potContents.push(a.key);
+      tossAnims.splice(i, 1);
+    }
+  }
+
+  // Coin pops
+  for (let i = coinPops.length - 1; i >= 0; i--) {
+    coinPops[i].t += dt / coinPops[i].duration;
+    if (coinPops[i].t >= 1) coinPops.splice(i, 1);
+  }
+
+  // Customer leaving
+  for (let i = customers.length - 1; i >= 0; i--) {
+    const c = customers[i];
+    if (c.slideIn < 1) c.slideIn = Math.min(1, c.slideIn + dt * 3);
+    if (c.happy && c.happyTimer > 0) c.happyTimer -= dt;
+    if (c.leaving) {
+      c.leaveTimer -= dt;
+      if (c.leaveTimer <= 0) {
+        customers.splice(i, 1);
+      }
+    }
+  }
+
+  // Spawn customers
+  if (customers.length === 0 || (customers.length < 3 && !customers[0].leaving)) {
+    customerTimer += dt;
+    if (customers.length === 0 || customerTimer > 3) {
+      spawnCustomer();
+      customerTimer = 0;
+    }
+  }
+
+  // Steam particles
+  if (potContents.length > 0) {
+    if (Math.random() < dt * 5) {
+      steamParts.push({
+        x: POT_X + (Math.random() - 0.5) * 30,
+        y: POT_Y - 20,
+        vx: (Math.random() - 0.5) * 10,
+        vy: -20 - Math.random() * 15,
+        life: 1,
+        maxLife: 1 + Math.random() * 0.5,
+        r: 3 + Math.random() * 4,
+      });
+    }
+  }
+  for (let i = steamParts.length - 1; i >= 0; i--) {
+    const p = steamParts[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.life -= dt / p.maxLife;
+    if (p.life <= 0) steamParts.splice(i, 1);
+  }
+}
+
+// ============================================================
+// DRAW
+// ============================================================
+function drawBG() {
+  // Kitchen wall
+  const grad = ctx.createLinearGradient(0, 0, 0, H * 0.7);
+  grad.addColorStop(0, '#6A5A48');
+  grad.addColorStop(1, '#8A7A68');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H * 0.7);
+
+  // Tile detail on wall — subtle brick pattern
+  ctx.globalAlpha = 0.08;
+  ctx.fillStyle = '#000';
+  for (let y = 0; y < H * 0.65; y += 24) {
+    const offset = (Math.floor(y / 24) % 2) * 30;
+    for (let x = offset; x < W; x += 60) {
+      ctx.fillRect(x, y, 58, 22);
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // Floor
+  const floorY = H * 0.7;
+  for (let y = floorY; y < H; y += 30) {
+    for (let x = 0; x < W; x += 30) {
+      const dark = ((Math.floor(x / 30) + Math.floor(y / 30)) % 2 === 0);
+      ctx.fillStyle = dark ? '#5A4A38' : '#6A5A48';
+      ctx.fillRect(x, y, 30, 30);
+    }
+  }
+
+  // Counter
+  const counterY = SHELF_Y - 14;
+  const counterGrad = ctx.createLinearGradient(0, counterY, 0, counterY + 18);
+  counterGrad.addColorStop(0, '#D8C8A0');
+  counterGrad.addColorStop(0.3, '#C8B890');
+  counterGrad.addColorStop(1, '#A89870');
+  ctx.fillStyle = counterGrad;
+  ctx.fillRect(0, counterY, W, 18);
+
+  // Counter edge highlight
+  ctx.fillStyle = '#E8D8B8';
+  ctx.fillRect(0, counterY, W, 2);
+}
+
+function drawSprite(name, x, y, scale) {
+  const s = spriteCache[name];
+  if (!s) return;
+  const sc = scale || 2;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(s, x - s.width * sc / 2, y - s.height * sc / 2, s.width * sc, s.height * sc);
+}
+
+function drawChef() {
+  drawSprite('chef', CHEF_X, CHEF_Y, 2.5);
+}
+
+function drawCustomers() {
+  for (let i = 0; i < customers.length; i++) {
+    const c = customers[i];
+    const targetY = CUST_START_Y + i * CUST_SPACING;
+    const slideOffset = (1 - c.slideIn) * 120;
+    const leaveOffset = c.leaving ? (1 - c.leaveTimer / (c.happy ? 1 : 0.5)) * 120 : 0;
+    const cx = CUST_X + slideOffset + leaveOffset;
+    const cy = targetY;
+
+    // Draw character
+    const spriteName = (c.happy && c.happyTimer > 0) ? c.type + '_happy' : c.type;
+    drawSprite(spriteName, cx, cy, 2);
+
+    // Speech bubble
+    if (!c.leaving) {
+      const bubbleW = 24 + c.recipe.length * 26;
+      const bubbleH = 36;
+      const bx = cx - bubbleW / 2 - 30;
+      const by = cy - 55;
+
+      // Bubble body
+      ctx.fillStyle = '#FFFFFF';
+      ctx.strokeStyle = '#888888';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bubbleW, bubbleH, 8);
+      ctx.fill();
+      ctx.stroke();
+
+      // Tail
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.moveTo(bx + bubbleW - 10, by + bubbleH);
+      ctx.lineTo(bx + bubbleW, by + bubbleH + 10);
+      ctx.lineTo(bx + bubbleW - 20, by + bubbleH);
+      ctx.fill();
+
+      // Ingredient icons in bubble
+      for (let j = 0; j < c.recipe.length; j++) {
+        const ix = bx + 14 + j * 26;
+        const iy = by + bubbleH / 2;
+        const s = spriteCache[c.recipe[j]];
+        if (s) {
+          ctx.drawImage(s, ix - 10, iy - 10, 20, 20);
+        }
+      }
+
+      // Patience indicator (cosmetic timer bar)
+      const elapsed = gameTime - c.spawnTime;
+      const patience = Math.max(0, 1 - elapsed / 30);
+      ctx.fillStyle = patience > 0.3 ? '#44AA44' : '#DD4444';
+      ctx.fillRect(bx, by + bubbleH + 3, bubbleW * patience, 3);
+      ctx.fillStyle = '#00000020';
+      ctx.fillRect(bx, by + bubbleH + 3, bubbleW, 3);
+    }
+  }
+}
+
+function drawPot() {
+  drawSprite('pot', POT_X, POT_Y, 1.5);
+
+  // Draw ingredients in pot (small icons bobbing)
+  for (let i = 0; i < potContents.length; i++) {
+    const angle = gameTime * 1.5 + i * 1.2;
+    const px = POT_X + Math.cos(angle) * 12 - 8;
+    const py = POT_Y - 15 + Math.sin(angle * 0.7) * 3;
+    const s = spriteCache[potContents[i]];
+    if (s) ctx.drawImage(s, px, py, 14, 14);
+  }
+
+  // Steam
+  for (const p of steamParts) {
+    ctx.globalAlpha = p.life * 0.35;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawTossAnims() {
+  for (const a of tossAnims) {
+    const t = a.t;
+    const x = a.sx + (a.tx - a.sx) * t;
+    const baseY = a.sy + (a.ty - a.sy) * t;
+    const arcY = baseY - Math.sin(t * Math.PI) * 80;
+    const s = spriteCache[a.key];
+    if (s) ctx.drawImage(s, x - 10, arcY - 10, 20, 20);
+  }
+}
+
+function drawShelf() {
+  const items = getShelfItems();
+  for (const item of items) {
+    // Slot background
+    ctx.fillStyle = '#3A3028';
+    ctx.strokeStyle = '#5A4A38';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(item.x, item.y, item.w, item.h, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    // Ingredient icon (centered, scaled up)
+    const s = spriteCache[item.key];
+    if (s) {
+      const scale = 2;
+      ctx.drawImage(s, item.x + (item.w - 20 * scale) / 2, item.y + (item.h - 20 * scale) / 2, 20 * scale, 20 * scale);
+    }
+
+    // Label
+    ctx.fillStyle = '#D8D0C0';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(INGR[item.key].name, item.x + item.w / 2, item.y + item.h + 12);
+  }
+}
+
+function drawServeButton() {
+  if (potContents.length === 0 || customers.length === 0) return;
+  const btn = getServeButton();
+
+  // Pulsing glow
+  const pulse = 0.8 + Math.sin(gameTime * 4) * 0.2;
+
+  ctx.fillStyle = `rgba(68, 170, 68, ${pulse})`;
+  ctx.strokeStyle = '#88DD88';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 10);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('SERVE', btn.x + btn.w / 2, btn.y + btn.h / 2);
+}
+
+function drawUI() {
+  // Coins display (top right)
+  ctx.drawImage(spriteCache['coin'], W - 140, 12, 24, 24);
+  ctx.fillStyle = '#FFdd44';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('' + coins, W - 112, 24);
+
+  // Customers served (top left)
+  ctx.fillStyle = '#E8E0D0';
+  ctx.font = '16px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('Served: ' + customersServed, 16, 24);
+
+  // Unlock hints
+  for (const u of UNLOCK_INGREDIENTS) {
+    if (!unlocks.includes(u.key)) {
+      ctx.fillStyle = '#998877';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('Unlock ' + INGR[u.key].name + ' at ' + u.cost + ' coins', W - 16, 48 + UNLOCK_INGREDIENTS.indexOf(u) * 16);
+    }
+  }
+
+  // Pot contents hint
+  if (potContents.length > 0) {
+    ctx.fillStyle = '#D8D0C0';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Tap pot to clear', POT_X, POT_Y + 55);
+  }
+
+  // Coin pops
+  for (const cp of coinPops) {
+    const alpha = 1 - cp.t;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#FFDD44';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('+' + cp.amount, cp.x, cp.y - cp.t * 60);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawTitle() {
+  // Title bar
+  ctx.fillStyle = '#2A201880';
+  ctx.fillRect(0, 0, W, 44);
+  ctx.fillStyle = '#E8D8B8';
+  ctx.font = 'bold 24px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Soup Shop', W / 2, 22);
+}
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+function frame(ts) {
+  if (!lastTime) lastTime = ts;
+  const dt = Math.min(0.1, (ts - lastTime) / 1000);
+  lastTime = ts;
+
+  update(dt);
+
+  // Clear
+  ctx.clearRect(0, 0, W, H);
+
+  drawBG();
+  drawChef();
+  drawPot();
+  drawTossAnims();
+  drawCustomers();
+  drawShelf();
+  drawServeButton();
+  drawTitle();
+  drawUI();
+
+  requestAnimationFrame(frame);
+}
+
+// Spawn initial customer
+spawnCustomer();
+
+requestAnimationFrame(frame);
+
+// ============================================================
+// VISITOR COUNTER (Supabase)
+// ============================================================
+(function() {
+  const SU = 'https://ivhpqkqnfqcgrfrsvszf.supabase.co';
+  const K = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aHBxa3FuZnFjZ3JmcnN2c3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTg1NjYsImV4cCI6MjA4OTM5NDU2Nn0.x3X_0dbhw3Qz7sgQAgpSoSu382ckB2uYxCJGe7_vDCM';
+  const G = 'soup-shop';
+  function hdr() { return { 'apikey': K, 'Authorization': 'Bearer ' + K, 'Content-Type': 'application/json' }; }
+  async function run() {
+    const vid = localStorage.getItem('pa_visitor_id') || (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+    localStorage.setItem('pa_visitor_id', vid);
+    const h = vid.slice(0, 16);
+    try { await fetch(SU + '/rest/v1/game_visits', { method: 'POST', headers: Object.assign(hdr(), { 'Prefer': 'resolution=merge-duplicates,return=minimal' }), body: JSON.stringify({ game: G, visitor_hash: h }) }); } catch(e) {}
+  }
+  run();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Atomic Sort Visualizer</title>
+<style>*{margin:0;padding:0}html,body{width:100%;height:100%;overflow:hidden;background:#0a0a0f}canvas{display:block;width:100vw;height:100vh}</style>
+</head><body><canvas id="c"></canvas><script>
+var canvas=document.getElementById('c'),ctx=canvas.getContext('2d'),W,H;
+function resize(){W=canvas.width=innerWidth;H=canvas.height=innerHeight}
+resize();addEventListener('resize',resize);
+
+var clamp=function(val,min,max){return Math.max(min, Math.min(val, max));};
+var lerp=function(a,b,t){return a + (b - a) * t;};
+var mapRange=function(val,inMin,inMax,outMin,outMax){return outMin + (val - inMin) / (inMax - inMin) * (outMax - outMin);};
+var compareTwo=function(a,b){if (a < b) return -1;
+if (a > b) return 1;
+return 0;};
+var swapInArray=function(arr,i,j){const temp = arr[i];
+arr[i] = arr[j];
+arr[j] = temp;};
+var nextBubbleStep=function(arr,idx){if (arr[idx] > arr[idx + 1]) {
+  const temp = arr[idx];
+  arr[idx] = arr[idx + 1];
+  arr[idx + 1] = temp;
+  return true;
+}
+return false;};
+
+var N=40,arr=[],targetArr=[];
+for(var i=0;i<N;i++)arr.push(Math.random()*0.9+0.1);
+targetArr=arr.slice();
+
+var sortIdx=0,sortEnd=N-1,sorted=false,swapped=false;
+var stepTimer=0,stepInterval=0.04;
+var highlightA=-1,highlightB=-1;
+var colors=['#0099FF','#00CCFF','#00FFCC','#44FF88','#88FF44','#CCFF00','#FFD700','#FF8C42','#FF5252','#E63946'];
+
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;
+  ctx.fillStyle='#0a0a0f';ctx.fillRect(0,0,W,H);
+
+  if(!sorted){
+    stepTimer+=dt;
+    while(stepTimer>=stepInterval&&!sorted){
+      stepTimer-=stepInterval;
+      highlightA=sortIdx;highlightB=sortIdx+1;
+      var didSwap=nextBubbleStep(arr,sortIdx);
+      if(didSwap)swapped=true;
+      sortIdx++;
+      if(sortIdx>=sortEnd){
+        if(!swapped){sorted=true;highlightA=-1;highlightB=-1}
+        else{sortIdx=0;swapped=false;sortEnd--}
+      }
+    }
+  }
+
+  var barW=W/N*0.8,gap=W/N*0.2;
+  for(var i=0;i<N;i++){
+    var x=i*(barW+gap)+gap/2;
+    var barH=arr[i]*H*0.85;
+    var ci=Math.floor(mapRange(arr[i],0,1,0,colors.length-1));
+    ci=clamp(ci,0,colors.length-1);
+    ctx.fillStyle=(i===highlightA||i===highlightB)?'#FFFFFF':colors[ci];
+    ctx.fillRect(x,H-barH-20,barW,barH);
+  }
+
+  ctx.fillStyle='#888';ctx.font='14px monospace';ctx.textAlign='center';
+  ctx.fillText(sorted?'Sorted! Click to reset':'Bubble Sort — sorting...',W/2,H-5);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+canvas.addEventListener('click',function(){
+  arr=[];for(var i=0;i<N;i++)arr.push(Math.random()*0.9+0.1);
+  sortIdx=0;sortEnd=N-1;sorted=false;swapped=false;highlightA=-1;highlightB=-1;
+});
+</script></body></html>

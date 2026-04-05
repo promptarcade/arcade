@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>{{TITLE}}</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #111; }
+canvas { display: block; touch-action: none; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+{{ENGINE}}
+
+var canvas = document.getElementById('c');
+var ctx = canvas.getContext('2d');
+var W, H, S;
+function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; S = Math.min(W,H)/600; }
+resize(); addEventListener('resize', resize);
+
+// --- Rendered shapes ---
+{{SHAPES}}
+
+// --- Shape state ---
+var shapes = {{SHAPE_STATE}};
+
+// --- Behaviors ---
+{{BEHAVIORS}}
+var allBehaviors = [{{BEHAVIOR_LIST}}];
+
+// --- Scores ---
+var scores = {};
+
+// --- Input state ---
+var inputState = { keys: {}, touch: null };
+{{INPUT}}
+
+// --- Render loop ---
+var last = 0;
+function loop(t) {
+  var dt = Math.min((t - last) / 1000, 0.05); last = t;
+  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, W, H);
+
+  {{TILE_BG}}
+
+  for (var i = 0; i < allBehaviors.length; i++) {
+    var events = allBehaviors[i](shapes, dt, W, H, S, inputState) || [];
+    for (var j = 0; j < events.length; j++) {
+      var e = events[j];
+      if (typeof e === 'string' && e.includes('score')) {
+        scores[e] = (scores[e] || 0) + 1;
+      }
+      {{EVENT_HANDLERS}}
+    }
+  }
+
+  for (var id in shapes) {
+    var s = shapes[id];
+    if (s.visible !== false && s.sprite) {
+      ctx.drawImage(s.sprite, s.x - s.w*S/2, s.y - s.h*S/2, s.w*S, s.h*S);
+    }
+  }
+
+  ctx.fillStyle = '#fff'; ctx.font = Math.round(24*S)+'px monospace'; ctx.textAlign = 'center';
+  var scoreText = Object.entries(scores).map(function(e) { return e[1]; }).join(' | ') || '0';
+  ctx.fillText(scoreText, W/2, 30*S);
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

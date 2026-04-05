@@ -1,0 +1,273 @@
+[
+  {
+    "prompt": "Calculate which phase (0-3) we are in. Phase is (elapsed / phase_duration) floored, then take modulo 4 to wrap around. Arguments: elapsed, phase_duration",
+    "argNames": [
+      "elapsed",
+      "phase_duration"
+    ],
+    "code": "return Math.floor(elapsed / phase_duration) % 4;",
+    "timestamp": 1774389550297
+  },
+  {
+    "prompt": "Return true if elapsed >= target_time, false otherwise. Arguments: elapsed, target_time",
+    "argNames": [
+      "elapsed",
+      "target_time"
+    ],
+    "code": "return elapsed >= target_time;",
+    "timestamp": 1774389550299
+  },
+  {
+    "prompt": "Return opacity level (0 to 1) based on phase. Phases 0 and 2 (active breathing) return 1.0. Phases 1 and 3 (hold) return 0.5. Arguments: phase",
+    "argNames": [
+      "phase"
+    ],
+    "code": "return (phase === 0 || phase === 2) ? 1.0 : 0.5;",
+    "timestamp": 1774389550300
+  },
+  {
+    "prompt": "Remap a value from one range to another. Given val in [in_min, in_max], map it to [out_min, out_max] linearly. Arguments: val, in_min, in_max, out_min, out_max",
+    "argNames": [
+      "val",
+      "in_min",
+      "in_max",
+      "out_min",
+      "out_max"
+    ],
+    "code": "return (val - in_min) / (in_max - in_min) * (out_max - out_min) + out_min;",
+    "timestamp": 1774389550302
+  },
+  {
+    "prompt": "Linear interpolation between start and end values based on progress (0.0 to 1.0). Returns start when progress is 0, end when progress is 1, and linearly interpolates between them.",
+    "argNames": [
+      "start",
+      "end",
+      "progress"
+    ],
+    "code": "return start + (end - start) * progress;",
+    "timestamp": 1774389640743
+  },
+  {
+    "prompt": "Add 1 to val and return the result. Arguments: val",
+    "argNames": [
+      "val"
+    ],
+    "code": "return val + 1;",
+    "timestamp": 1774389845554
+  },
+  {
+    "prompt": "Add 1 to p. If result >= 4, return 0. Otherwise return result. Arguments: p",
+    "argNames": [
+      "p"
+    ],
+    "code": "return p + 1 >= 4 ? 0 : p + 1;",
+    "timestamp": 1774389845555
+  },
+  {
+    "prompt": "Return 4000 if p is 0. Return 1000 if p is 1. Return 4000 if p is 2. Return 1000 if p is 3. Arguments: p",
+    "argNames": [
+      "p"
+    ],
+    "code": "return p % 2 === 0 ? 4000 : 1000;",
+    "timestamp": 1774389845556
+  },
+  {
+    "prompt": "Add dt to t and return the result. Arguments: t, dt",
+    "argNames": [
+      "t",
+      "dt"
+    ],
+    "code": "return t + dt;",
+    "timestamp": 1774389845557
+  },
+  {
+    "prompt": "Return true if t >= d. Otherwise return false. Arguments: t, d",
+    "argNames": [
+      "t",
+      "d"
+    ],
+    "code": "return t >= d;",
+    "timestamp": 1774389845558
+  },
+  {
+    "prompt": "If d is 0, return 0. Otherwise divide e by d and return result. Arguments: e, d",
+    "argNames": [
+      "e",
+      "d"
+    ],
+    "code": "return d === 0 ? 0 : e / d;",
+    "timestamp": 1774389845559
+  },
+  {
+    "prompt": "Clamp v to range [lo, hi]. If v is less than lo return lo. If v is greater than hi return hi. Otherwise return v. Arguments: v, lo, hi",
+    "argNames": [
+      "v",
+      "lo",
+      "hi"
+    ],
+    "code": "return Math.max(lo, Math.min(v, hi));",
+    "timestamp": 1774389845560
+  },
+  {
+    "prompt": "Return true if val equals target, otherwise false. Arguments: val, target",
+    "argNames": [
+      "val",
+      "target"
+    ],
+    "code": "return val === target;",
+    "timestamp": 1774389845561
+  },
+  {
+    "prompt": "If ph is 0 return 1 plus prog. If ph is 2 return 2 minus prog. Otherwise return 1. Arguments: prog, ph",
+    "argNames": [
+      "prog",
+      "ph"
+    ],
+    "code": "if (ph === 0) {\n  return 1 + prog;\n} else if (ph === 2) {\n  return 2 - prog;\n} else {\n  return 1;\n}",
+    "timestamp": 1774389860240
+  },
+  {
+    "prompt": "Return true if idx is a valid index for an array of length len. Arguments: idx, len",
+    "argNames": [
+      "idx",
+      "len"
+    ],
+    "code": "return idx >= 0 && idx < len;",
+    "timestamp": 1774390033866
+  },
+  {
+    "prompt": "Invert a boolean value. Arguments: val",
+    "argNames": [
+      "val"
+    ],
+    "code": "return !val;",
+    "timestamp": 1774390033867
+  },
+  {
+    "prompt": "Given a current position and a length, return the next position with wraparound. Arguments: pos, len",
+    "argNames": [
+      "pos",
+      "len"
+    ],
+    "code": "return (pos + 1) % len;",
+    "timestamp": 1774390033868
+  },
+  {
+    "prompt": "Clamp a value between a minimum and maximum. Arguments: val, min, max",
+    "argNames": [
+      "val",
+      "min",
+      "max"
+    ],
+    "code": "return Math.min(Math.max(val, min), max);",
+    "timestamp": 1774390033869
+  },
+  {
+    "prompt": "Return true if elapsed time has reached or exceeded the threshold. Arguments: elapsed, threshold",
+    "argNames": [
+      "elapsed",
+      "threshold"
+    ],
+    "code": "return elapsed >= threshold;",
+    "timestamp": 1774390033870
+  },
+  {
+    "prompt": "Convert beats-per-minute to milliseconds per beat. Arguments: bpm",
+    "argNames": [
+      "bpm"
+    ],
+    "code": "return 60000 / bpm;",
+    "timestamp": 1774390033872
+  },
+  {
+    "prompt": "Accumulate elapsed time by adding delta time. Arguments: elapsed, dt",
+    "argNames": [
+      "elapsed",
+      "dt"
+    ],
+    "code": "return elapsed + dt;",
+    "timestamp": 1774390033873
+  },
+  {
+    "prompt": "Get the phase of elapsed time within a beat cycle using modulo. Arguments: elapsed, beatLen",
+    "argNames": [
+      "elapsed",
+      "beatLen"
+    ],
+    "code": "return elapsed % beatLen;",
+    "timestamp": 1774390033875
+  },
+  {
+    "prompt": "Increment val by 1, wrapping at max. If val + 1 >= max, return 0. Otherwise return val + 1. Arguments: val, max",
+    "argNames": [
+      "val",
+      "max"
+    ],
+    "code": "return val + 1 >= max ? 0 : val + 1;",
+    "timestamp": 1774390231096
+  },
+  {
+    "prompt": "Test equality. Return true if a equals b. Return false otherwise. Arguments: a, b",
+    "argNames": [
+      "a",
+      "b"
+    ],
+    "code": "return a === b;",
+    "timestamp": 1774390231097
+  },
+  {
+    "prompt": "Check if bit is set. Return true if the bit at index idx is set in num. Use bitwise AND to check. Arguments: num, idx",
+    "argNames": [
+      "num",
+      "idx"
+    ],
+    "code": "return (num & (1 << idx)) !== 0;",
+    "timestamp": 1774390231098
+  },
+  {
+    "prompt": "Set a bit. Return num with the bit at index idx set to 1 using bitwise OR. Arguments: num, idx",
+    "argNames": [
+      "num",
+      "idx"
+    ],
+    "code": "return num | (1 << idx);",
+    "timestamp": 1774390231099
+  },
+  {
+    "prompt": "Clear a bit. Return num with the bit at index idx set to 0. Arguments: num, idx",
+    "argNames": [
+      "num",
+      "idx"
+    ],
+    "code": "return num & ~(1 << idx);",
+    "timestamp": 1774390231100
+  },
+  {
+    "prompt": "Clamp a value. If val is less than lo, return lo. If val is greater than hi, return hi. Otherwise return val. Arguments: val, lo, hi",
+    "argNames": [
+      "val",
+      "lo",
+      "hi"
+    ],
+    "code": "if (val < lo) return lo;\nif (val > hi) return hi;\nreturn val;",
+    "timestamp": 1774390231101
+  },
+  {
+    "prompt": "Add two values. Return a plus b. Arguments: a, b",
+    "argNames": [
+      "a",
+      "b"
+    ],
+    "code": "return a + b;",
+    "timestamp": 1774390231101
+  },
+  {
+    "prompt": "Toggle a bit. If the bit at index idx in num is 0, set it to 1. If it is 1, set it to 0. Return the result. Arguments: num, idx",
+    "argNames": [
+      "num",
+      "idx"
+    ],
+    "code": "return num ^ (1 << idx);",
+    "timestamp": 1774390231102
+  }
+]

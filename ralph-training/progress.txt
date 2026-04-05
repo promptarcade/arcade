@@ -1,0 +1,997 @@
+# Ralph Training Progress
+# This file accumulates lessons across iterations. Read it at the start of every session.
+
+## Lessons from pre-ralph training (2026-03-27/28):
+
+### Sphere lessons:
+- Phong/Blinn-Phong specular lands in wrong spot — use pow(diffuse, N) to keep it co-located with bright side
+- Ground planes need horizon (full canvas fill), not a rectangle with hard edges
+- Sink spheres 1-2px into ground to hide circle aliasing at poles
+- Cast shadows need radius ~1.2x object, intensity ~0.75 — defaults are always too subtle
+- Low ambient (0.03) creates spotlight look — use 0.12-0.18 for dispersed light
+- CRITICAL: smooth surfaces expose palette banding. Perturb normals with bump noise (0.1-0.2 strength) to break concentric bands. This is WHY the dragon eye references look good — every scale catches light differently.
+
+### Colour lessons:
+- Keep hue range TIGHT — a red sphere should read as RED throughout, not white-to-purple
+- Single palette with engine hue-shifting is better than dual-palette switching (avoids seam)
+- Specular accent palette only for the tightest highlight, not a broad zone
+
+### Construction lessons:
+- Handle attachments must not create steps — extend handles past belly peak
+- Profile functions need smooth transitions — no piecewise linear with hard breakpoints
+- Use proven canvas sizes (128x96 for HD props, ~46px half-widths)
+- Subtle belly (2-3px) not dramatic (6px+)
+
+### Proven code patterns (from reference_art_code_patterns.md — USE THESE):
+- drawPost setup: outlineMode:'none', dummy pixel in draw(), clear in drawPost, tone() helper
+- Sphere lighting: nx=dx/r, ny=dy/r, nz=sqrt(1-nx²-ny²), NdotL, diffuse, Phong specular, S-curve
+- Cylinder lighting: nx=dx/halfW, nz=sqrt(1-nx²), same NdotL formula but no ny
+- Dual palette: warm group (v>0.38) and cool group for shadows
+- Profile functions: define silhouette as halfWidth(t), render flat, verify, THEN shade
+- Tight packing: rowSpacing = formSize - 2, jitter 30%, sort by Y, dark crevice base
+- Bump texture: perturb normals with (hash-0.5)*strength before computing NdotL
+- Fresnel glass: thickness = abs(dx/halfW), fresnel = pow(1-nz, 2)*0.5+0.12
+- Metal: high specular (80-120 exp), environment reflection, quintic S-curve
+
+### Key rendering principles (from reference_art_fundamentals.md):
+- NO EMPTY SPACE — every pixel belongs to a rendered surface
+- FULL TONAL RANGE PER FORM — each form needs near-white highlight AND near-black shadow
+- EDGES DEFINE FORMS — concentrate contrast at boundaries, not gradient fills
+- COLOUR TEMPERATURE SHIFTS — lit=warm, shadow=cool, separate palette groups
+- CONSISTENT DETAIL DENSITY — texture must be uniform everywhere
+- SPECULAR: tiny and extreme contrast (2-5px, pure white against dark)
+
+### Existing scale rendering (from tools/props/training/p5-6-scales.js):
+- Each scale is a distinct 3D convex form with own highlight/shadow
+- Dark crevices between scales (near-black)
+- Size varies: large plates on flat areas, tiny near joints
+- Overlapping: bottom edge of upper scale covers top of lower
+- Row overlap spacing is critical for reading as a surface
+
+### Meta lessons:
+- ALWAYS check qa-knowledge.json before starting
+- ALWAYS compare output against dragon eye references before marking done
+- Drawing skill doesn't transfer between sessions — only principles do
+- The gap between knowing rules and applying them resets every session
+- Study existing approved outputs BEFORE drawing, not after
+
+## Iteration 1 (exercise 1, attempt 1-2) — 2026-03-28
+
+### Critic scores: attempt 1 all FAIL (1-3/5), attempt 2 improved to 3 FAILs remaining
+### Key critic feedback applied:
+- Shield shape instead of blob (construction improved 2→3)
+- Stronger bump texture
+- Added pinpoint specular (but critic says still too broad)
+- Pushed darker edge tones
+
+### Gaps identified by critic but NOT YET FIXED:
+- 32x32 canvas too small for HD tier — increased to 64x64 in PRD
+- Specular must be tighter (2-3px pinpoint, not diffuse glow)
+- Edges need dark-bright PAIRS (crevice line + bright ridge immediately above)
+- Tonal range still only ~50%, needs 70%+ (deeper darks on interior)
+- Bump noise should modulate lighting direction, not just add speckle
+
+## Iteration 2 (exercise 1, attempts 3-7) — 2026-03-28
+
+### Result: FAIL after 5 attempts. Same 4 criteria failed throughout: Texture (2), Tonal Range (2), Edges (2), Specular (2).
+
+### What improved across attempts:
+- Canvas upgraded 32→64px (adequate for single scale study)
+- Shield silhouette is recognizable and well-constructed (3/5)
+- Colour consistency is good (3-4/5, reads as green throughout)
+- Warm/cool palette split partially achieved
+- Curved dome shape visible in gradient
+- Grooves evolved from horizontal lines → curved arcs following dome
+
+### What STILL failed after 5 attempts — CRITICAL TRANSFERABLE GAPS:
+
+1. **TONAL RANGE IS THE ROOT PROBLEM**
+   - Critic says 40-50% range despite double S-curve and 0.005 ambient
+   - The 8-tone palette ramp may be the bottleneck — 8 discrete tones can't express the continuous gradient needed
+   - HYPOTHESIS: the palette colors themselves (the hex values in `colors:{}`) need to span a wider visual range. If `cool: '#0a1a0d'` isn't dark enough visually, no amount of `tone(cg, 0.02)` helps — the darkest tone IS '#0a1a0d'
+   - NEXT SESSION: verify what visual range the palette actually produces. Render a test gradient strip.
+
+2. **EDGE PAIRS: KNOWING THE RULE ≠ EXECUTING IT**
+   - The code DOES draw crevice + ridge pairs, but the critic can't see them
+   - HYPOTHESIS: the ridge brightness is too similar to surrounding pixels — need MUCH higher contrast. Ridge should be tone(hg, 0.9) even in shadow zones, not tone(wg, 0.5)
+   - The pair must be EXTREME: near-black immediately adjacent to near-white, regardless of where on the form
+
+3. **SPECULAR CONTRAST REQUIRES DARKER SURROUNDINGS**
+   - Placing specular in bright zone = invisible (no contrast)
+   - Placing specular in mid zone + darkening surround = still not enough
+   - NEXT: specular must sit on a surface that's at 20-30% brightness, and the dot must use the absolute brightest palette tone
+
+4. **BUMP TEXTURE AT PIXEL HASH RESOLUTION IS TOO FINE**
+   - hash(x,y) produces per-pixel noise that reads as dithering, not surface texture
+   - Need LARGER bump features: groups of 3-5 pixels should share similar perturbation
+   - NEXT: use hash(x/3, y/3) as the primary bump, with per-pixel only for secondary
+
+5. **GROOVE PATTERNS MUST BE ORGANIC, NOT REGULAR**
+   - Even with curved arcs and jitter, evenly-spaced grooves look mechanical
+   - Need: varying depth, width, spacing, and some grooves shorter/incomplete
+   - In references, grooves are irregular — some scales have clear ridges, others are smooth
+
+### Meta lessons:
+- Drawing skill from progress.txt doesn't transfer into execution — reading "edge pairs" and executing "edge pairs the critic recognizes" are different skills
+- The palette system (8 tones from hex colors) has a visual range ceiling — need to validate the actual rendered range before assuming the math is right
+- The critic is consistent: same scores for same issues across attempts, no regression
+- Incremental fixes don't solve structural problems — need to validate fundamentals (palette range, bump visibility) before iterating on composition
+
+## Iteration 3 (exercise 1, attempts 8-12) — 2026-03-28
+
+### Result: FAIL after 5 attempts. Same 4 criteria failed: Texture (2), Tonal Range (2), Edges (2), Specular (2).
+
+### What was tried and its effect:
+- **Attempt 8**: 5-group palette (dark/shd/mid/lit/peak). Visible features but critic said range compressed to mid-tones.
+- **Attempt 9**: Switched to 2-group palette (cool/warm) for continuous 16-tone ramp. More range but critic said still 40-50%.
+- **Attempt 10**: Extreme palette hex values (#010802, #f0ffd8) + hardcoded DARK/BRIGHT indices for edges/specular. Much more visible contrast but critic still said 40-50% range.
+- **Attempt 11**: Even more extreme palette (#010802, #f0ffd8), 4px block bump, specular as 5px cross on 8px darkened ring, 3px groove triplets. Best contrast yet but critic flagged: cross-shaped specular reads as UI cursor; bump blocks create visible grid; groove triplets too regular.
+- **Attempt 12**: Clean dome lighting (no bump on normals, brightness modulation AFTER), micro-feature bumps (individual 2-3px convex forms with highlight/shadow), irregular specular cluster, ridges near-max everywhere. Still 2/5 on all 4 criteria.
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **BUMP ON NORMALS COMPRESSES TONAL RANGE**
+   - Perturbing normals before computing NdotL redistributes lighting — dark pixels get brighter, bright pixels get darker
+   - Net effect: mid-tone compression, reducing the visible tonal range
+   - FIX: Compute CLEAN lighting first (smooth dome), then modulate FINAL brightness with noise
+   - This preserves the full tonal sweep while adding surface variation
+   - Applies to: ANY form where full tonal range matters (most things)
+
+2. **2-GROUP PALETTE FOR CONTINUOUS RAMP**
+   - With 5 palette groups × 8 tones, each group covers a narrow brightness band
+   - Transitions between groups create jumps; most tones go unused
+   - 2 groups × 8 tones = 16-tone continuous ramp from cool-dark to warm-bright
+   - Cool group covers v=0..0.42, warm group covers v=0.42..1.0
+   - Applies to: any single-form study where continuous gradation matters
+
+3. **FEATURE-BASED TEXTURE, NOT NOISE-BASED**
+   - Hash noise at ANY scale (1px, 3px, 4px blocks) reads as dithering or grid artifacts
+   - The references achieve texture through visible MICRO-STRUCTURES: tiny bumps, pits, scratches
+   - Each micro-feature needs its own highlight and shadow (2-3px highlight pixel + shadow pixel)
+   - This is fundamentally different from noise perturbation — it's drawing, not math
+   - Applies to: any organic surface (skin, bark, stone, leather)
+
+4. **SPECULAR SHAPE MATTERS**
+   - Cross/plus/star shapes read as UI cursor or lens flare
+   - Irregular L-shaped or asymmetric clusters read as wet/glossy glint
+   - 2-3px maximum, with the absolute brightest palette value
+   - Must sit on surface at 20-30% brightness, NOT in the highlight zone
+   - Applies to: any specular on any surface
+
+5. **HARDCODED PALETTE EXTREMES > COMPUTED VALUES**
+   - Computing v → mapping through palette → tone(group, v) often produces soft extremes
+   - For edge pairs and specular, use raw palette indices: DARK = group.startIdx, BRIGHT = group.startIdx + toneCount - 1
+   - These are LITERAL palette extremes that bypass all computation
+   - Applies to: any case where you need guaranteed extreme contrast
+
+6. **GROOVE RIDGES: CONTEXT vs EVERYWHERE**
+   - Critic said ridges should be "near-max EVERYWHERE" — but near-white ridges in deep shadow zones look like floating lines
+   - Better approach: ridges should be the LOCALLY brightest element, not globally brightest
+   - Shadow-zone ridges at 40-50% brightness still read as ridges if the crevice is near-black
+   - The PAIR is what matters, not the absolute brightness of either element
+   - Applies to: any dark-bright edge pair in varying lighting zones
+
+### Gaps that STILL remain unfixed after 10+ attempts:
+- Critic consistently says 40-50% tonal range despite extreme palette hex values — may be an engine limitation with 8-tone ramps
+- Texture: no approach has achieved >2/5 — noise, blocks, and micro-features all fail against reference-quality scales
+- The critic compares against photographic reference images (~500px, continuous tone) — a 64x64 palette-based sprite may have a fundamental ceiling
+- NEXT SESSION SHOULD TRY: rendering a FLAT test gradient strip of all 16 palette tones (both groups) and having the CRITIC evaluate the range directly, to establish whether the palette is the bottleneck or the rendering code is
+
+## Iteration 4 (exercise 1, attempts 13-17) — 2026-03-28
+
+### Result: FAIL after 5 attempts. Same 4 criteria: Texture (2), Tonal Range (2), Edges (2), Specular (2).
+
+### KEY BREAKTHROUGH: Understanding the ColorRamp algorithm
+
+The engine's `ColorRamp.generateN()` creates 8 tones from a base hex by:
+1. Converting to HSL
+2. Creating 4 anchors: deepShadow (L*0.45, H+20°), shadow (L*0.70, H+10°), base (L), highlight (L*1.30, H-15°)
+3. Interpolating tones across these anchors with smoothstep
+
+**This means the tonal range is a FUNCTION of the base hex's lightness:**
+- Near-black base (#020804, L≈3%) → ALL 8 tones between L=1.5% and L=4% (useless — everything near-black)
+- Mid-dark base (#1a3a12, L≈15%) → cool tones 7-22% (still all dark, no mid-range)
+- With #206f20 (L=28%) → cool ramp L=12.6%–36.4%
+- With #90df90 (L=72%) → warm ramp L=32.4%–93.6%
+- Combined: L=12.6% to L=93.6% = 81% range with overlap at 32-36%
+
+**This explains every previous "palette is too narrow" failure:**
+Previous iterations used near-black bases (#020804, #081008) thinking "dark green = near-black tones."
+But the engine multiplies the ALREADY-dark lightness, making the ramp even narrower.
+For maximal range: base colors should be at L=25-30% (dark) and L=70-75% (bright).
+
+### What was tried and its effect:
+- **Attempt 13 (palette diagnostic)**: Rendered flat gradient strip of all palette tones from #020804/#e8f8c0. Confirmed: cool group had 8 tones ALL between 5-10% luminance. Warm group jumped from 36% to 94%. 15% luminance gap in the middle.
+- **Attempt 14 (3-group palette)**: Used dark/mid/bright (#081008/#4a8a3a/#d0f0a0) for 24 tones. Engine error — approach abandoned.
+- **Attempt 15 (optimized 2-group)**: Changed to #206f20 (L=28%) and #90df90 (L=72%). Verified palette spans 12.6%-93.6% luminance. Visually much better gradient.
+- **Attempt 16 (low ambient)**: Pushed dome lighting darker (ambient 0.005), tighter bright zone. Specular placed on dark zone. Still 2/5 — critic says range looks 40-50%.
+- **Attempt 17 (micro-domes + wide grooves)**: 4-5px convex micro-domes instead of dot pairs. 2px groove crevices + 2px ridges. 4px specular cluster. Best texture yet but critic still says it reads as "noisy gradient with painted-on streaks."
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **PALETTE BASE LIGHTNESS DETERMINES RANGE**
+   - The engine's ColorRamp scales lightness: deepShadow=L*0.45, shadow=L*0.70, highlight=L*1.30
+   - Near-black/near-white bases produce NARROW ramps (all tones cluster near the base)
+   - For maximum range: use base at L=25-30% (8 tones spanning L=12-36%) and L=70-75% (8 tones spanning L=32-94%)
+   - Total coverage: 12-94% luminance with smooth overlap in the mid-range
+   - Applies to: any palette-based rendering — ALWAYS verify the actual tones before iterating on rendering code
+
+2. **HUE SHIFT IN RAMPS: +20° SHADOW, -15° HIGHLIGHT**
+   - Engine shifts hue cooler in shadows (H+20°), warmer in highlights (H-15°)
+   - This is automatic — don't fight it. Choose base hues knowing this shift will happen.
+   - For green (H=120°): shadows shift toward cyan (140°), highlights toward yellow-green (105°)
+   - Applies to: any colour planning for palette-based sprites
+
+3. **PALETTE DIAGNOSTIC BEFORE RENDERING**
+   - ALWAYS render a flat gradient strip of all palette tones before doing ANY drawing work
+   - Verify: darkest tone reads near-black, brightest near-white, no large gaps
+   - This takes 2 minutes and prevents hours of futile iteration on rendering code
+   - Applies to: any new sprite project
+
+4. **MICRO-DOMES (4-5px) > DOT PAIRS (2px) FOR TEXTURE**
+   - 2px highlight+shadow dot pairs are too small to read as convex forms — they look like noise
+   - 4-5px domes with dome normals computed per-pixel create visible bumps
+   - Blend 50% global position lighting + 50% local bump lighting
+   - Still scored 2/5 but visibly better than previous attempts
+   - Applies to: any surface texture that needs to read at small sizes
+
+### Gaps that STILL remain unfixed after 17 attempts:
+- Critic consistently says 2/5 on same 4 criteria despite progressively better palette and rendering
+- The critic compares against ~500px continuous-tone photographs — 64x64 × 16-tone palette has a fundamental resolution gap
+- Possible next steps:
+  a. Try LARGER canvas (128x128) to give more pixel budget for micro-features
+  b. Try direct pixel colour manipulation (bypass the palette system entirely)
+  c. Accept that exercise 1 may have a ceiling and move to exercise 2 (patch of scales) where the critic may be more receptive to the multi-form composition
+  d. Ask user for guidance on whether to continue iterating or move forward
+
+## Iteration 5 (exercise 1, attempts 18-22) — 2026-03-28
+
+### Result: FAIL after 5 attempts. Same 4 criteria: Texture (2), Tonal Range (2), Edges (2), Specular (2).
+
+### What was tried and its effect:
+- **Attempt 18**: 128x128 canvas, dome gradient + groove pairs + 25 micro-domes + L-shaped specular on darkened zone. Critic: "smooth gradient with painted-on streaks" — micro-domes invisible, tonal range 40-50%.
+- **Attempt 19**: Per-band tonal range (each strip between grooves gets own dark→bright sweep). Critic: same — "noisy gradient with horizontal streaks", still 40-50% range.
+- **Attempt 20**: Hard two-tone lighting (double S-curve), hardcoded palette indices for groove pairs (DARKEST/BRIGHTEST). Critic: groove pairs visible but read as "painted-on stripes not 3D crevice-ridge pairs", specular missing/invisible, micro-domes = speckle.
+- **Attempt 21**: INVERTED APPROACH — dense hex-packed micro-dome field covering 100% surface, each dome with own NdotL. Critic: reads as "stamped grid pattern/wallpaper" — domes too uniform in size/spacing/shape, hex regularity is the problem.
+- **Attempt 22**: HYBRID — varied organic features (r=2-6, larger center smaller edges), dark crevice base, per-feature dome lighting blended with global. Critic: reads as "fluorescent dots painted on dark surface" — too much dark space between features, domes lack internal gradient, mid-range gap.
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **INVERTED RENDERING: TEXTURE FIRST, FORM SECOND**
+   - Traditional: compute smooth form gradient → add features on top → features are cosmetic
+   - Better: pack surface with textured features → modulate brightness by global form → features ARE the surface
+   - The references achieve quality through density of rendered detail — no "smooth base" visible anywhere
+   - Still failed because execution needs TIGHT packing (overlap/crowd features, not grid spacing)
+   - Applies to: any textured surface rendering
+
+2. **TEXTURE DENSITY MUST APPROACH 100%**
+   - 30 features at 7px spacing = 5% coverage → reads as scattered dots on gradient
+   - 80 features at varied spacing = 40% coverage → still reads as dots on dark surface
+   - References: ~100% coverage, dark base only visible as thin crevice LINES between tightly packed forms
+   - Features must OVERLAP and CROWD each other — no flat base visible except 1-2px crevice lines
+   - Applies to: any densely textured surface (scales, stone, bark, chainmail)
+
+3. **EACH MICRO-FEATURE NEEDS FULL TONAL SWEEP**
+   - A micro-dome with uniform brightness = a flat circle, not a 3D form
+   - Each dome/feature must have: near-white highlight (upper-left), mid-tone body, near-black shadow (lower-right)
+   - The dome IS a tiny sphere — compute NdotL per pixel across its surface
+   - Global form lighting MODULATES local lighting (darker in shadow zones) but doesn't replace it
+   - Applies to: any repeated small form
+
+4. **EDGE PAIRS AT FORM BOUNDARIES**
+   - Where each micro-form meets its neighbor, the boundary needs: near-black crevice + near-white ridge
+   - This creates the "overlapping 3D forms" illusion that makes scales/tiles read as surfaces
+   - Without edge pairs at EVERY boundary, forms look like dots scattered on a flat background
+   - Applies to: any packed surface (scales, stones, tiles, cobbles)
+
+5. **MID-RANGE GAP IS A RENDERING PROBLEM**
+   - 2-tone output (dark base + bright features) with nothing at 30-50% looks unnatural
+   - Need gradual transitions: feature edges fade to mid-tone → crevice shadow → dark base
+   - Each feature should populate the ENTIRE brightness range, not just the bright end
+   - Applies to: any two-group palette rendering
+
+6. **128x128 CANVAS DID NOT SOLVE THE QUALITY PROBLEM**
+   - More pixels = more room for features, but same fundamental rendering approach = same score
+   - The bottleneck is not resolution — it's rendering approach (smooth gradient vs dense micro-structure)
+   - The critic compares against continuous-tone photographs; palette-based indexed colour has inherent banding
+   - Applies to: don't assume bigger canvas fixes quality — the rendering technique matters more
+
+### Persistent gaps after 22 attempts across 5 iterations:
+- All 4 failing criteria (Texture, Tonal Range, Edges, Specular) have NEVER exceeded 2/5
+- The critic is consistent: same feedback across all attempts
+- THREE distinct approaches tried (smooth gradient + features, dense uniform grid, varied organic features) — all score identically
+- The critic benchmark is continuous-tone photographic references — indexed-palette pixel art may have a structural ceiling against this benchmark
+- NEXT STEPS: Either bypass the palette system for direct RGB, try 256x256, or accept the exercise 1 ceiling and move to exercise 2 where the composition (multi-form) may score differently
+- ALTERNATIVE: The critic prompt may need calibration — it compares against 500px photographs which is an inappropriate benchmark for 128px pixel art
+
+## Iteration 6 (exercise 1, attempts 23-27) — 2026-03-28
+
+### Result: FAIL after 5 attempts. Texture reached 3/5 (first time!) but Tonal Range, Edges, Specular remain at 2/5.
+
+### What was tried and its effect:
+- **Attempt 23 (unified height field)**: Dome + grooves + bumps computed as ONE surface, normals via finite differences. Critic: "chaotic hash noise" — bump features blended together, not individually identifiable.
+- **Attempt 24 (explicit dome rendering)**: r=3-5 domes with per-pixel sphere lighting, painted on dark base. Critic: "hash-based dithering" — domes too small to read as individual 3D forms.
+- **Attempt 25 (larger domes r=5-7)**: Explicit domes with post-hoc ridge detection. Critic: "spots on a surface" — domes overlapped via painter's order, covering each other's crevices.
+- **Attempt 26 (Voronoi tessellation)**: ★ BEST RESULT. Every pixel assigned to nearest dome center. Crevice at cell boundaries, ridge just inside. Texture 3/5, Coverage 4/5, Colour 4/5. But computed contrast still too moderate for edges/tonal range.
+- **Attempt 27 (Voronoi + hardcoded extremes)**: Forced BRIGHTEST at every ridge, DARKEST at every crevice. BACKFIRED — bright ridges at every boundary created a white grid/mesh that looked MORE artificial. Texture dropped back to 2/5.
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **VORONOI TESSELLATION FOR PACKED TEXTURE**
+   - Assign every pixel to its nearest feature center (Voronoi cell)
+   - Crevice at cell boundary (where distance to nearest ≈ distance to second-nearest)
+   - This guarantees 100% coverage by construction — no base gradient visible anywhere
+   - Each cell is independently lit with sphere normals from its center
+   - The boundary threshold controls crevice width: 0.12-0.13 ≈ 1-2px dark lines
+   - Applies to: any densely packed surface (scales, cobblestones, tiles, chainmail, bark)
+
+2. **HARDCODED EXTREMES AT ALL BOUNDARIES BACKFIRES**
+   - Forcing the absolute brightest tone at EVERY ridge creates a uniform white grid
+   - This reads as MORE artificial than computed values (violates organic asymmetry)
+   - Better: ridges should be the LOCALLY brightest element (varies by global position)
+   - Shadow-zone ridges at 50-60% look natural; highlight-zone ridges at 90-95% look natural
+   - ONLY use hardcoded extremes for crevices (DARKEST) and specular (BRIGHTEST)
+   - Applies to: any edge pair rendering — extremes should be used selectively, not everywhere
+
+3. **DOME RADIUS FOR IDENTIFIABILITY: 5-7px MINIMUM**
+   - r=3-5 domes blend into noise at 128x128 — too small to show individual highlight/shadow
+   - r=5-7 domes are large enough for per-pixel sphere lighting to create visible tonal sweep
+   - With Voronoi at spacing 9, r=5.5-7 gives cells of ~9-14px diameter — individually identifiable
+   - Applies to: any repeated micro-feature — below 5px, features merge into texture noise
+
+4. **HEIGHT FIELD ≠ GOOD TEXTURE**
+   - Computing bumps as a height field and deriving normals produces continuous, smooth variations
+   - These read as noise/dithering, not as individually distinct 3D forms
+   - Explicit features (Voronoi cells) with per-feature normals produce identifiable forms
+   - The difference: height field has gradual transitions, Voronoi has sharp boundaries
+   - Applies to: any organic surface — explicit features > procedural height modulation
+
+5. **GLOBAL MODULATION AS MULTIPLIER, NOT BLEND**
+   - Blending global + local lighting (e.g., 40% global + 60% local) compresses per-feature range
+   - Multiplicative modulation (local * (0.25 + global * 0.75)) preserves per-feature contrast while varying overall brightness
+   - This means shadow-zone features are darker overall but still have internal contrast
+   - Applies to: any scene combining global and local lighting
+
+### Progress across all 27 attempts:
+- Texture: 2→2→2→2→**3**→2 (peaked at 3/5 with Voronoi, lost with forced extremes)
+- Tonal Range: consistently 2/5 across all iterations
+- Edges: consistently 2/5 across all iterations
+- Specular: consistently 2/5 across all iterations
+- Coverage: 3→3→3→3→**4**→3 (peaked at 4/5 with Voronoi)
+- Colour: 3→3→3→3→**4**→3 (peaked at 4/5)
+- Construction: 3/5 consistent
+- Craft: consistently 2/5
+
+### Remaining gap analysis:
+- The Voronoi approach is correct for texture and coverage
+- The remaining 2/5 scores (Tonal Range, Edges, Specular) are all about CONTRAST INTENSITY
+- The per-dome range is theoretically 0-90% but in practice uses 30-70% (mid-range compression)
+- Ridge contrast needs to be stronger than attempt 26 but not as uniform as attempt 27
+- Specular placement on bright zones makes it invisible — needs to be on 20-30% brightness surface
+- NEXT: vary dome sizes more (3-8px), use COMPUTED but stronger ridge contrast, place specular deliberately in shadow zone
+
+## Iteration 7 (exercise 1, attempts 28-32) — 2026-03-28
+
+### Result: FAIL after 5 attempts. Texture steady at 3/5, Tonal Range/Edges/Specular still 2/5.
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **PALETTE TONE DISTRIBUTION vs RANGE**
+   - Having extreme hex values doesn't guarantee visible tonal range
+   - A cool base at L=12% produces 8 tones between L=5-16% — ALL look the same dark green
+   - A cool base at L=20% produces 8 tones between L=9-26% — each is visually distinct
+   - The DISTRIBUTION across tones matters more than the absolute extremes
+   - Optimal bases: L=20-25% (cool) and L=72-76% (warm) for 16 visually distinct tones
+   - Applies to: any palette-based rendering — verify tone DISTRIBUTION, not just range endpoints
+
+2. **GAMMA CURVE vs S-CURVE FOR PER-FEATURE RENDERING**
+   - S-curve pushes extremes apart but creates a UNIFORM DARK BLOB on shadow side
+   - At NdotL=0 (30% of sphere surface), S-curve produces v=0 for ALL those pixels
+   - Gamma 0.65 distributes tones more evenly — the shadow side shows gradation
+   - S-curve is better for overall composition; gamma is better for per-feature detail
+   - Applies to: any repeated form where you need visible tonal sweep within each form
+
+3. **SPECULAR PLACEMENT PARADOX — MID-TONE ZONES**
+   - On bright surfaces (L=80%+): specular at L=99% has only 19% contrast — invisible
+   - On dark surfaces (L=10-20%): specular at L=99% has 80%+ contrast BUT 2-3px is too small to see against dark expanse
+   - The sweet spot should be MID-TONE zones (L=40-50%): high contrast (50%+) AND visible against medium background
+   - ALSO: specular clusters need to be 4-5px, not 2-3px, to be identifiable at 128x128
+   - Applies to: any specular highlight placement
+
+4. **BOTH MULTIPLICATIVE AND ADDITIVE GLOBAL BLEND COMPRESS PER-FEATURE RANGE**
+   - Multiplicative (v * globalMod): shadow-zone features compressed to 0-20%
+   - Additive (v * 0.82 + gl * 0.18): highlight-zone features lifted floor to 15%+
+   - Neither preserves the full 0-100% range per feature
+   - For maximum per-feature range: NO global modulation on feature interiors
+   - Use global modulation ONLY on boundaries (ridge brightness, crevice depth)
+   - Applies to: any scene combining global form lighting with local detail
+
+5. **16-TONE RAMP MUST BE MONOTONIC**
+   - With 2 palette groups, the combined 16-tone ramp is cool[0..7] + warm[0..7]
+   - If cool-brightest > warm-darkest, the ramp dips at index 7→8 — visual artifacts
+   - Ensure bases are chosen so cool-brightest ≈ warm-darkest (≈L=30%)
+   - With L=20% cool: brightest cool ≈ L=26%. With L=76% warm: darkest warm ≈ L=34%.
+   - 8% gap is acceptable; 21% gap (with L=12% cool) is not
+   - Applies to: any dual-group palette used as a single ramp
+
+### Persistent analysis after 32 attempts (7 iterations):
+- Texture: SOLVED at 3/5 with Voronoi — never needs to change structurally
+- Tonal Range: persistently 2/5 — critic says 40-55% range despite palette spanning 80%+
+- Edges: persistently 2/5 — ridges not bright enough relative to dome interior
+- Specular: persistently 2/5 — placement paradox unresolved
+- The 3 remaining failures are all about CONTRAST INTENSITY within the correct structure
+- NEXT SESSION: try specular in mid-tone zone with 4-5px clusters; consider bypassing palette for specular (draw actual white pixels)
+
+## Iteration 8 (exercise 1, attempts 33-37) — 2026-03-28
+
+### Result: FAIL after 5 attempts. Same 4 criteria: Texture 3, Tonal Range 2, Edges 2, Specular 2. Coverage 4, Colour 4.
+
+### Approaches tested from iteration 7 recommendations:
+- **Specular in mid-tone zones**: TESTED (attempts 33-37). Specular placed on domes where global brightness is 20-50%. Creates better contrast than highlight-zone placement. Critic still says 2/5 because clusters are too small (2-3 visible px after boundary filtering).
+- **Bypass palette for specular**: TESTED. Used absolute BRIGHTEST palette index directly. Visible but still not enough contrast against surrounding cells.
+- **Gamma 0.65 instead of S-curve**: TESTED (all attempts). Distributes tones more evenly than S-curve — no uniform dark blobs. But per-dome visible range still reads as 3-4 tones.
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **RANGE-BAND SHIFTING FOR GLOBAL+LOCAL LIGHTING**
+   - Instead of multiplying local lighting by global factor (which compresses range), SHIFT the tonal window
+   - Shadow-zone features map to [lo=0.03, hi=0.52], highlight-zone features to [lo=0.30, hi=0.97]
+   - Each feature maintains constant bandwidth (~50% of palette) while window position communicates global form
+   - But: this only works if localV actually spans [0, 1] within each feature
+   - Applies to: any scene combining per-feature and global lighting
+
+2. **LIGHT-ALIGNMENT SWEEP FOR FULL PER-FEATURE RANGE**
+   - Using 2D light-direction alignment instead of 3D sphere NdotL guarantees full [0,1] range per dome
+   - `alignment = (dx * lx2d + dy * ly2d) / dist` — gives -1 to +1 linearly across dome
+   - Map to v: `(-alignment + 1) * 0.5` — guaranteed 0 to 1
+   - Unlike sphere NdotL which maxes out at ~0.85 for most light angles
+   - Applies to: any repeated convex form where you need guaranteed full tonal sweep
+
+3. **INTERIOR CAP BELOW RIDGE GUARANTEES EDGE PAIR CONTRAST**
+   - Cap dome interior maximum below ridge brightness (e.g., interior max 0.82, ridge at 0.90+)
+   - This guarantees ridges always read as locally brightest element
+   - But: this also compresses interior range — the cap steals from the top end
+   - Better approach may be: draw ridges AFTER dome interiors as an overlay, not as part of Voronoi classification
+   - Applies to: any edge-pair rendering where ridges must stand out
+
+4. **SMALL VORONOI CELLS HAVE A PER-DOME TONAL CEILING**
+   - At r=6 (12px diameter, ~120 interior pixels), a full 16-tone gradient spreads each tone across only ~7 pixels
+   - The critic (and human viewers) perceive this as "3-4 visible tones" not "16 tones"
+   - References show scales at 50-100px diameter where gradients are unambiguous
+   - For visible tonal sweep within small cells, need either: larger cells (r=12+), fewer tones (harder contrast jumps), or an entirely different rendering approach
+   - Applies to: any Voronoi-based texture — cell size determines how many tones per cell are perceptible
+
+5. **SPECULAR WITH HALO RING**
+   - Core of absolute brightest tone (4-5px) surrounded by second-brightest halo (3-4px)
+   - Creates larger effective specular footprint without losing the bright pinpoint
+   - Asymmetric shape (L, Z, or teardrop) reads as wet/glossy, not as UI element
+   - But: at 128x128 with r=6 domes, the specular+halo can dominate the cell
+   - Applies to: any glossy/wet surface specular
+
+### Persistent analysis after 37 attempts (8 iterations):
+- Texture: stable at 3/5 with Voronoi
+- Tonal Range: stuck at 2/5 — likely a CELL SIZE limitation, not a rendering limitation
+- Edges: stuck at 2/5 — ridge-interior brightness difference not perceptible at small cell size
+- Specular: stuck at 2/5 — improved placement but insufficient size/contrast
+- Coverage: 4/5 (Voronoi)
+- Colour: 4/5
+- The remaining failures may require either LARGER cells (256x256 canvas), or a fundamentally different approach (single-dome scale with surface texture overlay instead of Voronoi sub-domes)
+- Consider advancing to exercise 2 (patch of scales) where the composition may score differently
+
+## Iteration 9 (exercise 2, attempts 1-4) — 2026-03-28
+
+### Result: PASS on attempt 4! All 8 criteria at 3/5 or above. First clean pass after 41 total attempts.
+
+### Critic scores (attempt 4): Texture 3, Tonal Range 3, Edges 3, Specular 3, Coverage 4, Colour 4, Construction 4, Craft 3
+
+### Key breakthrough: ZONE-BASED RENDERING
+- Exercise 1 failed because smooth dome gradients over small cells (r=6-14) produce only 2-3 perceptible tones
+- Zone-based approach: divide each dome's NdotL into 5 DISCRETE zones with sharp jumps between them
+- Each zone maps to a specific palette index, producing clear tonal steps that the critic can identify
+- This is fundamentally different from smooth gradient → quantization (which looks like banding)
+- Deliberate jumps at meaningful lighting thresholds look like faceted 3D, not banded gradients
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **ZONE-BASED RENDERING FOR SMALL FORMS**
+   - When a form has <30px diameter, smooth gradients produce too few visible tone steps
+   - Instead: divide the lighting into 5 zones (deep shadow / shadow / mid / highlight / bright peak)
+   - Map each zone to a specific palette index with deliberate jumps
+   - The jumps read as faceted/crystalline surface quality — appropriate for scales, stone, armor
+   - Use gamma 0.65 to compute the initial NdotL, THEN quantize to zones
+   - Applies to: any repeated small convex form (scales, cobblestones, chainmail, roof tiles)
+
+2. **RANGE-BAND SHIFTING: GLOBAL POSITION SHIFTS TONAL WINDOW**
+   - Instead of multiplying local lighting by global factor (compresses range per-form), SHIFT the palette window
+   - Shadow-zone forms use palette indices 0-7, highlight-zone forms use indices 7-15
+   - Each form maintains full bandwidth (~7 tones) while window position communicates global form
+   - Implemented as: baseIdx = gb * 9, per-dome tones at [baseIdx, baseIdx+2, baseIdx+4, baseIdx+6, baseIdx+7]
+   - Applies to: any scene combining global + local lighting on repeated forms
+
+3. **RIDGE AS POST-PROCESS, NOT IN-DOME COMPUTATION**
+   - Ridges drawn as a separate pass AFTER dome interiors produces cleaner results
+   - Detect boundary pixels (owner changes), mark as crevice (DARKEST), then find pixels 1px inside boundary and boost to ridge brightness
+   - Ridge brightness = baseIdx + 8 (2+ tones above dome peak) — locally brightest without being globally uniform
+   - Applies to: any edge pair rendering on Voronoi tessellation
+
+4. **SPECULAR ON MID-BRIGHTNESS SCALES FOR MAXIMUM CONTRAST**
+   - Specular at gb 0.3-0.55 creates maximum perceived contrast (background surface at 40-50% luminance, specular at near-white)
+   - Bright-zone specular (gb > 0.6): small 2px dots sufficient (already bright surface)
+   - Mid-zone specular (gb 0.3-0.55): 4-5px L-shaped clusters with halo ring needed for impact
+   - Applies to: any specular highlight placement — always target mid-tone surfaces
+
+5. **MULTI-PASS RENDERING: INTERIORS → BOUNDARIES → RIDGES → SPECULAR**
+   - Pass 1: dome interiors with zone-based lighting
+   - Pass 2: detect boundary pixels, mark as crevice (near-black)
+   - Pass 3: find pixels 1px inside boundary, boost to ridge brightness
+   - Pass 4: overlay specular clusters on selected scales
+   - Each pass can be independently tuned without affecting others
+   - Applies to: any complex sprite with multiple rendering concerns
+
+### What each attempt contributed:
+- Attempt 1: Voronoi layout, smooth dome gradient, range-band shifting. Texture 3, Specular 3, rest at 2. Proved layout works.
+- Attempt 2: Shield shapes, 2-pass ridge detection, micro pits. Ridges visible but not contrasting enough. All still at 2 except Texture 3.
+- Attempt 3: Extreme global modulation, more speculars. Critic still said edges/tonal range at 2 despite visible improvements.
+- Attempt 4: ZONE-BASED rendering (discrete tonal steps instead of smooth gradient). PASSED. The discrete zones made per-dome tonal range PERCEPTIBLE.
+
+### Meta lessons:
+- Exercise 2 (multi-form composition) unlocked what exercise 1 couldn't: visible per-form tonal range through zone-based rendering
+- The single-scale exercise had a structural ceiling: one dome filling 128x128 with Voronoi sub-cells produced cells too small for visible gradients
+- Larger cells (r=14, ~28px diameter) are large enough for 5 discrete zones to be individually visible
+- The critic benchmark (Hyper Light Drifter, CrossCode) rewards deliberate tonal structure over smooth gradients
+
+## Iteration 10 (exercise 3, attempt 1) — 2026-03-28
+
+### Result: PASS on first attempt! All 8 criteria at 3/5 or above.
+
+### Critic scores: Texture 3, Tonal Range 3, Edges 3, Specular 3, Coverage 4, Colour 4, Construction 4, Craft 3
+
+### What worked (carried forward from exercises 1-2):
+- Zone-based rendering (5 discrete tonal zones per dome) — transferred directly, no modifications needed
+- Range-band shifting (gb * 9 as base index into 16-tone ramp) — works naturally with sphere NdotL
+- Multi-pass pipeline (interiors → boundaries → ridges → specular)
+- Specular placement on mid-brightness scales (gb 0.30-0.55)
+- Voronoi tessellation for 100% coverage
+- L≈22% / L≈74% palette bases for optimal tone distribution
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **FORESHORTENING VIA SURFACE NORMAL Z-COMPONENT**
+   - For scales on a sphere: scale radius = baseRadius * nz
+   - nz = sqrt(1 - nx² - ny²), so center of sphere nz≈1 (full size), edges nz→0 (tiny)
+   - This is geometrically correct foreshortening — no manual size tables needed
+   - The visual result: scales naturally compress at silhouette edges, expand at center
+   - Applies to: any repeated form on a curved surface (armor plates, bark on a log, tiles on a dome)
+
+2. **PRE-COMPUTE SURFACE DATA INTO TYPED ARRAYS**
+   - Computing sphere normals and NdotL into Float32Arrays before scale rendering
+   - Allows both scale placement (using nz for size) and insideSphere checks (using Uint8Array)
+   - Cleaner than computing sphere normals per-pixel during scale rendering
+   - Applies to: any multi-pass rendering where surface data is needed by multiple passes
+
+3. **SPHERE EDGE DARKENING FOR SILHOUETTE**
+   - A thin rim (6% of radius) of near-black at the sphere edge prevents hard cut edges
+   - Without this, scales at the edge would abruptly stop, breaking the curved surface illusion
+   - Applies to: any curved surface that needs a soft silhouette transition
+
+4. **COMPOSITION OF LEARNED TECHNIQUES**
+   - Exercise 3 required NO new rendering techniques — only combining ex1/ex2 discoveries
+   - Zone-based rendering + range-band shifting + Voronoi + foreshortening = curved scaled surface
+   - This confirms the techniques are truly composable and transferable
+   - The only new element was foreshortening, which is geometry not rendering
+   - Applies to: meta-lesson about building complexity through composition of proven techniques
+
+### Critic feedback for future improvement (not blocking):
+- Intra-scale texture: each tonal zone is flat, adding 1-2px surface roughness would push Texture to 4/5
+- Ridge contrast: ridges could be 1-2 indices brighter relative to dome interior
+- Specular drama: clusters could be 5-6px with dark halo for more pop
+- Tonal range stretch: darkest/brightest scales could push 1-2 indices further apart
+
+## Iteration 11 (exercise 4, attempt 1) — 2026-03-29
+
+### Result: PASS on first attempt! All 8 criteria at 3/5 or above.
+
+### Critic scores: Texture 3, Tonal Range 3, Edges 3, Specular 3, Coverage 4, Colour 4, Construction 4, Craft 3
+
+### What worked (all carried forward from exercises 1-3):
+- Zone-based rendering (5 discrete zones per scale dome)
+- Range-band shifting (gb * 9 for palette window)
+- Multi-pass pipeline (interiors → boundaries → ridges → specular)
+- Voronoi tessellation for 100% scale coverage
+- Specular on mid-brightness scales (gb 0.30-0.55)
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **CONCAVE FORM LIGHTING: DEPTH = DARKNESS**
+   - For concave forms (sockets, bowls, cave entrances), depth into the form replaces surface angle as the primary lighting variable
+   - Deeper pixels get less light: v *= pow(1 - normalizedDepth, 1.5)
+   - Ambient occlusion scales with depth: ambient = 0.02 + 0.08 * (1 - depth)
+   - The rim of a concave form catches light (normal faces outward), center is in deep shadow
+   - This is the INVERSE of convex forms where center is brightest
+   - Applies to: bowls, eye sockets, cave mouths, window recesses, any concave opening
+
+2. **RIM LIGHTING ON RIDGES: BRIGHT EDGE AGAINST DARK INTERIOR**
+   - The signature visual of a socket/frame: a thin bright line on the outer edge of the ridge
+   - The ridge is a CONVEX form (half-cylinder cross-section) on the edge of a CONCAVE form
+   - Upper lid catches more light than lower lid (directional lighting)
+   - Rim = outermost 2-3px of the ridge, pushed to palette index 12-14
+   - The contrast is dramatic: bright rim (index 12-14) adjacent to dark socket (index 0-2)
+   - Applies to: any frame/border around a recessed area (door frames, window sills, bowl rims)
+
+3. **CAST SHADOW FROM OVERHANGING GEOMETRY**
+   - The upper lid overhangs the top of the socket, casting a shadow
+   - This shadow is ADDITIONAL to the concave depth darkening — near-black regardless of ambient
+   - Detect by checking if pixel is near the top edge AND shallow depth
+   - Applies to: any geometry with an overhang (eaves, helmets, brow ridges, shelf undersides)
+
+4. **ZONE TRANSITIONS: SCALED SKIN → SMOOTH LID → DARK INTERIOR**
+   - Three distinct surface types with different rendering approaches in one image
+   - Scales: Voronoi + zone-based + micro-texture (from ex1-3)
+   - Lid: smooth convex ridge with cylinder-like cross-section normals
+   - Socket: concave depth-based lighting with minimal texture
+   - The transitions define the structure — where scales stop and lid begins, where lid stops and socket begins
+   - Applies to: any composite subject with multiple material zones
+
+5. **ALMOND SHAPE AS SIGNED DISTANCE FIELD**
+   - Parametric almond: ellipse with sharpened tips (multiply y by (1 + x²*k))
+   - almondDist < 0 = inside socket, > 0 = outside
+   - The distance field serves multiple purposes: masking (don't draw scales inside socket), depth computation (how deep into the socket), lid band detection (narrow strip around edge)
+   - Applies to: any non-circular opening shape
+
+### Critic feedback for future improvement (not blocking):
+- Intra-scale texture: each tonal zone is flat, add 1-2px roughness within zones
+- Edge pair contrast: push ridges 1-2 indices brighter
+- Specular drama: increase to 5-6px clusters with dark halo
+- Socket interior: add subtle texture (consistent detail density — darkest area is least detailed)
+- Rim light intensity: upper lid rim could be 2-3 indices brighter
+
+## Iteration 12 (exercise 4, attempt 1) — 2026-03-29
+
+### Result: PASS on first attempt! Exercise 4 re-passed after scale density regression fix.
+
+### Critic scores: Texture 3, Tonal Range 3, Edges 3, Specular 3, Coverage 4, Colour 4, Construction 4, Craft 3
+
+### What was fixed from iteration 11:
+- **Scale density regression**: Iteration 11 used 18x15 grid spacing with baseR=11, but scales near socket shrank to r=5 without compensating spacing. Dark background visible between scales.
+- **Fix**: Three changes:
+  1. Tighter main grid (13x11 spacing instead of 18x15)
+  2. Extra ring of perimeter scales placed along the socket edge at multiple distances
+  3. True Voronoi assignment: every non-socket pixel assigned to nearest scale center, guaranteeing 100% coverage by construction (no painter's-order gaps)
+- **Result**: Dense coverage matching exercise 3, no bare background
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **VORONOI ASSIGNMENT > PAINTER'S ORDER FOR COVERAGE**
+   - Previous approach: draw each scale as a filled shape, painter's order (later overwrites earlier)
+   - Problem: gaps appear where shapes don't overlap, especially where they shrink near obstacles
+   - Better: assign EVERY pixel to its nearest seed via Voronoi, then render per-cell
+   - This guarantees 100% coverage by construction — no pixel is unassigned
+   - Crevice detection via distance ratio (distNearest / distSecond > threshold)
+   - Applies to: any packed surface where gaps are unacceptable
+
+2. **ADAPTIVE SEED DENSITY NEAR OBSTACLES**
+   - When features shrink near an obstacle (socket edge), the main grid's fixed spacing creates gaps
+   - Fix: add extra seed rings specifically around the obstacle perimeter
+   - Ring seeds at multiple distances (0.25, 0.43, 0.61 in almond-dist units)
+   - Check minimum distance to existing seeds to avoid overcrowding (8px min)
+   - Applies to: any packed texture near a boundary where density must be maintained
+
+3. **REGRESSION AWARENESS: COVERAGE IS NON-NEGOTIABLE**
+   - Once a technique scores well (coverage 4/5 in ex2-3), it MUST be maintained in later exercises
+   - Adding new elements (socket, lid) must not degrade existing ones (scale density)
+   - Test: compare the new output visually against previous exercise outputs before submitting
+   - Applies to: any iterative creative work — new features must not regress established quality
+
+## Iteration 13 (exercise 5, attempts 1-3) — 2026-03-29
+
+### Result: PASS on attempt 3 (palette fix attempts). All 8 criteria at 3/5 or above.
+
+### Critic scores: Texture 3, Tonal Range 3, Edges 3, Specular 3, Coverage 4, Colour 4, Construction 4, Craft 3
+
+### What was tried:
+- **Attempt 1**: Warm amber palette (#7a5828/#f0c858). Engine hue shift turned it green. Colour 2/5 FAIL.
+- **Attempt 2**: Pre-compensated redder palette, multiple iterations on hex values to fight engine's +20°/-15° hue shifts.
+- **Attempt 3**: Deep red cool (#781010, H≈0°) + orange warm (#d06020, H≈17°). All shifted tones stay in H=345°-37° range (red-orange-amber). PASSED.
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **ENGINE HUE SHIFT PRE-COMPENSATION FOR NON-GREEN PALETTES**
+   - The engine shifts shadow hues +20° and highlight hues -15° during ColorRamp generation
+   - For GREEN palettes (H≈120°), this creates cyan shadows (H=140°) and yellow highlights (H=105°) — acceptable
+   - For WARM palettes (H≈30-50°), the +20° shadow shift pushes tones into H=50-70° (yellow-GREEN) — looks wrong
+   - FIX: Pre-compensate by using base hues 15-20° REDDER than the desired output
+   - For amber/gold output (target H≈30-40°), use base hues at H≈10-20°
+   - For orange output (target H≈20-30°), use base hues at H≈0-10°
+   - CRITICAL: The warm group's deepShadow tone (H+20°) is the worst offender — must stay below H≈45° to avoid green cast
+   - Applies to: any non-green palette using the engine's ColorRamp system
+
+2. **RADIAL FIBRE PATTERN FOR IRIS/FLOWER/SHIELD DETAIL**
+   - Generate N fibres at angular positions with jitter, varying brightness and thickness per fibre
+   - Each pixel finds its nearest fibre (angular Voronoi)
+   - Fibre core = bright, between-fibre = darker (but NOT black — subtle crevice, not deep gap)
+   - Fibre effect strength scales with radial distance: 0 at centre (smooth bright), 1.0 at mid/outer
+   - Combine with radial colour gradient: warm/bright centre → cooler/darker edge
+   - Between-fibre crevice detection via angular distance ratio (same as Voronoi boundary detection)
+   - Applies to: any radial pattern (iris, flower, shield boss, clock face, wheel spoke, magic effect)
+
+3. **COLOUR GRADIENT VIA PALETTE INDEX MAPPING**
+   - Instead of computing colour from hue math, map radial distance to a palette index range
+   - Centre: palette 12-14 (brightest), mid: palette 8-11, edge: palette 4-7, rim: palette 0-2
+   - The engine's colour ramp handles the actual hue-to-brightness relationship
+   - This is simpler and more predictable than trying to compute hue gradients manually
+   - Applies to: any smooth gradient within a single form
+
+4. **GLOSSY SURFACE SPECULAR IS DIFFERENT FROM MATTE**
+   - Matte specular (scales): small cluster on mid-brightness surface, moderate contrast
+   - Glossy specular (eye): larger highlight area with bright core + halo, placed where surface normal faces light
+   - Wet surfaces show SECONDARY reflections (smaller, opposite side from main specular)
+   - The main specular should be in the upper-lit portion; secondary in the lower-lit portion
+   - Applies to: any glossy/wet surface (eyes, water drops, polished metal, gems)
+
+5. **VERTICAL SLIT PUPIL AS FOCAL ELEMENT**
+   - Slit width tapers at top/bottom: pw = maxWidth * (1 - y²/halfH²)
+   - Jet black interior (DARKEST palette)
+   - Thin edge ring (palette 1) creates separation from iris
+   - Adjacent iris pixels get brightness boost (pupil-edge glow) — simulates light scatter at the pupil boundary
+   - The pupil is drawn OVER the iris in a separate pass for clean edges
+   - Applies to: any dominant focal element that needs to be the sharpest/highest-contrast feature
+
+### Critic feedback for future improvement (not blocking):
+- Fibre individuality: each fibre should be truly unique (hand-placed feel, not procedural)
+- Specular drama: larger, brighter, more dramatic glint on the glossy surface
+- Outer iris transition: push amber-to-dark harder, edge pair on limbal ring inner edge
+- Overall craft: study Owlboy's close-up eye art for fibre detail density
+
+## Iteration 14 (exercise 6, attempt 1) — 2026-03-29
+
+### Result: PASS on first attempt! All 8 criteria at 3/5 or above. No regressions from ex3-5.
+
+### Critic scores: Texture 3, Tonal Range 3, Edges 3, Specular 3, Coverage 4, Colour 4, Construction 4, Craft 3
+
+### What worked (all carried forward + new compositing):
+- Voronoi scales with zone-based rendering, ridge detection, specular (from ex2-4)
+- Concave socket with depth-based lighting (from ex4)
+- Eyelid ridge with rim lighting (from ex4)
+- Radial iris fibres with slit pupil (from ex5)
+- NEW: cast shadow from upper lid onto top of iris
+- NEW: lid reflection as bright band on lower iris
+- NEW: depth layering — scales rendered first, socket second, iris third, lid fourth, interactions last
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **COMPOSITING ORDER MATTERS FOR MULTI-FORM SCENES**
+   - When multiple forms interact (container + contained), render in depth order: back → front
+   - Then apply INTERACTIONS as separate passes: cast shadows, reflections, specular
+   - This keeps each form's rendering clean while allowing cross-form effects
+   - Scales → socket interior → iris → lid → cast shadow → reflections → specular
+   - Applies to: any scene where objects affect each other's appearance (bowls with contents, windows with reflections, helmets on heads)
+
+2. **CAST SHADOW FROM OVERHANGING FORM ONTO CONTAINED FORM**
+   - The upper lid overhangs the iris — shadow falls on the top portion of the iris
+   - Implementation: after iris is rendered, darken pixels near the top by 3-5 palette indices
+   - Shadow depth = how far the pixel is from the shadow edge (stronger near the lid)
+   - This is a POST-PROCESSING pass — don't try to integrate it into the iris rendering itself
+   - Applies to: any overhang casting shadow on a lower surface (eaves on walls, brims on faces, shelf contents)
+
+3. **REFLECTION OF SURROUNDING GEOMETRY ON GLOSSY SURFACES**
+   - Glossy surfaces (eyes, water, polished metal) show reflections of nearby geometry
+   - The reflection of the upper lid appears as a bright curved band on the LOWER portion of the iris
+   - Position: mirror the lid edge across the surface center — what's above reflects below
+   - Intensity: subtle (2-3 palette indices brighter), not a full mirror image
+   - Applies to: any reflective surface near other geometry (puddles reflecting buildings, shields reflecting sky)
+
+4. **DEPTH LAYERING CREATES VISUAL HIERARCHY**
+   - Three depth layers: scales (background), socket (midground), iris (foreground)
+   - Each layer has different material properties and rendering approach
+   - The transitions between layers define the 3D structure: scale→lid transition = convex ridge, lid→socket = concave descent, socket→iris = focal point
+   - Applies to: any composite subject with front/mid/back elements
+
+5. **CONTAINED FORMS SHARE PALETTE BUT DIFFER IN TONAL RANGE**
+   - The iris uses the same green palette as the scales but occupies a different tonal window
+   - Iris uses mostly mid-dark tones (palette 4-12) while scales span full range (0-15)
+   - The socket uses only dark tones (0-5)
+   - This creates value hierarchy without needing separate palettes
+   - Applies to: any composite where different materials share a palette family
+
+### Critic feedback for future improvement (not blocking):
+- Iris should be the BRIGHTEST, most detailed element — currently scales upstage it
+- Eye specular should be the single brightest point in the entire image, larger and more dramatic
+- Lid shadow on iris could be more pronounced — distinct band, not gradient
+- Radial fibres in iris could be more individually distinct (compare ex5)
+- Per-scale micro-texture (pits within zones) would push texture toward 4/5
+
+## Iteration 15 (exercise 6 REPASS, attempt 1) — 2026-03-29
+
+### Result: PASS on first attempt. All 8 criteria 3+/5.
+
+### What changed from reverted iteration 14:
+1. **SEPARATE AMBER PALETTE FOR IRIS** — Added two new palette groups (irisDeep: '#781010', irisBright: '#d06020') instead of reusing the green scale palette. The iris now renders in warm amber/red tones that CONTRAST with the surrounding green scales. Reused the proven ex5 hue-compensated colors.
+2. **EYEBALL FILLS ENTIRE SOCKET** — Instead of a small iris circle (r=16) inside a large socket, every pixel inside the socket is now part of the iris/eyeball. A thin limbal ring (depth < 0.16) provides the dark border at the socket edge. No dark gap between iris and lid.
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **CONTRASTING PALETTES FOR FOCAL HIERARCHY**
+   - When compositing forms that should draw the eye, use a DIFFERENT colour temperature palette for the focal element
+   - Here: green (cool) scales surround amber (warm) iris → instant visual hierarchy
+   - The warm element naturally draws attention against the cool background
+   - This requires multiple palette groups (4 groups = 32 tones) which the engine supports
+   - Applies to: any scene with a focal point — use contrasting colour temperature, not just brightness
+
+2. **FILL THE CONTAINER TO ELIMINATE GAPS**
+   - When placing one form inside another (iris in socket, gem in setting, fruit in bowl), the inner form must fill the container completely
+   - Render the inner form for ALL pixels inside the container, not just within a fixed radius
+   - Use the container boundary (almondDist < 0) as the rendering mask, not a circle
+   - A thin border/rim (limbal ring, setting edge) provides the visual transition
+   - Applies to: any contained form — the container defines the rendering boundary
+
+3. **SEPARATE TONE FUNCTIONS FOR SEPARATE PALETTES**
+   - With 4+ palette groups, need separate tone mapping functions (scaleTone vs irisTone)
+   - Each maps 0-15 to its own pair of palette groups
+   - Keep a separate level buffer (irisLvl) for post-processing passes that modify brightness
+   - Applies to: any multi-material composite with independent palettes
+
+4. **SPECULAR FROM A DIFFERENT PALETTE READS AS REFLECTION**
+   - Eye specular used SCALE_BRIGHT (near-white green) on amber iris → reads as light source reflection
+   - The specular being a different colour than the surface sells the "glossy reflection" illusion
+   - The halo used IRIS_SECOND (bright amber) → natural falloff from reflected light to surface colour
+   - Applies to: any glossy surface — specular should be light-coloured, not surface-coloured
+
+### Critic feedback for future exercises:
+- Eye specular should be even more dramatic (5-7px, single brightest point)
+- Intra-zone texture within scale tonal zones would push texture to 4/5
+- Iris fibres slightly less distinct than standalone ex5 — sharpen in ex7
+- Lid shadow could be more distinct (band not gradient)
+- Ridge contrast could be pushed 1-2 indices higher
+
+## Iteration 16 (exercise 7, attempt 1) — 2026-03-29
+
+### Result: PASS on first attempt! Best scores yet — 5 criteria at 4/5.
+
+### Critic scores: Texture 4, Tonal Range 3, Edges 4, Specular 3, Coverage 4, Colour 4, Construction 4, Craft 3
+
+### What worked (all techniques composed into full composition):
+- Voronoi scales with zone-based rendering, ridge detection (from ex2-4)
+- Concave socket with depth-based lighting (from ex4)
+- Eyelid ridge with rim lighting and cylinder normals (from ex4)
+- Radial iris fibres with angular Voronoi, slit pupil (from ex5)
+- Cast shadow from upper lid onto iris (from ex6)
+- Lid reflection as bright band on lower iris (from ex6)
+- Separate amber palette for iris vs green for scales (from ex6 repass)
+- Eyeball fills entire socket interior (from ex6 repass)
+- Multi-pass depth-ordered pipeline with post-processing interactions
+
+### KEY NEW TECHNIQUE: VALUE HIERARCHY VIA TONAL WINDOW ASSIGNMENT
+- The exercise required scales to RECEDE and iris to be BRIGHTEST
+- Solution: assign different tonal ceilings per material layer
+- Scales: gb * 6 (max base index 6) → tones cap at ~13 → never reach near-white
+- Scale ridges capped at index 13 (not 15) → bright but not brightest
+- Iris: full palette 0-15 → brightest tones reserved for focal element
+- Scale specular: FEWER clusters (max 3), SMALLER (3px), using SCALE_SECOND not SCALE_BRIGHT
+- Iris specular: LARGER (8px core), using SCALE_BRIGHT (near-white) → single brightest point
+- The hierarchy is: iris specular > iris fibres > lid rim > scale ridges > scale interiors
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **VALUE HIERARCHY VIA TONAL WINDOW CAPPING**
+   - When compositing multiple materials, assign different tonal CEILINGS per layer
+   - Background elements: cap at palette 13/15 (never reach near-white)
+   - Focal elements: full range 0-15 (allowed to reach extremes)
+   - The eye naturally goes to the HIGHEST CONTRAST area
+   - Implementation: reduce the gb multiplier (gb * 6 vs gb * 9) and cap zone indices
+   - Applies to: any scene with foreground/background separation — hero characters vs environment, UI highlights vs base elements
+
+2. **SPECULAR QUANTITY INVERSELY PROPORTIONAL TO IMPORTANCE**
+   - Background scales: 2-3 small speculars max (recede)
+   - Focal element (iris): 2 large speculars (dominate)
+   - The iris specular must be the SINGLE brightest point in the entire image
+   - Scale speculars should be noticeably dimmer (use SCALE_SECOND not SCALE_BRIGHT)
+   - Applies to: any scene with specular highlights — fewer but brighter on the focal point
+
+3. **WIDER CANVAS IMPROVES COMPOSITION DRAMATICALLY**
+   - 192x128 (3:2) provides much more room for scales to fill naturally vs 128x128 (1:1)
+   - The eye feels naturally embedded in a scaled surface, not squeezed into a square
+   - More peripheral scales = more context = more immersive composition
+   - The wider format also matches the reference images better (all are landscape)
+   - Applies to: composition framing — match canvas aspect ratio to subject shape
+
+4. **ALL PREVIOUS TECHNIQUES COMPOSE WITHOUT MODIFICATION**
+   - 15 iterations of technique development composed cleanly into the most complex piece yet
+   - No technique needed modification — only parameter tuning (tonal windows, specular sizes)
+   - This confirms the training loop is producing genuinely transferable, composable skills
+   - The composition itself IS the new technique — the parts are all proven
+
+### Critic feedback for future exercises:
+- Push tonal extremes harder — deepest crevices more near-black, brightest highlights more near-white
+- Sharpen per-scale speculars — crisp 1-2px bright points, not soft glow
+- Organic scale variation — break geometric uniformity of hexagonal pattern
+- Value hierarchy partially achieved but could be MORE dramatic — iris should be overwhelmingly brightest
+
+## Iteration 17 (exercise 8, attempt 1) — 2026-03-29
+
+### Result: PASS on first attempt! Coverage 5/5 and Craft 4/5 — new highs.
+
+### Critic scores: Texture 4, Tonal Range 4, Edges 4, Specular 3, Coverage 5, Colour 4, Construction 4, Craft 4
+
+### What worked:
+- Entire exercise 7 structure transferred with ZERO code changes — only 4 palette hex values changed
+- Hue pre-compensation prevented orange-brown shadows: cool base at H≈348° (slightly magenta-red) so engine's +20° shadow shift lands at H≈8° (warm deep red, not orange)
+- Warm-on-warm iris contrast: gold iris (H≈35°) against red scales (H≈0°) reads clearly through hue separation alone
+- All value hierarchy logic (gb*6 for scales, full range for iris) works identically with any palette
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **PALETTE TRANSPOSITION IS PALETTE-ONLY WHEN STRUCTURE IS CORRECT**
+   - If all rendering techniques (Voronoi, zone-based, ridge detection, etc.) are implemented palette-independently via tone() functions and palette index math, transposing to a new colour requires ZERO code changes
+   - Only the 4 hex values in the `colors:{}` block change
+   - This validates that the techniques are truly palette-agnostic and transferable
+   - Applies to: any sprite system with properly abstracted palette — team colours, time-of-day variants, seasonal themes
+
+2. **HUE CORRIDOR CONTROL VIA PRE-COMPENSATION**
+   - Engine shifts shadow hues +20° and highlight hues -15°
+   - For target colour at hue H: use H-20° for shadow base, H+15° for highlight base
+   - Red target (H≈0°): shadow base H≈340-348° (crimson/magenta), highlight base H≈355° (stays red)
+   - Green target (H≈120°): shadow base H≈100° (yellow-green), highlight base H≈135° (teal-green)
+   - This generalizes to ANY target hue — the formula is universal
+   - Applies to: any palette design for the engine's ColorRamp system
+
+3. **WARM-ON-WARM CONTRAST THROUGH HUE SEPARATION**
+   - You don't need warm vs cool temperature contrast for focal hierarchy
+   - Red (H≈0°) vs gold (H≈35°) is ~35° hue separation — both warm, but clearly distinct
+   - Combined with brightness hierarchy (iris brighter than scales), this creates strong focal pull
+   - The green version used warm amber vs cool green — wider temperature gap but same principle
+   - Applies to: any composition where the entire palette is warm or cool — use hue variation within the temperature
+
+4. **COVERAGE 5/5 CONFIRMS VORONOI PIXEL ASSIGNMENT RELIABILITY**
+   - Voronoi assignment (every pixel assigned to nearest seed) has now achieved 5/5 coverage
+   - This is the FIRST 5/5 on any criterion in the entire training loop
+   - The technique is fully proven for guaranteed 100% surface coverage
+   - Applies to: any densely packed surface — this is the canonical approach
+
+### Critic notes for future:
+- Scale catchlights slightly broad (3-4px) — tighten to 1-2px with darkened surround for sharper gloss
+- Some mid-shadow tones lean purple/magenta — tighten hue corridor to ±10° not ±20°
+
+## Iteration 18 (exercise 9, attempt 1) — 2026-03-29
+
+### Result: PASS on first attempt! Ninth consecutive first-attempt pass.
+
+### Critic scores: Texture 3, Tonal Range 4, Edges 4, Specular 3, Coverage 4, Colour 3, Construction 4, Craft 3
+
+### What worked:
+- Third consecutive palette-only transposition — same rendering code as ex7/ex8, only 4 hex values changed
+- Iridescent scales rendered via SATURATION GRADIENT in palette: cool group = deep saturated blue-purple, warm group = desaturated silver-blue
+- Purple iris (irisDeep: '#381870') with golden centre (irisBright: '#d8a838') — strong warm-on-cool focal contrast
+- Engine hue shift ALIGNED with iridescence: +20° on H≈225° pushes shadows to H≈245° (purple) — natural iridescent direction
+- All value hierarchy logic from ex7/ex8 transferred without modification
+
+### NEW TRANSFERABLE DISCOVERIES:
+
+1. **IRIDESCENCE VIA PALETTE SATURATION GRADIENT**
+   - Iridescence = colour changes with viewing angle/surface normal
+   - Implementation: one palette group for HIGH SATURATION (shadow/oblique normals), another for LOW SATURATION (lit/facing normals)
+   - The palette transition itself creates the hue+saturation shift that reads as iridescence
+   - Cool (shadow): deep saturated blue-purple (#182058, H≈225°, high S)
+   - Warm (highlight): desaturated silver-blue (#a8b8d8, H≈215°, low S)
+   - The zone-based rendering + range-band shifting naturally blends between these groups
+   - Applies to: beetle shells, oil slicks, metallic finishes, magic effects, soap bubbles
+
+2. **ENGINE HUE SHIFT AS IRIDESCENCE ALLY ON COOL PALETTES**
+   - Engine shifts shadows +20° and highlights -15°
+   - For blue (H≈225°): shadows → H≈245° (purple), highlights → H≈210° (cyan-silver)
+   - This blue→purple→silver shift IS natural iridescence — engine does it for free
+   - Unlike warm palettes where the shift fights the target colour, cool palettes benefit
+   - Applies to: any blue/purple/teal iridescent surface — the engine's hue shift is an ally, not an enemy
+
+3. **MONOCHROMATIC RISK WITH COOL DESATURATED PALETTES**
+   - The critic flagged "reads as blue-grey rather than assertively blue"
+   - Desaturated silver warm group (#a8b8d8) blends with saturated blue cool group (#182058), but the silver doesn't pop enough
+   - The issue: silver/grey is inherently ambiguous — it could be "blue-grey" or just "grey"
+   - Fix for future: push warm group more toward TRUE SILVER (even lower saturation, higher lightness) while keeping cool group deeply saturated
+   - The saturation GAP between groups determines iridescent drama — wider gap = more dramatic
+   - Applies to: any iridescent palette — the saturation difference between groups determines perceived colour shift intensity
+
+### Critic notes for future:
+- Push silver highlights even more desaturated/bright for stronger iridescent contrast
+- Iris specular reads as blocky rectangle — use asymmetric cluster for wet glint
+- Scale speculars blend into highlight zones — need darker surrounding context
+- Overall colour assertiveness lower than ex8 — blue-grey less visually bold than red

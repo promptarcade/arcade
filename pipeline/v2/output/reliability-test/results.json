@@ -1,0 +1,72 @@
+[
+  {
+    "run": 1,
+    "success": true,
+    "error": null,
+    "time": 49180,
+    "cost": 0.04442825
+  },
+  {
+    "run": 2,
+    "success": true,
+    "error": null,
+    "time": 55147,
+    "cost": 0.04264335
+  },
+  {
+    "run": 3,
+    "success": true,
+    "error": null,
+    "time": 55344,
+    "cost": 0.04537635000000001
+  },
+  {
+    "run": 4,
+    "success": true,
+    "error": null,
+    "time": 39905,
+    "cost": 0.03390825
+  },
+  {
+    "run": 5,
+    "success": true,
+    "error": null,
+    "time": 46410,
+    "cost": 0.03642315
+  },
+  {
+    "run": 6,
+    "success": true,
+    "error": null,
+    "time": 46445,
+    "cost": 0.0383871
+  },
+  {
+    "run": 7,
+    "success": true,
+    "error": null,
+    "time": 47543,
+    "cost": 0.037508349999999996
+  },
+  {
+    "run": 8,
+    "success": true,
+    "error": null,
+    "time": 354249,
+    "cost": 0.03840494999999999
+  },
+  {
+    "run": 9,
+    "success": true,
+    "error": null,
+    "time": 48850,
+    "cost": 0.041529300000000005
+  },
+  {
+    "run": 10,
+    "success": true,
+    "error": null,
+    "time": 45646,
+    "cost": 0.0378322
+  }
+]

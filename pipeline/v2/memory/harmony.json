@@ -1,0 +1,80 @@
+[
+  {
+    "promptKey": "3 palettes",
+    "prompt": "Palette 1: base=#0099FF, light=#66DDFF, dark=#0055CC, accent=#00FFFF\nPalette 2: base=#DC143C, light=#FF7F7F, dark=#8B0000, accent=#FFB400\nPalette 3: base=#FAFBFC, light=#FFFFFF, dark=#E0E6ED, accent=#00E5FF",
+    "output": [
+      {
+        "base": "#0099FF",
+        "light": "#66DDFF",
+        "dark": "#0077FF",
+        "accent": "#00FFFF"
+      },
+      {
+        "base": "#DC143C",
+        "light": "#FF7F7F",
+        "dark": "#FF6666",
+        "accent": "#FFB400"
+      },
+      {
+        "base": "#FAFBFC",
+        "light": "#FFFFFF",
+        "dark": "#A0A0A0",
+        "accent": "#A855F7"
+      }
+    ],
+    "timestamp": 1774322857448,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "3 palettes",
+    "prompt": "Palette 1: base=#0099FF, light=#66D9FF, dark=#003D7A, accent=#00D4FF\nPalette 2: base=#C84C5A, light=#E8A5B0, dark=#6B1D34, accent=#D4956B\nPalette 3: base=#FFFBF0, light=#FFFFFE, dark=#F0EAE0, accent=#FFD700",
+    "output": [
+      {
+        "base": "#0099FF",
+        "light": "#66D9FF",
+        "dark": "#003D7A",
+        "accent": "#00D4FF"
+      },
+      {
+        "base": "#C84C5A",
+        "light": "#F0A8B8",
+        "dark": "#6B1D34",
+        "accent": "#D4956B"
+      },
+      {
+        "base": "#FFDDAA",
+        "light": "#FFFFC0",
+        "dark": "#FFCC66",
+        "accent": "#FFD700"
+      }
+    ],
+    "timestamp": 1774323102774,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "3 palettes",
+    "prompt": "Palette 1: base=#0080FF, light=#80D4FF, dark=#0047AB, accent=#FFB400\nPalette 2: base=#E63946, light=#FF8A95, dark=#A01830, accent=#FFB347\nPalette 3: base=#FAFBFC, light=#FFFFFF, dark=#E0E6ED, accent=#00E5FF",
+    "output": [
+      {
+        "base": "#0099FF",
+        "light": "#66D9FF",
+        "dark": "#003D7A",
+        "accent": "#FFD700"
+      },
+      {
+        "base": "#E63946",
+        "light": "#F0A8B8",
+        "dark": "#6B1D34",
+        "accent": "#FF8C42"
+      },
+      {
+        "base": "#FAFBFC",
+        "light": "#FFFFFF",
+        "dark": "#B0BAD0",
+        "accent": "#00E5FF"
+      }
+    ],
+    "timestamp": 1774323324743,
+    "runId": "mesh"
+  }
+]

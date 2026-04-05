@@ -1,0 +1,3447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Pong</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #111; font-family: sans-serif; }
+canvas { display: block; touch-action: none; width: 100vw; height: 100vh; }
+#ui { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; color: #fff; padding: 10px; }
+#score { font-size: 24px; font-weight: bold; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui"><div id="score">Score: 0</div></div>
+<script>
+// Generated code — strict mode disabled for compatibility
+
+// === SPRITE ENGINE ===
+// ============================================================
+// SpriteForge v2 — Tier 3 Pixel-Level Sprite Engine
+// ============================================================
+// Procedural sprite generation with pixel-level rendering,
+// directional shading, tinted outlines, and hue-shifted palettes.
+// Designed for inlining into single-file HTML games.
+//
+// Usage:
+//   const { sheet, animator } = SpriteForge.character({
+//     style: 'chibi',
+//     colors: { skin: '#ffcc99', hair: '#553322', shirt: '#3355aa', ... },
+//     body: { build: 'medium', hair: 'flowing' },
+//     animations: { idle: { frames: 4, speed: 0.2 }, walk: { frames: 6, speed: 0.1 } },
+//   });
+//   // In game loop:
+//   animator.play('walk');
+//   animator.update(dt);
+//   animator.draw(ctx, x, y);
+// ============================================================
+
+'use strict';
+
+// ============================================================
+// UTILITIES
+// ============================================================
+
+function sf2_makeCanvas(w, h) {
+  // Always use DOM canvas — OffscreenCanvas has drawImage compat issues on file://
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+function sf2_seededRNG(seed) {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function sf2_hashStr(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  return h;
+}
+
+// ============================================================
+// MODULE A: COLOR UTILITIES & RAMP GENERATION
+// ============================================================
+
+function sf2_hexToRGB(hex) {
+  if (typeof hex !== 'string') return hex;
+  hex = hex.replace('#', '');
+  if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return {
+    r: parseInt(hex.slice(0,2), 16),
+    g: parseInt(hex.slice(2,4), 16),
+    b: parseInt(hex.slice(4,6), 16),
+  };
+}
+
+function sf2_rgbToHSL(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return { h: h * 360, s, l };
+}
+
+function sf2_hslToRGB(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  h /= 360;
+  let r, g, b;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+}
+
+function sf2_packRGBA(r, g, b, a) {
+  return ((a & 0xFF) << 24) | ((b & 0xFF) << 16) | ((g & 0xFF) << 8) | (r & 0xFF);
+}
+
+function sf2_unpackRGBA(v) {
+  return { r: v & 0xFF, g: (v >> 8) & 0xFF, b: (v >> 16) & 0xFF, a: (v >> 24) & 0xFF };
+}
+
+const ColorRamp = {
+  // Generate a 4-tone ramp with hue shifting
+  generate(baseHex) {
+    const rgb = sf2_hexToRGB(baseHex);
+    const hsl = sf2_rgbToHSL(rgb.r, rgb.g, rgb.b);
+
+    const deepShadow = sf2_hslToRGB(
+      hsl.h + 20, // cool shift
+      Math.min(1, hsl.s * 0.80),
+      Math.max(0.05, hsl.l * 0.45)
+    );
+    const shadow = sf2_hslToRGB(
+      hsl.h + 10,
+      Math.min(1, hsl.s * 0.90),
+      Math.max(0.08, hsl.l * 0.70)
+    );
+    const base = rgb;
+    const highlight = sf2_hslToRGB(
+      hsl.h - 15, // warm shift
+      Math.min(1, hsl.s * 0.85),
+      Math.min(0.95, hsl.l * 1.30)
+    );
+
+    return [deepShadow, shadow, base, highlight];
+  },
+
+  // Generate packed RGBA values
+  generatePacked(baseHex) {
+    return ColorRamp.generate(baseHex).map(c => sf2_packRGBA(c.r, c.g, c.b, 255));
+  },
+
+  // Build a complete indexed palette from color group definitions
+  // Returns { palette: Uint32Array, groups: { name: { startIdx, ramp } }, groupForIndex: Uint8Array }
+  buildPalette(colorGroups) {
+    // Index 0 = transparent
+    const palette = new Uint32Array(256);
+    const groupForIndex = new Uint8Array(256);
+    const groups = {};
+    palette[0] = 0; // transparent
+    let idx = 1;
+    let groupId = 1;
+
+    for (const [name, baseHex] of Object.entries(colorGroups)) {
+      let ramp;
+      if (name === 'eyes') {
+        // Special eye palette: pupil(near-black), iris(user color), white, specular(bright white)
+        const iris = sf2_hexToRGB(baseHex);
+        ramp = [
+          sf2_packRGBA(15, 10, 20, 255),           // 0: pupil — near black
+          sf2_packRGBA(iris.r, iris.g, iris.b, 255), // 1: iris — user's eye color
+          sf2_packRGBA(240, 240, 245, 255),          // 2: white of eye
+          sf2_packRGBA(255, 255, 255, 255),          // 3: specular highlight
+        ];
+      } else {
+        ramp = ColorRamp.generatePacked(baseHex);
+      }
+      const startIdx = idx;
+      for (let i = 0; i < 4; i++) {
+        palette[idx] = ramp[i];
+        groupForIndex[idx] = groupId;
+        idx++;
+      }
+      groups[name] = { startIdx, groupId, ramp };
+      groupId++;
+    }
+
+    // Reserve index for outline (will be set per-pixel by post-processing)
+    palette[idx] = sf2_packRGBA(0, 0, 0, 255); // black fallback
+    const outlineIdx = idx;
+    idx++;
+
+    return { palette, groups, groupForIndex, outlineIdx, nextIdx: idx };
+  },
+};
+
+// ============================================================
+// MODULE B: PIXEL CANVAS
+// ============================================================
+
+class PixelCanvas {
+  constructor(width, height) {
+    this.width = width;
+    this.height = height;
+    this.pixels = new Uint8Array(width * height);       // palette index
+    this.groupMap = new Uint8Array(width * height);      // color group ID
+    this.palette = null;         // Uint32Array(256), set by setPalette
+    this.groupForIndex = null;   // Uint8Array(256), maps palette idx -> group ID
+  }
+
+  setPalette(palette, groupForIndex) {
+    this.palette = palette;
+    this.groupForIndex = groupForIndex;
+  }
+
+  clear() {
+    this.pixels.fill(0);
+    this.groupMap.fill(0);
+  }
+
+  // ---- Pixel Access ----
+
+  setPixel(x, y, idx) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+    const off = y * this.width + x;
+    this.pixels[off] = idx;
+    if (this.groupForIndex) this.groupMap[off] = this.groupForIndex[idx];
+  }
+
+  getPixel(x, y) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return 0;
+    return this.pixels[y * this.width + x];
+  }
+
+  isFilled(x, y) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return false;
+    return this.pixels[y * this.width + x] !== 0;
+  }
+
+  // ---- Drawing Primitives ----
+
+  hline(x, y, len, idx) {
+    for (let i = 0; i < len; i++) this.setPixel(x + i, y, idx);
+  }
+
+  vline(x, y, len, idx) {
+    for (let i = 0; i < len; i++) this.setPixel(x, y + i, idx);
+  }
+
+  fillRect(x, y, w, h, idx) {
+    for (let row = 0; row < h; row++) {
+      this.hline(x, y + row, w, idx);
+    }
+  }
+
+  // Midpoint ellipse algorithm
+  fillEllipse(cx, cy, rx, ry, idx) {
+    if (rx <= 0 || ry <= 0) return;
+    cx = Math.round(cx); cy = Math.round(cy);
+    rx = Math.round(rx); ry = Math.round(ry);
+    const rx2 = rx * rx, ry2 = ry * ry;
+    for (let y = -ry; y <= ry; y++) {
+      const yf = y * y;
+      const xSpan = Math.floor(rx * Math.sqrt(1 - yf / ry2));
+      this.hline(cx - xSpan, cy + y, xSpan * 2 + 1, idx);
+    }
+  }
+
+  fillCircle(cx, cy, r, idx) {
+    this.fillEllipse(cx, cy, r, r, idx);
+  }
+
+  // Bresenham line
+  line(x0, y0, x1, y1, idx) {
+    x0 = Math.round(x0); y0 = Math.round(y0);
+    x1 = Math.round(x1); y1 = Math.round(y1);
+    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    while (true) {
+      this.setPixel(x0, y0, idx);
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x0 += sx; }
+      if (e2 < dx) { err += dx; y0 += sy; }
+    }
+  }
+
+  // Fill triangle via scanline
+  fillTriangle(x0, y0, x1, y1, x2, y2, idx) {
+    // Sort by Y
+    if (y0 > y1) { [x0,y0,x1,y1] = [x1,y1,x0,y0]; }
+    if (y0 > y2) { [x0,y0,x2,y2] = [x2,y2,x0,y0]; }
+    if (y1 > y2) { [x1,y1,x2,y2] = [x2,y2,x1,y1]; }
+    const lerp = (a, b, t) => a + (b - a) * t;
+    for (let y = Math.round(y0); y <= Math.round(y2); y++) {
+      let xa, xb;
+      if (y < y1) {
+        if (y1 === y0) continue;
+        const t1 = (y - y0) / (y1 - y0);
+        const t2 = (y - y0) / (y2 - y0);
+        xa = lerp(x0, x1, t1);
+        xb = lerp(x0, x2, t2);
+      } else {
+        if (y2 === y1) continue;
+        const t1 = (y - y1) / (y2 - y1);
+        const t2 = (y - y0) / (y2 - y0);
+        xa = lerp(x1, x2, t1);
+        xb = lerp(x0, x2, t2);
+      }
+      if (xa > xb) { const tmp = xa; xa = xb; xb = tmp; }
+      this.hline(Math.round(xa), y, Math.round(xb - xa) + 1, idx);
+    }
+  }
+
+  // ---- Bulk Operations ----
+
+  mirrorHorizontal() {
+    const { width, height, pixels, groupMap } = this;
+    const half = Math.floor(width / 2);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < half; x++) {
+        const src = y * width + x;
+        const dst = y * width + (width - 1 - x);
+        pixels[dst] = pixels[src];
+        groupMap[dst] = groupMap[src];
+      }
+    }
+  }
+
+  scatterNoise(x, y, w, h, idx, density, rng) {
+    rng = rng || Math.random;
+    for (let py = y; py < y + h; py++) {
+      for (let px = x; px < x + w; px++) {
+        if (this.isFilled(px, py) && rng() < density) {
+          this.setPixel(px, py, idx);
+        }
+      }
+    }
+  }
+
+  ditherCheckerboard(x, y, w, h, idxA, idxB) {
+    for (let py = y; py < y + h; py++) {
+      for (let px = x; px < x + w; px++) {
+        if (this.isFilled(px, py)) {
+          this.setPixel(px, py, (px + py) % 2 === 0 ? idxA : idxB);
+        }
+      }
+    }
+  }
+
+  // ---- Export ----
+
+  toCanvas() {
+    const cvs = sf2_makeCanvas(this.width, this.height);
+    const ctx = cvs.getContext('2d');
+    const imgData = ctx.createImageData(this.width, this.height);
+    const data = imgData.data;
+    const { pixels, palette, width, height } = this;
+    for (let i = 0; i < width * height; i++) {
+      const idx = pixels[i];
+      if (idx === 0) continue; // transparent
+      const rgba = palette[idx];
+      const off = i * 4;
+      data[off]     = rgba & 0xFF;
+      data[off + 1] = (rgba >> 8) & 0xFF;
+      data[off + 2] = (rgba >> 16) & 0xFF;
+      data[off + 3] = (rgba >> 24) & 0xFF;
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return cvs;
+  }
+
+  blitTo(ctx, destX, destY) {
+    const cvs = this.toCanvas();
+    ctx.drawImage(cvs, destX, destY);
+  }
+}
+
+// ============================================================
+// MODULE C: POST-PROCESSING
+// ============================================================
+
+const PostProcess = {
+  // Direction vectors for 8 neighbors
+  _dirs: [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]],
+
+  // Normalize light direction
+  _lightDir: (function() {
+    const lx = -0.7, ly = -0.7;
+    const len = Math.sqrt(lx*lx + ly*ly);
+    return { x: lx/len, y: ly/len };
+  })(),
+
+  // Pass 1: Directional shading
+  // Remaps each filled pixel to the correct tone within its color group
+  // based on surface normal computed from empty neighbors
+  applyShading(pc, groups) {
+    const { width, height, pixels, groupMap } = pc;
+    const dirs = PostProcess._dirs;
+    const light = PostProcess._lightDir;
+    const newPixels = new Uint8Array(pixels.length);
+    newPixels.set(pixels);
+
+    // Build group base index lookup: groupId -> startIdx
+    const groupBase = new Uint8Array(256);
+    for (const g of Object.values(groups)) {
+      groupBase[g.groupId] = g.startIdx;
+    }
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const off = y * width + x;
+        if (pixels[off] === 0) continue; // transparent
+
+        const gid = groupMap[off];
+        if (gid === 0) continue;
+        const base = groupBase[gid];
+        if (base === 0) continue;
+
+        // Compute surface normal from empty neighbors
+        let nx = 0, ny = 0;
+        let emptyCount = 0;
+        for (const [dx, dy] of dirs) {
+          const px2 = x + dx, py2 = y + dy;
+          if (px2 < 0 || px2 >= width || py2 < 0 || py2 >= height || pixels[py2 * width + px2] === 0) {
+            // Empty neighbor — normal points away from it (toward center)
+            nx -= dx;
+            ny -= dy;
+            emptyCount++;
+          }
+        }
+
+        if (emptyCount === 0) {
+          // Interior pixel — use base tone
+          newPixels[off] = base + 2; // base
+          continue;
+        }
+
+        // Normalize
+        const len = Math.sqrt(nx * nx + ny * ny);
+        if (len > 0) { nx /= len; ny /= len; }
+
+        // Dot with light direction
+        const dot = nx * light.x + ny * light.y;
+
+        // Map to tone (0=deepShadow, 1=shadow, 2=base, 3=highlight)
+        let tone;
+        if (dot > 0.4) tone = 3;       // highlight (facing light)
+        else if (dot > -0.1) tone = 2;  // base
+        else if (dot > -0.5) tone = 1;  // shadow
+        else tone = 0;                   // deep shadow
+
+        newPixels[off] = base + tone;
+      }
+    }
+
+    pc.pixels.set(newPixels);
+  },
+
+  // Pass 2: Tinted outlines
+  // Empty pixels adjacent to filled pixels become the deepShadow of the nearest filled neighbor's group
+  applyOutlines(pc, groups, mode) {
+    if (mode === 'none') return;
+
+    const { width, height, pixels, groupMap } = pc;
+    const dirs = PostProcess._dirs;
+    const newPixels = new Uint8Array(pixels.length);
+    const newGroupMap = new Uint8Array(groupMap.length);
+    newPixels.set(pixels);
+    newGroupMap.set(groupMap);
+
+    // Build group base index lookup
+    const groupBase = new Uint8Array(256);
+    for (const g of Object.values(groups)) {
+      groupBase[g.groupId] = g.startIdx;
+    }
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const off = y * width + x;
+        if (pixels[off] !== 0) continue; // skip filled pixels
+
+        // Check neighbors for filled pixels
+        let nearestGroup = 0;
+        let found = false;
+        // Check cardinals first (stronger adjacency), then diagonals
+        for (const [dx, dy] of dirs) {
+          const px2 = x + dx, py2 = y + dy;
+          if (px2 >= 0 && px2 < width && py2 >= 0 && py2 < height) {
+            const noff = py2 * width + px2;
+            if (pixels[noff] !== 0) {
+              nearestGroup = groupMap[noff];
+              found = true;
+              break;
+            }
+          }
+        }
+
+        if (!found) continue;
+
+        const base = groupBase[nearestGroup];
+        if (base === 0) continue;
+
+        if (mode === 'tinted') {
+          // Use the deepShadow tone of the neighbor's group
+          newPixels[off] = base + 0; // deepShadow
+        } else if (mode === 'black') {
+          // Use a fixed dark color — we'll set palette index 255 to black
+          newPixels[off] = 255;
+        } else if (mode === 'silhouette') {
+          // Only outline if ALL pixels on one side are empty (exterior edge)
+          let leftEmpty = true, rightEmpty = true, topEmpty = true, bottomEmpty = true;
+          for (let dy = -1; dy <= 1; dy++) {
+            if (x - 1 >= 0 && pixels[(y+dy) * width + (x-1)] !== 0) leftEmpty = false;
+            if (x + 1 < width && pixels[(y+dy) * width + (x+1)] !== 0) rightEmpty = false;
+          }
+          for (let dx = -1; dx <= 1; dx++) {
+            if (y - 1 >= 0 && pixels[(y-1) * width + (x+dx)] !== 0) topEmpty = false;
+            if (y + 1 < height && pixels[(y+1) * width + (x+dx)] !== 0) bottomEmpty = false;
+          }
+          if (leftEmpty || rightEmpty || topEmpty || bottomEmpty) {
+            newPixels[off] = base + 0;
+          }
+        }
+
+        if (newPixels[off] !== 0) {
+          newGroupMap[off] = nearestGroup;
+        }
+      }
+    }
+
+    pc.pixels.set(newPixels);
+    pc.groupMap.set(newGroupMap);
+  },
+};
+
+// ============================================================
+// MODULE D: SHEET BUILDER — helper to turn custom draw functions into animated sprite sheets
+// ============================================================
+
+// Usage:
+//   const { sheet, animator } = SpriteForge.buildSheet({
+//     frameWidth: 24, frameHeight: 32,
+//     palette: ColorRamp.buildPalette({ skin: '#ffddbb', hair: '#664422', ... }),
+//     outlineMode: 'tinted',
+//     animations: {
+//       idle: { frames: 4, speed: 0.2, draw: (pc, pal, t) => { /* draw one frame */ } },
+//       walk: { frames: 6, speed: 0.1, draw: (pc, pal, t) => { /* draw one frame */ } },
+//     },
+//   });
+//
+// Each draw function receives:
+//   pc   — PixelCanvas (cleared, palette set)
+//   pal  — palette object from ColorRamp.buildPalette
+//   t    — animation progress 0..1 for this frame
+//
+// Shading + outlines are applied automatically after each draw call.
+// To protect eyes/details from shading, draw them in the optional `drawPost` callback
+// which runs after shading but before outlines.
+
+// ============================================================
+// MODULE G: SPRITESHEET, ANIMATOR, CACHE (carried from v1)
+// ============================================================
+
+class SpriteSheet {
+  constructor(canvas, frameWidth, frameHeight, cols, rows) {
+    this.canvas = canvas;
+    this.frameWidth = frameWidth;
+    this.frameHeight = frameHeight;
+    this.cols = cols;
+    this.rows = rows;
+    this._names = {};
+  }
+
+  getFrame(index) {
+    const col = index % this.cols;
+    const row = Math.floor(index / this.cols);
+    return {
+      x: col * this.frameWidth,
+      y: row * this.frameHeight,
+      w: this.frameWidth,
+      h: this.frameHeight,
+      canvas: this.canvas,
+    };
+  }
+
+  nameFrame(name, index) { this._names[name] = index; }
+
+  getFrameByName(name) {
+    const idx = this._names[name];
+    return idx != null ? this.getFrame(idx) : null;
+  }
+
+  drawFrame(ctx, index, x, y, opts) {
+    const f = this.getFrame(index);
+    if (!f) return;
+    const o = opts || {};
+    ctx.save();
+    const scale = o.scale || 1;
+    const alpha = o.alpha != null ? o.alpha : 1;
+    ctx.globalAlpha = alpha;
+    if (o.flipX || o.flipY) {
+      ctx.translate(x + f.w * scale / 2, y + f.h * scale / 2);
+      ctx.scale(o.flipX ? -1 : 1, o.flipY ? -1 : 1);
+      ctx.drawImage(f.canvas, f.x, f.y, f.w, f.h, -f.w * scale / 2, -f.h * scale / 2, f.w * scale, f.h * scale);
+    } else {
+      ctx.drawImage(f.canvas, f.x, f.y, f.w, f.h, x, y, f.w * scale, f.h * scale);
+    }
+    ctx.restore();
+  }
+}
+
+class SpriteAnimator {
+  constructor(sheet, animations) {
+    this.sheet = sheet;
+    this.animations = animations;
+    this.current = null;
+    this.frame = 0;
+    this.elapsed = 0;
+    this.playing = false;
+    this._dir = 1; // 1 forward, -1 backward (pingpong)
+  }
+
+  play(name, opts) {
+    if (this.current === name && this.playing) return;
+    this.current = name;
+    this.frame = 0;
+    this.elapsed = 0;
+    this.playing = true;
+    this._dir = 1;
+    this._opts = opts || {};
+  }
+
+  stop() { this.playing = false; }
+
+  update(dt) {
+    if (!this.playing || !this.current) return;
+    const anim = this.animations[this.current];
+    if (!anim) return;
+
+    this.elapsed += dt;
+    if (this.elapsed >= anim.speed) {
+      this.elapsed -= anim.speed;
+      this.frame += this._dir;
+
+      if (this.frame >= anim.frames.length) {
+        if (anim.pingpong) {
+          this._dir = -1;
+          this.frame = anim.frames.length - 2;
+        } else if (anim.loop !== false) {
+          this.frame = 0;
+        } else {
+          this.frame = anim.frames.length - 1;
+          this.playing = false;
+          if (anim.onComplete) anim.onComplete();
+        }
+      } else if (this.frame < 0) {
+        this._dir = 1;
+        this.frame = 1;
+      }
+    }
+  }
+
+  getCurrentFrame() {
+    if (!this.current) return 0;
+    const anim = this.animations[this.current];
+    if (!anim) return 0;
+    return anim.frames[Math.max(0, Math.min(this.frame, anim.frames.length - 1))];
+  }
+
+  draw(ctx, x, y, opts) {
+    this.sheet.drawFrame(ctx, this.getCurrentFrame(), x, y, opts);
+  }
+}
+
+class SpriteCache {
+  constructor(maxEntries) {
+    this.max = maxEntries || 128;
+    this._map = new Map();
+  }
+
+  get(key) {
+    const entry = this._map.get(key);
+    if (!entry) return null;
+    entry.ts = Date.now();
+    return entry.value;
+  }
+
+  set(key, value) {
+    if (this._map.size >= this.max) {
+      let oldest = null, oldestKey = null;
+      for (const [k, v] of this._map) {
+        if (!oldest || v.ts < oldest.ts) { oldest = v; oldestKey = k; }
+      }
+      if (oldestKey) this._map.delete(oldestKey);
+    }
+    this._map.set(key, { value, ts: Date.now() });
+  }
+
+  has(key) { return this._map.has(key); }
+  clear() { this._map.clear(); }
+}
+
+// ============================================================
+// SPRITEFORGE v2 PUBLIC API
+// ============================================================
+
+
+// ============================================================
+// MODULE D: BODY TEMPLATES
+// ============================================================
+
+// ============================================================
+
+const BODY_TEMPLATES = {
+  mini: {
+    canvas: { w: 16, h: 24 },
+    head: { rx: 5, ry: 5, cy: 7 },
+    torso: { w: 8, h: 5, cy: 14 },
+    legs: { w: 2, h: 5, gap: 2 },
+    arms: { w: 1, h: 4, shoulderOff: 0 },
+    eyes: { type: 'dot', w: 1, h: 1, gap: 3, cy: -1 },
+    hair: { maxH: 3 },
+    features: { ears: false, hands: false, belt: false, mouth: false },
+    outline: 'black',
+    toneCount: 3,
+  },
+  retro: {
+    canvas: { w: 24, h: 32 },
+    head: { rx: 7, ry: 7, cy: 9 },
+    torso: { w: 10, h: 6, cy: 19 },
+    legs: { w: 3, h: 6, gap: 2 },
+    arms: { w: 2, h: 5, shoulderOff: 1 },
+    eyes: { type: 'simple', w: 3, h: 2, gap: 4, cy: -1 },
+    hair: { maxH: 4 },
+    features: { ears: false, hands: false, belt: true, mouth: false },
+    outline: 'black',
+    toneCount: 3,
+  },
+  chibi: {
+    canvas: { w: 32, h: 40 },
+    head: { rx: 10, ry: 10, cy: 12 },
+    torso: { w: 14, h: 8, cy: 25 },
+    legs: { w: 4, h: 7, gap: 2 },
+    arms: { w: 3, h: 7, shoulderOff: 1 },
+    eyes: { type: 'detailed', w: 4, h: 4, gap: 5, cy: 0 },
+    hair: { maxH: 6 },
+    features: { ears: true, hands: true, belt: true, mouth: true },
+    outline: 'tinted',
+    toneCount: 4,
+  },
+  tall: {
+    canvas: { w: 32, h: 48 },
+    head: { rx: 8, ry: 9, cy: 11 },
+    torso: { w: 14, h: 12, cy: 24 },
+    legs: { w: 4, h: 11, gap: 2 },
+    arms: { w: 3, h: 10, shoulderOff: 1 },
+    eyes: { type: 'detailed', w: 4, h: 3, gap: 5, cy: 0 },
+    hair: { maxH: 6 },
+    features: { ears: true, hands: true, belt: true, mouth: true },
+    outline: 'tinted',
+    toneCount: 4,
+  },
+  heroic: {
+    canvas: { w: 36, h: 56 },
+    head: { rx: 8, ry: 9, cy: 12 },
+    torso: { w: 16, h: 16, cy: 26 },
+    legs: { w: 5, h: 14, gap: 2 },
+    arms: { w: 4, h: 13, shoulderOff: 2 },
+    eyes: { type: 'detailed', w: 5, h: 4, gap: 6, cy: 0 },
+    hair: { maxH: 7 },
+    features: { ears: true, hands: true, belt: true, mouth: true },
+    outline: 'tinted',
+    toneCount: 4,
+  },
+};
+
+// ============================================================
+// MODULE E: CHARACTER RENDERER
+// ============================================================
+
+const CharacterRenderer = {
+  // Main entry: draw a single animation frame
+  drawFrame(pc, template, pal, config, frameType, frameNum, totalFrames) {
+    const t = totalFrames > 1 ? frameNum / (totalFrames - 1) : 0;
+    const cx = Math.floor(template.canvas.w / 2);
+    const pose = CharacterRenderer._getPose(template, frameType, t);
+
+    // Get palette indices for each group
+    const skin = pal.groups.skin ? pal.groups.skin.startIdx : 1;
+    const hair = pal.groups.hair ? pal.groups.hair.startIdx : 5;
+    const shirt = pal.groups.shirt ? pal.groups.shirt.startIdx : 9;
+    const pants = pal.groups.pants ? pal.groups.pants.startIdx : 13;
+    const shoes = pal.groups.shoes ? pal.groups.shoes.startIdx : 17;
+    const eyeGroup = pal.groups.eyes ? pal.groups.eyes.startIdx : 21;
+    const belt = pal.groups.belt ? pal.groups.belt.startIdx : 25;
+
+    // Use base tone (+2) for initial drawing — shading pass will adjust
+    const skinBase = skin + 2;
+    const hairBase = hair + 2;
+    const shirtBase = shirt + 2;
+    const pantsBase = pants + 2;
+    const shoesBase = shoes + 2;
+    const beltBase = belt + 2;
+
+    const T = template;
+    const headCY = T.head.cy + pose.headBob;
+    const torsoCY = T.torso.cy + pose.torsoShift;
+    const legBase = torsoCY + Math.floor(T.torso.h / 2);
+
+    // 1. Back hair (long styles)
+    if (config.body && config.body.hair === 'long') {
+      CharacterRenderer._drawBackHair(pc, T, cx, headCY, hairBase);
+    }
+
+    // 2. Head
+    pc.fillEllipse(cx, headCY, T.head.rx, T.head.ry, skinBase);
+
+    // 3. Ears
+    if (T.features.ears) {
+      pc.fillCircle(cx - T.head.rx, headCY + 1, 2, skinBase);
+      pc.fillCircle(cx + T.head.rx, headCY + 1, 2, skinBase);
+    }
+
+    // 4. Torso
+    const torsoLeft = cx - Math.floor(T.torso.w / 2);
+    pc.fillRect(torsoLeft, torsoCY - Math.floor(T.torso.h / 2), T.torso.w, T.torso.h, shirtBase);
+    // Shoulder taper — round off top corners
+    if (T.torso.w >= 12) {
+      const tTop = torsoCY - Math.floor(T.torso.h / 2);
+      pc.setPixel(torsoLeft, tTop, 0);
+      pc.setPixel(torsoLeft + T.torso.w - 1, tTop, 0);
+    }
+
+    // 5. Legs
+    const legY = legBase;
+    const leftLegX = cx - Math.floor(T.legs.gap / 2) - T.legs.w + pose.leftLeg;
+    const rightLegX = cx + Math.floor(T.legs.gap / 2) + pose.rightLeg;
+    pc.fillRect(leftLegX, legY, T.legs.w, T.legs.h, pantsBase);
+    pc.fillRect(rightLegX, legY, T.legs.w, T.legs.h, pantsBase);
+
+    // 6. Feet/Shoes
+    const feetY = legY + T.legs.h;
+    pc.fillRect(leftLegX - 1, feetY, T.legs.w + 1, 2, shoesBase);
+    pc.fillRect(rightLegX, feetY, T.legs.w + 1, 2, shoesBase);
+
+    // 7. Belt
+    if (T.features.belt) {
+      const beltY = legY - 1;
+      pc.hline(torsoLeft + 1, beltY, T.torso.w - 2, beltBase);
+    }
+
+    // 8. Arms
+    const armTop = torsoCY - Math.floor(T.torso.h / 2) + T.arms.shoulderOff;
+    const leftArmX = torsoLeft - T.arms.w;
+    const rightArmX = torsoLeft + T.torso.w;
+    pc.fillRect(leftArmX, armTop + pose.leftArm, T.arms.w, T.arms.h, skinBase);
+    pc.fillRect(rightArmX, armTop + pose.rightArm, T.arms.w, T.arms.h, skinBase);
+
+    // 9. Hands
+    if (T.features.hands) {
+      pc.fillRect(leftArmX, armTop + T.arms.h + pose.leftArm, T.arms.w, 2, skinBase);
+      pc.fillRect(rightArmX, armTop + T.arms.h + pose.rightArm, T.arms.w, 2, skinBase);
+    }
+
+    // 10. Hair front
+    CharacterRenderer._drawHairFront(pc, T, cx, headCY, hairBase, config);
+
+    // 11. Face — Eyes (drawn after shading pass, see _drawFace)
+    // Stored for later: pc._eyeParams set here for post-shading draw
+    pc._eyeParams = { T, cx, headCY, eyeGroup, config, frameType, frameNum, totalFrames };
+
+    // 12. Mouth
+    if (T.features.mouth) {
+      const mouthY = headCY + Math.floor(T.head.ry * 0.4);
+      pc.hline(cx - 1, mouthY, 3, skin + 1); // shadow tone for mouth line
+    }
+
+    // Death: clear most pixels for fade effect
+    if (frameType === 'death') {
+      const progress = t;
+      if (progress > 0.5) {
+        const rng = sf2_seededRNG(frameNum * 1000);
+        for (let y = 0; y < pc.height; y++) {
+          for (let x = 0; x < pc.width; x++) {
+            if (rng() < (progress - 0.5) * 2) {
+              pc.pixels[y * pc.width + x] = 0;
+              pc.groupMap[y * pc.width + x] = 0;
+            }
+          }
+        }
+      }
+    }
+  },
+
+  _getPose(T, frameType, t) {
+    const pose = { headBob: 0, torsoShift: 0, leftLeg: 0, rightLeg: 0, leftArm: 0, rightArm: 0 };
+    const sin = Math.sin;
+    const PI = Math.PI;
+    const round = Math.round;
+
+    switch (frameType) {
+      case 'idle':
+        pose.headBob = round(sin(t * PI * 2) * 0.5);
+        break;
+      case 'walk': {
+        const walkSin = sin(t * PI * 2);
+        pose.headBob = round(-Math.abs(walkSin) * 1.5);
+        pose.leftLeg = round(walkSin * 2);
+        pose.rightLeg = round(-walkSin * 2);
+        pose.leftArm = round(-walkSin * 3);
+        pose.rightArm = round(walkSin * 3);
+        break;
+      }
+      case 'attack': {
+        if (t < 0.4) {
+          pose.rightArm = round(-t / 0.4 * 6);
+        } else {
+          pose.rightArm = round(-(1 - (t - 0.4) / 0.6) * 6);
+        }
+        pose.torsoShift = round(sin(t * PI) * -1);
+        break;
+      }
+      case 'hurt': {
+        pose.torsoShift = round(sin(t * PI) * 2);
+        pose.headBob = round(-sin(t * PI) * 1);
+        break;
+      }
+      case 'death': {
+        pose.torsoShift = round(t * 3);
+        pose.headBob = round(t * 2);
+        break;
+      }
+    }
+
+    return pose;
+  },
+
+  _drawBackHair(pc, T, cx, headCY, hairIdx) {
+    const hairTop = headCY - T.head.ry - 1;
+    const hairBottom = headCY + Math.floor(T.head.ry * 0.8);
+    const hairW = T.head.rx + 3;
+    for (let y = hairTop; y <= hairBottom; y++) {
+      const t = (y - hairTop) / (hairBottom - hairTop);
+      const w = Math.round(hairW * (0.7 + t * 0.3));
+      pc.hline(cx - w, y, w * 2 + 1, hairIdx);
+    }
+  },
+
+  _drawHairFront(pc, T, cx, headCY, hairIdx, config) {
+    const style = (config.body && config.body.hair) || 'short';
+    const hairTop = headCY - T.head.ry;
+    const maxH = T.hair.maxH;
+
+    switch (style) {
+      case 'short': {
+        // Cap on top of head
+        pc.fillEllipse(cx, hairTop, T.head.rx - 1, maxH, hairIdx);
+        break;
+      }
+      case 'spiky': {
+        // Triangular tufts above head
+        const spikeCount = Math.max(3, Math.floor(T.head.rx / 2));
+        for (let i = 0; i < spikeCount; i++) {
+          const sx = cx - T.head.rx + 2 + i * Math.floor((T.head.rx * 2 - 4) / (spikeCount - 1));
+          const spikeH = maxH + (i % 2) * 2;
+          pc.fillTriangle(sx - 2, hairTop + 1, sx + 2, hairTop + 1, sx, hairTop - spikeH, hairIdx);
+        }
+        // Base cap
+        pc.fillEllipse(cx, hairTop + 1, T.head.rx - 1, Math.floor(maxH * 0.4), hairIdx);
+        break;
+      }
+      case 'long': {
+        // Fringe/bangs over forehead
+        pc.fillEllipse(cx, hairTop, T.head.rx, Math.floor(maxH * 0.6), hairIdx);
+        // Side curtains
+        pc.fillRect(cx - T.head.rx - 1, hairTop, 2, T.head.ry + 3, hairIdx);
+        pc.fillRect(cx + T.head.rx, hairTop, 2, T.head.ry + 3, hairIdx);
+        break;
+      }
+      case 'flowing': {
+        // Full coverage top + sides flowing down
+        pc.fillEllipse(cx, hairTop, T.head.rx, maxH, hairIdx);
+        const sideLen = T.head.ry + maxH;
+        pc.fillRect(cx - T.head.rx - 1, hairTop, 3, sideLen, hairIdx);
+        pc.fillRect(cx + T.head.rx - 1, hairTop, 3, sideLen, hairIdx);
+        break;
+      }
+      case 'ponytail': {
+        // Short top
+        pc.fillEllipse(cx, hairTop, T.head.rx - 1, Math.floor(maxH * 0.5), hairIdx);
+        // Tail extending right
+        const tailX = cx + T.head.rx;
+        const tailY = hairTop + 2;
+        pc.fillRect(tailX, tailY, 3, maxH + 4, hairIdx);
+        break;
+      }
+      case 'mohawk': {
+        // Narrow vertical strip
+        pc.fillRect(cx - 1, hairTop - maxH, 3, maxH + 2, hairIdx);
+        break;
+      }
+      case 'bun': {
+        // Small dome on top
+        pc.fillEllipse(cx, hairTop, T.head.rx - 1, Math.floor(maxH * 0.4), hairIdx);
+        pc.fillCircle(cx, hairTop - maxH + 1, Math.floor(maxH * 0.6), hairIdx);
+        break;
+      }
+      case 'bob': {
+        // Mid-length with curved bottom
+        pc.fillEllipse(cx, hairTop + 1, T.head.rx, maxH, hairIdx);
+        const bobLen = Math.floor(T.head.ry * 0.5);
+        pc.fillRect(cx - T.head.rx, hairTop, 2, bobLen, hairIdx);
+        pc.fillRect(cx + T.head.rx - 1, hairTop, 2, bobLen, hairIdx);
+        break;
+      }
+      default: // 'none'
+        break;
+    }
+  },
+
+  _drawEyes(pc, T, cx, headCY, eyeStart, config, frameType, frameNum, totalFrames) {
+    const eye = T.eyes;
+    const eyeY = headCY + (eye.cy || 0);
+
+    // Blink on specific idle frames
+    const isBlink = frameType === 'idle' && frameNum === totalFrames - 1;
+    // Hurt = squeezed eyes
+    const isHurt = frameType === 'hurt';
+
+    if (eye.type === 'dot') {
+      // Simple dot eyes — use pupil color (dark) for visibility
+      if (isBlink || isHurt) {
+        pc.hline(cx - Math.floor(eye.gap / 2), eyeY, 1, eyeStart);
+        pc.hline(cx + Math.floor(eye.gap / 2), eyeY, 1, eyeStart);
+      } else {
+        pc.setPixel(cx - Math.floor(eye.gap / 2), eyeY, eyeStart); // pupil (near-black)
+        pc.setPixel(cx + Math.floor(eye.gap / 2), eyeY, eyeStart);
+      }
+    } else if (eye.type === 'simple') {
+      // 3x2 eyes: white bg + dark pupil
+      const lx = cx - Math.floor(eye.gap / 2) - Math.floor(eye.w / 2);
+      const rx = cx + Math.floor(eye.gap / 2) - Math.floor(eye.w / 2);
+      if (isBlink || isHurt) {
+        pc.hline(lx, eyeY, eye.w, eyeStart + 1);
+        pc.hline(rx, eyeY, eye.w, eyeStart + 1);
+      } else {
+        // White
+        pc.fillRect(lx, eyeY, eye.w, eye.h, eyeStart + 3); // highlight = white
+        pc.fillRect(rx, eyeY, eye.w, eye.h, eyeStart + 3);
+        // Pupil (center pixel)
+        pc.setPixel(lx + Math.floor(eye.w / 2), eyeY + Math.floor(eye.h / 2), eyeStart); // deepShadow = pupil
+        pc.setPixel(rx + Math.floor(eye.w / 2), eyeY + Math.floor(eye.h / 2), eyeStart);
+      }
+    } else if (eye.type === 'detailed') {
+      // Full eye: eyeStart+0=pupil(black), +1=iris(color), +2=white, +3=specular
+      const lx = cx - Math.floor(eye.gap / 2) - Math.floor(eye.w / 2);
+      const rx = cx + Math.floor(eye.gap / 2) - Math.floor(eye.w / 2);
+      if (isBlink || isHurt) {
+        pc.hline(lx, eyeY + Math.floor(eye.h / 2), eye.w, eyeStart); // closed eye line
+        pc.hline(rx, eyeY + Math.floor(eye.h / 2), eye.w, eyeStart);
+      } else {
+        // White of eye (background)
+        pc.fillRect(lx, eyeY, eye.w, eye.h, eyeStart + 2);
+        pc.fillRect(rx, eyeY, eye.w, eye.h, eyeStart + 2);
+        // Iris — centered circle within the eye area
+        const irisX = Math.floor(eye.w / 2);
+        const irisR = Math.max(1, Math.floor(Math.min(eye.w, eye.h) / 2) - 1);
+        pc.fillCircle(lx + irisX, eyeY + Math.floor(eye.h / 2), irisR, eyeStart + 1);
+        pc.fillCircle(rx + irisX, eyeY + Math.floor(eye.h / 2), irisR, eyeStart + 1);
+        // Pupil — single dark pixel at center
+        pc.setPixel(lx + irisX, eyeY + Math.floor(eye.h / 2), eyeStart);
+        pc.setPixel(rx + irisX, eyeY + Math.floor(eye.h / 2), eyeStart);
+        // Specular highlight — top-left of each eye
+        pc.setPixel(lx + irisX - 1, eyeY, eyeStart + 3);
+        pc.setPixel(rx + irisX - 1, eyeY, eyeStart + 3);
+      }
+    }
+  },
+};
+
+// ============================================================
+// MODULE F: CREATURE RENDERER
+// ============================================================
+
+
+// ============================================================
+// MODULE F: CREATURE RENDERER
+// ============================================================
+
+// MODULE F: CREATURE RENDERER
+// ============================================================
+
+const CreatureRenderer = {
+  drawFrame(pc, pal, config, frameType, frameNum, totalFrames) {
+    const t = totalFrames > 1 ? frameNum / (totalFrames - 1) : 0;
+    const cx = Math.floor(pc.width / 2);
+    const cy = Math.floor(pc.height / 2);
+    const type = (config.creature && config.creature.bodyShape) || 'blob';
+    const bodyColor = pal.groups.body ? pal.groups.body.startIdx + 2 : 1;
+    const eyeColor = pal.groups.eyes ? pal.groups.eyes.startIdx : 5;
+
+    // Animation offsets
+    let squish = 0, shiftX = 0, shiftY = 0;
+    switch (frameType) {
+      case 'idle':
+        squish = Math.sin(t * Math.PI * 2) * 0.08;
+        shiftY = Math.round(Math.sin(t * Math.PI * 2) * 1);
+        break;
+      case 'walk':
+        shiftX = Math.round(Math.sin(t * Math.PI * 2) * 2);
+        squish = Math.sin(t * Math.PI * 4) * 0.1;
+        shiftY = Math.round(Math.abs(Math.sin(t * Math.PI * 2)) * -2);
+        break;
+      case 'attack':
+        shiftX = t < 0.5 ? Math.round(-t * 4) : Math.round((t - 0.5) * 8 - 2);
+        squish = t < 0.4 ? t * 0.2 : -(t - 0.4) * 0.15;
+        break;
+      case 'hurt':
+        shiftX = Math.round(Math.sin(t * Math.PI) * 3);
+        break;
+      case 'death':
+        squish = t * 0.5;
+        break;
+    }
+
+    const bx = cx + shiftX;
+    const by = cy + shiftY;
+
+    // Deferred eye list — drawn after shading pass
+    const deferredEyes = [];
+    const drawEye = (ex, ey, r) => { deferredEyes.push({ ex, ey, r }); };
+
+    switch (type) {
+      case 'blob': {
+        // Classic slime/blob: dome shape, glossy, cute face
+        const rx = Math.max(4, Math.floor(pc.width * 0.32 * (1 + squish)));
+        const ry = Math.max(4, Math.floor(pc.height * 0.28 * (1 - squish)));
+        // Body — slightly flattened dome
+        pc.fillEllipse(bx, by + 2, rx, ry, bodyColor);
+        // Flat bottom
+        pc.fillRect(bx - rx, by + 2, rx * 2 + 1, Math.floor(ry * 0.3), bodyColor);
+        // Glossy highlight — upper left area
+        pc.fillEllipse(bx - Math.floor(rx * 0.25), by - Math.floor(ry * 0.15), Math.max(2, Math.floor(rx * 0.35)), Math.max(2, Math.floor(ry * 0.25)), bodyColor + 1);
+        // Eyes
+        const eyeCount = (config.creature && config.creature.eyeCount) || 2;
+        const eyeY = by - Math.floor(ry * 0.1);
+        const eyeR = Math.max(1, Math.floor(rx * 0.2));
+        if (eyeCount === 1) {
+          drawEye(bx, eyeY, eyeR);
+        } else {
+          const gap = Math.max(3, Math.floor(rx * 0.4));
+          drawEye(bx - gap, eyeY, eyeR);
+          drawEye(bx + gap, eyeY, eyeR);
+        }
+        // Smile
+        if (rx >= 6) {
+          pc.hline(bx - 2, by + Math.floor(ry * 0.25), 5, bodyColor - 1);
+          pc.setPixel(bx - 3, by + Math.floor(ry * 0.25) - 1, bodyColor - 1);
+          pc.setPixel(bx + 3, by + Math.floor(ry * 0.25) - 1, bodyColor - 1);
+        }
+        break;
+      }
+      case 'quadruped': {
+        // 4-legged animal: distinct head, body, legs
+        const bodyRX = Math.max(5, Math.floor(pc.width * 0.26));
+        const bodyRY = Math.max(3, Math.floor(pc.height * 0.14 * (1 - squish)));
+        const headR = Math.max(3, Math.floor(bodyRY * 0.9));
+        const legH = Math.max(3, Math.floor(pc.height * 0.2));
+        const legW = Math.max(2, Math.floor(pc.width * 0.06));
+        const stride = Math.round(Math.sin(t * Math.PI * 2) * 2);
+        // Body
+        pc.fillEllipse(bx, by, bodyRX, bodyRY, bodyColor);
+        // Head — positioned to the right, slightly higher
+        const headX = bx + bodyRX - Math.floor(headR * 0.3);
+        const headY = by - bodyRY + Math.floor(headR * 0.3);
+        pc.fillCircle(headX, headY, headR, bodyColor);
+        // Ear nubs
+        pc.fillCircle(headX - 2, headY - headR, Math.max(1, Math.floor(headR * 0.4)), bodyColor);
+        pc.fillCircle(headX + 2, headY - headR, Math.max(1, Math.floor(headR * 0.4)), bodyColor);
+        // Legs — side view facing right
+        // Each leg: vertical shin + foot extending RIGHT (forward)
+        const frontBase = bx + Math.floor(bodyRX * 0.35);
+        const backBase = bx - Math.floor(bodyRX * 0.35);
+        const groundY = by + bodyRY - 1;
+        const footW = legW + 2; // foot wider than leg, extends forward
+        const footH = Math.max(1, Math.floor(legH * 0.2));
+        const footY = groundY + legH - footH;
+
+        // Draw leg + foot helper (foot extends to the right = forward)
+        const drawLeg = (lx, color) => {
+          pc.fillRect(lx, groundY, legW, legH, color);        // shin
+          pc.fillRect(lx, footY, footW, footH, color);         // foot extends right
+        };
+
+        // Far legs first (behind, darker)
+        drawLeg(frontBase + 1 - stride, bodyColor - 1);
+        drawLeg(backBase + 1 + stride, bodyColor - 1);
+        // Near legs on top
+        drawLeg(frontBase + stride, bodyColor);
+        drawLeg(backBase - stride, bodyColor);
+        // Tail — small curve from back
+        pc.line(bx - bodyRX, by - 1, bx - bodyRX - 3, by - 4, bodyColor);
+        pc.line(bx - bodyRX - 3, by - 4, bx - bodyRX - 2, by - 6, bodyColor);
+        // Eye on head
+        drawEye(headX + Math.floor(headR * 0.3), headY - 1, Math.max(1, Math.floor(headR * 0.35)));
+        // Nose
+        pc.setPixel(headX + headR - 1, headY + 1, bodyColor - 1);
+        break;
+      }
+      case 'serpent': {
+        // Snake: thick segmented body, tapered tail, distinct head with eyes and tongue
+        const segCount = 8;
+        const maxR = Math.max(3, Math.floor(pc.width * 0.12));
+        const bodyLen = Math.floor(pc.width * 0.7);
+        const startX = bx - Math.floor(bodyLen * 0.35);
+        for (let i = 0; i < segCount; i++) {
+          const sf = i / (segCount - 1);
+          const sx = startX + Math.floor(sf * bodyLen);
+          const sy = by + Math.round(Math.sin(sf * Math.PI * 1.5 + t * Math.PI * 2) * 5);
+          // Taper: head is large, body medium, tail thin
+          let r;
+          if (i === 0) r = Math.floor(maxR * 1.3); // head
+          else if (i < 3) r = maxR;
+          else r = Math.max(1, Math.floor(maxR * (1 - (sf - 0.3) * 0.8)));
+          pc.fillCircle(sx, sy, r, bodyColor);
+        }
+        // Head details
+        const headX = startX;
+        const headY = by + Math.round(Math.sin(t * Math.PI * 2) * 5);
+        const headR = Math.floor(maxR * 1.3);
+        // Eyes — on top of head
+        drawEye(headX - Math.floor(headR * 0.4), headY - Math.floor(headR * 0.4), Math.max(1, Math.floor(headR * 0.35)));
+        drawEye(headX + Math.floor(headR * 0.4), headY - Math.floor(headR * 0.4), Math.max(1, Math.floor(headR * 0.35)));
+        // Forked tongue
+        const tongueX = headX - headR - 1;
+        const tongueY = headY;
+        pc.line(tongueX, tongueY, tongueX - 3, tongueY - 1, eyeColor);
+        pc.line(tongueX, tongueY, tongueX - 3, tongueY + 1, eyeColor);
+        break;
+      }
+      case 'flying': {
+        // Bat/bird: round body, large swept wings, visible face
+        const bodyRX = Math.max(3, Math.floor(pc.width * 0.12));
+        const bodyRY = Math.max(3, Math.floor(pc.height * 0.14));
+        // Body — round
+        pc.fillEllipse(bx, by, bodyRX, bodyRY, bodyColor);
+        // Wings — large triangular, attached to body sides
+        const wingFlap = Math.round(Math.sin(t * Math.PI * 2) * 4);
+        const wingSpan = Math.floor(pc.width * 0.38);
+        const wingTip = by - wingFlap - 2;
+        const wingMid = by + Math.floor(bodyRY * 0.3);
+        // Left wing — triangle from shoulder to tip to elbow
+        pc.fillTriangle(
+          bx - bodyRX, by - 1,          // shoulder
+          bx - wingSpan, wingTip,        // tip
+          bx - bodyRX - 2, wingMid,      // elbow
+          bodyColor
+        );
+        // Right wing — mirror
+        pc.fillTriangle(
+          bx + bodyRX, by - 1,
+          bx + wingSpan, wingTip,
+          bx + bodyRX + 2, wingMid,
+          bodyColor
+        );
+        // Wing membrane detail line
+        pc.line(bx - bodyRX, by, bx - wingSpan + 2, wingTip + 2, bodyColor + 1);
+        pc.line(bx + bodyRX, by, bx + wingSpan - 2, wingTip + 2, bodyColor + 1);
+        // Eyes — prominent on the round body
+        const eyeR = Math.max(1, Math.floor(bodyRX * 0.4));
+        drawEye(bx - Math.floor(bodyRX * 0.45), by - Math.floor(bodyRY * 0.2), eyeR);
+        drawEye(bx + Math.floor(bodyRX * 0.45), by - Math.floor(bodyRY * 0.2), eyeR);
+        // Feet — tiny dangling
+        pc.line(bx - 2, by + bodyRY, bx - 3, by + bodyRY + 3, bodyColor);
+        pc.line(bx + 2, by + bodyRY, bx + 3, by + bodyRY + 3, bodyColor);
+        break;
+      }
+      case 'spider': {
+        // Spider: large round abdomen, smaller cephalothorax, 8 legs spreading outward
+        const abdR = Math.max(4, Math.floor(pc.width * 0.18));
+        const headR = Math.max(2, Math.floor(pc.width * 0.1));
+        const abdY = by + 3;
+        const headY = abdY - abdR - headR + 3;
+        // Abdomen (larger, back)
+        pc.fillEllipse(bx, abdY, abdR, Math.floor(abdR * 0.85), bodyColor);
+        // Cephalothorax (smaller, front)
+        pc.fillCircle(bx, headY, headR, bodyColor);
+        // Connect them
+        pc.fillRect(bx - headR + 1, headY + headR - 1, headR * 2 - 1, 3, bodyColor);
+        // 8 legs — 4 per side, angled outward and bending downward
+        const legLen1 = Math.max(4, Math.floor(pc.width * 0.2));  // upper segment
+        const legLen2 = Math.max(3, Math.floor(pc.width * 0.15)); // lower segment
+        for (let side = -1; side <= 1; side += 2) {
+          for (let i = 0; i < 4; i++) {
+            const angle = (0.3 + i * 0.35) * side; // spread angle
+            const swing = Math.sin(t * Math.PI * 2 + i * 1.2) * 1.5;
+            // Knee point — extends outward and slightly up
+            const kneeX = bx + Math.round((headR + legLen1) * Math.cos(angle) * side);
+            const kneeY = headY + Math.round(-legLen1 * 0.3 + i * 1.5 + swing);
+            // Foot point — from knee downward
+            const footX = kneeX + Math.round(legLen2 * 0.5 * side);
+            const footY = kneeY + legLen2;
+            // Draw leg: body -> knee -> foot
+            pc.line(bx + headR * side, headY + i - 1, kneeX, kneeY, bodyColor);
+            pc.line(kneeX, kneeY, footX, footY, bodyColor);
+          }
+        }
+        // Eyes — cluster of small eyes on cephalothorax
+        const eyeR = Math.max(1, Math.floor(headR * 0.3));
+        drawEye(bx - Math.floor(headR * 0.4), headY - Math.floor(headR * 0.3), eyeR);
+        drawEye(bx + Math.floor(headR * 0.4), headY - Math.floor(headR * 0.3), eyeR);
+        // Smaller secondary eyes
+        pc.setPixel(bx - Math.floor(headR * 0.6), headY, eyeColor + 2);
+        pc.setPixel(bx + Math.floor(headR * 0.6), headY, eyeColor + 2);
+        // Fangs
+        pc.line(bx - 1, headY + headR, bx - 2, headY + headR + 2, eyeColor + 2);
+        pc.line(bx + 1, headY + headR, bx + 2, headY + headR + 2, eyeColor + 2);
+        break;
+      }
+    }
+    // Store deferred eyes for post-shading drawing
+    pc._deferredEyes = deferredEyes;
+    pc._eyeColor = eyeColor;
+  },
+
+  // Draw deferred creature eyes (call after shading pass)
+  drawDeferredEyes(pc) {
+    if (!pc._deferredEyes || !pc._deferredEyes.length) return;
+    const eyeColor = pc._eyeColor || 5;
+    for (const { ex, ey, r } of pc._deferredEyes) {
+      const er = Math.max(1, r);
+      if (er <= 1) {
+        pc.setPixel(ex, ey, eyeColor + 2); // white
+        pc.setPixel(ex, ey, eyeColor);      // pupil on top
+      } else {
+        pc.fillCircle(ex, ey, er, eyeColor + 2);              // white
+        pc.fillCircle(ex, ey, Math.max(1, er - 1), eyeColor + 1); // iris
+        pc.setPixel(ex, ey, eyeColor);                         // pupil
+        pc.setPixel(ex - 1, ey - 1, eyeColor + 3);            // specular
+      }
+    }
+  },
+};
+
+// ============================================================
+
+// ============================================================
+// MODULE H: SPRITEFORGE v2 PUBLIC API
+// ============================================================
+
+// MODULE H: SPRITEFORGE v2 PUBLIC API
+// ============================================================
+
+const _sf2Cache = new SpriteCache(256);
+
+const SpriteForge = {
+  VERSION: 2,
+
+  character(config) {
+    const cacheKey = JSON.stringify({ _t: 'char', ...config });
+    const cached = _sf2Cache.get(cacheKey);
+    if (cached) return cached;
+
+    // Resolve style
+    const styleName = config.style || 'chibi';
+    const template = BODY_TEMPLATES[styleName];
+    if (!template) throw new Error('Unknown style: ' + styleName);
+
+    // Build color palette
+    const colors = config.colors || {};
+    const defaultColors = {
+      skin: '#ffcc99', hair: '#553322', shirt: '#5588bb',
+      pants: '#445566', shoes: '#332211', eyes: '#4488ff', belt: '#8b7355',
+    };
+    const mergedColors = { ...defaultColors, ...colors };
+    const pal = ColorRamp.buildPalette(mergedColors);
+
+    // Set black at index 255 for 'black' outline mode
+    pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+
+    // Resolve animations
+    const defaultAnims = {
+      idle: { frames: 4, speed: 0.2 },
+      walk: { frames: 6, speed: 0.1 },
+      attack: { frames: 4, speed: 0.08 },
+      hurt: { frames: 2, speed: 0.1 },
+      death: { frames: 4, speed: 0.15 },
+    };
+    const animConfig = { ...defaultAnims, ...(config.animations || {}) };
+
+    // Count total frames
+    let totalFrames = 0;
+    const animList = [];
+    for (const [name, def] of Object.entries(animConfig)) {
+      animList.push({ name, frames: def.frames, speed: def.speed });
+      totalFrames += def.frames;
+    }
+
+    // Create sprite sheet grid
+    const cols = Math.ceil(Math.sqrt(totalFrames));
+    const rows = Math.ceil(totalFrames / cols);
+    const fw = template.canvas.w;
+    const fh = template.canvas.h;
+    const sheetCanvas = sf2_makeCanvas(cols * fw, rows * fh);
+    const sheetCtx = sheetCanvas.getContext('2d');
+    sheetCtx.imageSmoothingEnabled = false;
+
+    // Determine outline mode
+    const outlineMode = config.outlineMode || template.outline || 'tinted';
+
+    // Generate each frame
+    let frameIdx = 0;
+    const animationDefs = {};
+
+    for (const anim of animList) {
+      const frameIndices = [];
+      for (let f = 0; f < anim.frames; f++) {
+        const pc = new PixelCanvas(fw, fh);
+        pc.setPalette(pal.palette, pal.groupForIndex);
+
+        // Draw the character frame (without eyes)
+        CharacterRenderer.drawFrame(pc, template, pal, config, anim.name, f, anim.frames);
+
+        // Post-processing: shade body first, then draw eyes, then outlines
+        PostProcess.applyShading(pc, pal.groups);
+
+        // Draw eyes AFTER shading so they aren't modified
+        if (pc._eyeParams) {
+          const ep = pc._eyeParams;
+          CharacterRenderer._drawEyes(pc, ep.T, ep.cx, ep.headCY, ep.eyeGroup, ep.config, ep.frameType, ep.frameNum, ep.totalFrames);
+        }
+
+        PostProcess.applyOutlines(pc, pal.groups, outlineMode);
+
+        // Blit to sheet
+        const col = frameIdx % cols;
+        const row = Math.floor(frameIdx / cols);
+        pc.blitTo(sheetCtx, col * fw, row * fh);
+
+        frameIndices.push(frameIdx);
+        frameIdx++;
+      }
+
+      animationDefs[anim.name] = {
+        frames: frameIndices,
+        speed: anim.speed,
+        loop: anim.name !== 'death' && anim.name !== 'hurt',
+        pingpong: anim.name === 'idle',
+      };
+    }
+
+    const sheet = new SpriteSheet(sheetCanvas, fw, fh, cols, rows);
+    const animator = new SpriteAnimator(sheet, animationDefs);
+    animator.play('idle');
+
+    const result = { sheet, animator, animations: animationDefs };
+    _sf2Cache.set(cacheKey, result);
+    return result;
+  },
+
+  creature(config) {
+    const cacheKey = JSON.stringify({ _t: 'creature', ...config });
+    const cached = _sf2Cache.get(cacheKey);
+    if (cached) return cached;
+
+    const size = config.size || 32;
+    const colors = config.colors || {};
+    const defaultColors = { body: '#66aa44', eyes: '#ffffff' };
+    const mergedColors = { ...defaultColors, ...colors };
+    const pal = ColorRamp.buildPalette(mergedColors);
+    pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+
+    const defaultAnims = {
+      idle: { frames: 4, speed: 0.2 },
+      walk: { frames: 4, speed: 0.12 },
+      attack: { frames: 3, speed: 0.1 },
+      hurt: { frames: 2, speed: 0.1 },
+      death: { frames: 3, speed: 0.15 },
+    };
+    const animConfig = { ...defaultAnims, ...(config.animations || {}) };
+
+    let totalFrames = 0;
+    const animList = [];
+    for (const [name, def] of Object.entries(animConfig)) {
+      animList.push({ name, frames: def.frames, speed: def.speed });
+      totalFrames += def.frames;
+    }
+
+    const cols = Math.ceil(Math.sqrt(totalFrames));
+    const rows = Math.ceil(totalFrames / cols);
+    const sheetCanvas = sf2_makeCanvas(cols * size, rows * size);
+    const sheetCtx = sheetCanvas.getContext('2d');
+    sheetCtx.imageSmoothingEnabled = false;
+
+    const outlineMode = config.outlineMode || 'tinted';
+    let frameIdx = 0;
+    const animationDefs = {};
+
+    for (const anim of animList) {
+      const frameIndices = [];
+      for (let f = 0; f < anim.frames; f++) {
+        const pc = new PixelCanvas(size, size);
+        pc.setPalette(pal.palette, pal.groupForIndex);
+
+        CreatureRenderer.drawFrame(pc, pal, config, anim.name, f, anim.frames);
+
+        PostProcess.applyShading(pc, pal.groups);
+        CreatureRenderer.drawDeferredEyes(pc);
+        PostProcess.applyOutlines(pc, pal.groups, outlineMode);
+
+        const col = frameIdx % cols;
+        const row = Math.floor(frameIdx / cols);
+        pc.blitTo(sheetCtx, col * size, row * size);
+
+        frameIndices.push(frameIdx);
+        frameIdx++;
+      }
+
+      animationDefs[anim.name] = {
+        frames: frameIndices,
+        speed: anim.speed,
+        loop: anim.name !== 'death' && anim.name !== 'hurt',
+        pingpong: anim.name === 'idle',
+      };
+    }
+
+    const sheet = new SpriteSheet(sheetCanvas, size, size, cols, rows);
+    const animator = new SpriteAnimator(sheet, animationDefs);
+    animator.play('idle');
+
+    const result = { sheet, animator, animations: animationDefs };
+    _sf2Cache.set(cacheKey, result);
+    return result;
+  },
+
+  // Build a sprite sheet from custom drawing functions (no templates).
+  buildSheet(config) {
+    const fw = config.frameWidth;
+    const fh = config.frameHeight;
+    const pal = config.palette;
+    const outlineMode = config.outlineMode || 'tinted';
+    pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+
+    let totalFrames = 0;
+    const animList = [];
+    for (const [name, def] of Object.entries(config.animations)) {
+      animList.push({ name, ...def });
+      totalFrames += def.frames;
+    }
+
+    const cols = Math.ceil(Math.sqrt(totalFrames));
+    const rows = Math.ceil(totalFrames / cols);
+    const sheetCanvas = sf2_makeCanvas(cols * fw, rows * fh);
+    const sheetCtx = sheetCanvas.getContext('2d');
+    sheetCtx.imageSmoothingEnabled = false;
+
+    let frameIdx = 0;
+    const animationDefs = {};
+
+    for (const anim of animList) {
+      const frameIndices = [];
+      for (let f = 0; f < anim.frames; f++) {
+        const pc = new PixelCanvas(fw, fh);
+        pc.setPalette(pal.palette, pal.groupForIndex);
+        const t = anim.frames > 1 ? f / (anim.frames - 1) : 0;
+        anim.draw(pc, pal, t);
+        PostProcess.applyShading(pc, pal.groups);
+        if (anim.drawPost) anim.drawPost(pc, pal, t);
+        PostProcess.applyOutlines(pc, pal.groups, outlineMode);
+        const col = frameIdx % cols;
+        const row = Math.floor(frameIdx / cols);
+        pc.blitTo(sheetCtx, col * fw, row * fh);
+        frameIndices.push(frameIdx);
+        frameIdx++;
+      }
+      animationDefs[anim.name] = {
+        frames: frameIndices,
+        speed: anim.speed || 0.15,
+        loop: anim.loop !== false,
+        pingpong: !!anim.pingpong,
+      };
+    }
+
+    const sheet = new SpriteSheet(sheetCanvas, fw, fh, cols, rows);
+    const animator = new SpriteAnimator(sheet, animationDefs);
+    animator.play(animList[0] ? animList[0].name : 'idle');
+    return { sheet, animator, animations: animationDefs };
+  },
+
+  // Render a single static sprite (no animation). For props, furniture, terrain.
+  // config = { width, height, palette, outlineMode, draw(pc, pal), drawPost(pc, pal) }
+  // Returns { canvas, pc } — canvas is the rendered image, pc is the PixelCanvas for inspection.
+  static(config) {
+    const w = config.width || 32;
+    const h = config.height || 32;
+    const pal = config.palette;
+    const outlineMode = config.outlineMode || 'tinted';
+    pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+
+    const pc = new PixelCanvas(w, h);
+    pc.setPalette(pal.palette, pal.groupForIndex);
+    config.draw(pc, pal);
+    PostProcess.applyShading(pc, pal.groups);
+    if (config.drawPost) config.drawPost(pc, pal);
+    PostProcess.applyOutlines(pc, pal.groups, outlineMode);
+
+    const cvs = sf2_makeCanvas(w, h);
+    const ctx = cvs.getContext('2d');
+    pc.blitTo(ctx, 0, 0);
+    return { canvas: cvs, pc };
+  },
+
+  clearCache() { _sf2Cache.clear(); },
+};
+
+if (typeof window !== 'undefined') {
+  window.SpriteForge = SpriteForge;
+  window.SpriteSheet = SpriteSheet;
+  window.SpriteAnimator = SpriteAnimator;
+  window.PixelCanvas = PixelCanvas;
+  window.ColorRamp = ColorRamp;
+  window.PostProcess = PostProcess;
+}
+
+
+// === CANVAS SETUP ===
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, S;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  S = Math.min(W, H) / 600;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// === SPRITES ===
+
+// --- Sprite: player-paddle (24x64) ---
+const sprite_player_paddle = (function() {
+  var colors = {
+    'base': '#00D4FF',
+    'highlight': '#80EAFF',
+    'shadow': '#007A99',
+    'accent': '#FFFFFF',
+    'glow': '#00FFCC'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(24, 64);
+
+  // Draw
+  (function(pc, pal) {
+    
+// Get palette indices
+const baseIdx = pal.groups.base.startIdx;
+const highlightIdx = pal.groups.highlight.startIdx;
+const shadowIdx = pal.groups.shadow.startIdx;
+const accentIdx = pal.groups.accent.startIdx;
+const glowIdx = pal.groups.glow.startIdx;
+
+// Rectangle dimensions: 12px wide, centered at x=12
+const x1 = 6, x2 = 18, centerX = 12;
+const y1 = 2, y2 = 62;
+const w = x2 - x1;  // 12 pixels
+
+// Draw main rectangle body with horizontal gradient (bright center, dark edges)
+for (let y = y1; y < y2; y++) {
+  // Chamfered corners: taper width at top and bottom rows
+  let rowWidth = w;
+  if (y === 2 || y === 61) rowWidth = 8;
+  else if (y === 3 || y === 60) rowWidth = 10;
+  
+  const offset = (w - rowWidth) / 2;
+  const xLeft = x1 + offset;
+  const xRight = xLeft + rowWidth;
+  
+  // Fill row with horizontal gradient
+  for (let x = xLeft; x < xRight; x++) {
+    const distFromCenter = Math.abs(x - centerX);
+    
+    let colorIdx;
+    if (distFromCenter <= 1) {
+      // Brightest center strip
+      colorIdx = highlightIdx + 3;
+    } else if (distFromCenter <= 2) {
+      // Mid-bright
+      colorIdx = baseIdx + 3;
+    } else if (distFromCenter <= 3.5) {
+      // Mid tones
+      colorIdx = baseIdx + 2;
+    } else {
+      // Darker edges
+      colorIdx = baseIdx + 1;
+    }
+    
+    pc.setPixel(x, y, colorIdx);
+  }
+}
+
+// Draw left edge highlight (2px bright white line, avoiding chamfered corners)
+pc.vline(x1, y1 + 3, y2 - y1 - 6, accentIdx + 3);
+pc.vline(x1 + 1, y1 + 3, y2 - y1 - 6, accentIdx + 3);
+
+// Draw right edge shadow (1px line, avoiding chamfered corners)
+pc.vline(x2 - 1, y1 + 3, y2 - y1 - 6, shadowIdx + 0);
+
+// Add subtle texture noise in darker edge regions for depth
+pc.scatterNoise(x1 + 2, y1 + 8, w - 4, y2 - y1 - 16, baseIdx + 0, 0.1);
+
+// Add glow accents at center for subtle luminosity
+for (let y = y1 + 12; y < y1 + 18; y++) {
+  pc.setPixel(centerX, y, glowIdx + 3);
+}
+
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 24; cvs.height = 64;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(24, 64);
+  for (var y = 0; y < 64; y++) {
+    for (var x = 0; x < 24; x++) {
+      var idx = pc.pixels[y * 24 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 24 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: opponent-paddle (24x64) ---
+const sprite_opponent_paddle = (function() {
+  var colors = {
+    'base': '#FF6B35',
+    'highlight': '#FFB347',
+    'shadow': '#CC3300',
+    'accent': '#FFF5E0',
+    'glow': '#FF1744'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(24, 64);
+
+  // Draw
+  (function(pc, pal) {
+    
+const shadowColor = pal.groups.shadow.startIdx + 1;   // dark rust
+const darkOrange = pal.groups.base.startIdx + 0;      // darkest tone
+const midOrange = pal.groups.base.startIdx + 2;       // medium orange  
+const brightOrange = pal.groups.base.startIdx + 3;    // brightest saturated
+const cream = pal.groups.accent.startIdx + 3;         // cream-white highlight
+const glowOrange = pal.groups.glow.startIdx + 2;      // hot orange glow
+
+// Paddle dimensions and position
+const x = 7;
+const y = 4;
+const w = 10;
+const h = 56;
+
+// Main paddle body in medium orange
+pc.fillRect(x, y, w, h, midOrange);
+
+// Left edge - dark rust shadow line
+pc.vline(x, y, h, shadowColor);
+
+// Left blend - darker coral bleeding inward
+pc.vline(x + 1, y, h, darkOrange);
+
+// Right blend - darker coral fading from edge
+pc.vline(x + w - 3, y, h, darkOrange);
+
+// Right edge - 2px cream-white inner highlight
+pc.vline(x + w - 2, y, h, cream);
+pc.vline(x + w - 1, y, h, cream);
+
+// Center vertical strip - blazes with saturated bright orange (4px)
+pc.fillRect(x + 3, y, 4, h, brightOrange);
+
+// Top chamfered edge - beveled effect
+pc.fillRect(x, y, w, 2, darkOrange);
+pc.fillRect(x + 1, y + 1, w - 2, 1, midOrange);
+
+// Bottom chamfered edge - beveled effect  
+pc.fillRect(x, y + h - 2, w, 2, shadowColor);
+pc.fillRect(x + 1, y + h - 2, w - 2, 1, darkOrange);
+
+// Scattered glow and texture throughout paddle body for depth
+pc.scatterNoise(x + 1, y + 3, w - 2, h - 6, glowOrange, 0.2);
+
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 24; cvs.height = 64;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(24, 64);
+  for (var y = 0; y < 64; y++) {
+    for (var x = 0; x < 24; x++) {
+      var idx = pc.pixels[y * 24 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 24 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: game-ball (24x24) ---
+const sprite_game_ball = (function() {
+  var colors = {
+    'base': '#FFFFFF',
+    'highlight': '#FFFDE7',
+    'shadow': '#B0BEC5',
+    'accent': '#FFE500',
+    'trail': '#FFD740'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(24, 24);
+
+  // Draw
+  (function(pc, pal) {
+    const baseColor = pal.groups.base.startIdx;
+const highlightColor = pal.groups.highlight.startIdx;
+const shadowColor = pal.groups.shadow.startIdx;
+const accentColor = pal.groups.accent.startIdx;
+
+// Fill background with dark shadow (court)
+pc.fillRect(0, 0, 24, 24, shadowColor + 0);
+
+// Define octagon bounds (square 3,3 to 20,20 with corner pixels removed)
+const x1 = 3, x2 = 20, y1 = 3, y2 = 20;
+
+// Top edge (exclude corners with 1px diagonal)
+pc.setPixel(x1 + 1, y1, accentColor + 3);
+pc.hline(x1 + 2, y1, x2 - x1 - 3, accentColor + 3);
+pc.setPixel(x2 - 1, y1, accentColor + 3);
+
+// Middle rows (full width with yellow 1px edges)
+for (let y = y1 + 1; y < y2; y++) {
+  pc.setPixel(x1, y, accentColor + 3);           // left yellow edge
+  pc.hline(x1 + 1, y, x2 - x1 - 1, baseColor + 3); // white fill
+  pc.setPixel(x2, y, accentColor + 3);           // right yellow edge
+}
+
+// Bottom edge (exclude corners, darker for shading gradient)
+pc.setPixel(x1 + 1, y2, accentColor + 2);
+pc.hline(x1 + 2, y2, x2 - x1 - 3, accentColor + 2);
+pc.setPixel(x2 - 1, y2, accentColor + 2);
+
+// Add lighter shading (highlight) at top-left quadrant
+pc.fillRect(5, 5, 5, 5, highlightColor + 3);
+
+// Add darker shading at bottom-right quadrant
+pc.fillRect(15, 15, 4, 4, baseColor + 0);
+
+// Add subtle texture noise for depth and visual interest
+pc.scatterNoise(4, 4, 16, 16, baseColor + 2, 0.07);
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 24; cvs.height = 24;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(24, 24);
+  for (var y = 0; y < 24; y++) {
+    for (var x = 0; x < 24; x++) {
+      var idx = pc.pixels[y * 24 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 24 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: boundary-wall (32x32) ---
+const sprite_boundary_wall = (function() {
+  var colors = {
+    'base': '#1A1A2E',
+    'highlight': '#2D2D5E',
+    'shadow': '#0D0D1A',
+    'accent': '#E0E0E0',
+    'edge': '#4A4A8A'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(32, 32);
+
+  // Draw
+  (function(pc, pal) {
+    const baseIdx = pal.groups.base.startIdx;
+const highlightIdx = pal.groups.highlight.startIdx;
+const shadowIdx = pal.groups.shadow.startIdx;
+const edgeIdx = pal.groups.edge.startIdx;
+
+// Fill entire canvas with middle base tone (no transparent pixels)
+pc.fillRect(0, 0, 32, 32, baseIdx + 1);
+
+// TOP BOUNDARY BAR
+pc.fillRect(0, 0, 32, 8, baseIdx + 0);
+
+// BOTTOM BOUNDARY BAR
+pc.fillRect(0, 24, 32, 8, baseIdx + 0);
+
+// TOP HIGHLIGHT STRIPE (2px muted-indigo on top surface)
+pc.hline(0, 0, 32, highlightIdx + 2);
+pc.hline(0, 1, 32, highlightIdx + 1);
+
+// SHADOW STRIPES (thick near-black shadow at bottom of bars)
+pc.hline(0, 6, 32, shadowIdx + 1);
+pc.hline(0, 7, 32, shadowIdx + 0);
+
+pc.hline(0, 30, 32, shadowIdx + 1);
+pc.hline(0, 31, 32, shadowIdx + 0);
+
+// TILE SEAM NOTCHES (subtle lighter marks at tile boundaries)
+pc.vline(0, 10, 12, edgeIdx + 1);
+
+// TEXTURE VARIATION (scatter noise for natural tiling)
+pc.scatterNoise(1, 0, 30, 8, baseIdx + 1, 0.1);
+pc.scatterNoise(1, 24, 30, 8, baseIdx + 1, 0.1);
+pc.scatterNoise(0, 8, 32, 16, baseIdx + 2, 0.1);
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 32; cvs.height = 32;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(32, 32);
+  for (var y = 0; y < 32; y++) {
+    for (var x = 0; x < 32; x++) {
+      var idx = pc.pixels[y * 32 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 32 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: center-divider (32x32) ---
+const sprite_center_divider = (function() {
+  var colors = {
+    'base': '#0D0D1A',
+    'highlight': '#3A3A6E',
+    'shadow': '#050510',
+    'accent': '#FFFFFF',
+    'secondary': '#B0BEC5'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(32, 32);
+
+  // Draw
+  (function(pc, pal) {
+    
+// Get color indices
+const baseColor = pal.groups.base.startIdx;
+const highlightColor = pal.groups.highlight.startIdx;
+const shadowColor = pal.groups.shadow.startIdx;
+const accentColor = pal.groups.accent.startIdx;
+const secondaryColor = pal.groups.secondary.startIdx;
+
+// Fill entire background with base color
+pc.fillRect(0, 0, 32, 32, baseColor + 0);
+
+// Add texture variation with noise for natural tiling
+pc.scatterNoise(0, 0, 32, 32, baseColor + 1, 0.12);
+pc.scatterNoise(0, 0, 32, 32, shadowColor + 0, 0.1);
+pc.scatterNoise(0, 0, 32, 32, highlightColor + 0, 0.05);
+
+// Dash parameters - centered vertical rectangle
+const dashX = 14;
+const dashY = 9;
+const dashW = 4;
+const dashH = 14;
+
+// Draw the main white dash
+pc.fillRect(dashX, dashY, dashW, dashH, accentColor + 0);
+
+// Draw cool-gray shadow 1px to the right
+pc.fillRect(dashX + dashW, dashY, 1, dashH, secondaryColor + 1);
+
+// Add subtle left edge definition to dash for depth
+pc.vline(dashX, dashY, dashH, accentColor + 2);
+
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 32; cvs.height = 32;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(32, 32);
+  for (var y = 0; y < 32; y++) {
+    for (var x = 0; x < 32; x++) {
+      var idx = pc.pixels[y * 32 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 32 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: score-panel (48x32) ---
+const sprite_score_panel = (function() {
+  var colors = {
+    'base': '#12122A',
+    'highlight': '#1E1E3C',
+    'shadow': '#080815',
+    'accent': '#00D4FF',
+    'digit': '#FFFFFF',
+    'inactive': '#2A2A4A'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(48, 32);
+
+  // Draw
+  (function(pc, pal) {
+    const baseIdx = pal.groups.base.startIdx;
+const highlightIdx = pal.groups.highlight.startIdx;
+const shadowIdx = pal.groups.shadow.startIdx;
+const accentIdx = pal.groups.accent.startIdx;
+const inactiveIdx = pal.groups.inactive.startIdx;
+
+// Fill entire canvas with dark navy background
+pc.fillRect(0, 0, 48, 32, baseIdx);
+
+// Draw 2px cyan outer border
+pc.hline(0, 0, 48, accentIdx);
+pc.hline(0, 1, 48, accentIdx);
+pc.hline(0, 30, 48, accentIdx);
+pc.hline(0, 31, 48, accentIdx);
+pc.vline(0, 0, 32, accentIdx);
+pc.vline(1, 0, 32, accentIdx);
+pc.vline(46, 0, 32, accentIdx);
+pc.vline(47, 0, 32, accentIdx);
+
+// Draw 1px inset bevel (lighter highlight on top/left, darker shadow on bottom/right)
+pc.hline(2, 2, 44, highlightIdx);
+pc.vline(2, 2, 28, highlightIdx);
+pc.hline(2, 29, 44, shadowIdx);
+pc.vline(45, 2, 28, shadowIdx);
+
+// Seven-segment digit display
+const hSegW = 12;
+const hSegH = 2;
+const vSegW = 2;
+const vSegH = 8;
+
+// Segment positions
+const aX = 12, aY = 4;   // A: top
+const bX = 26, bY = 6;   // B: top right
+const cX = 26, cY = 14;  // C: bottom right
+const dX = 12, dY = 22;  // D: bottom
+const eX = 10, eY = 14;  // E: bottom left
+const fX = 10, fY = 6;   // F: top left
+const gX = 12, gY = 13;  // G: middle
+
+// Draw inactive segments (dim indigo) - B and E off
+pc.fillRect(bX, bY, vSegW, vSegH, inactiveIdx);
+pc.fillRect(eX, eY, vSegW, vSegH, inactiveIdx);
+
+// Draw active segments (bright cyan glow) - A, C, D, F, G on (digit "5")
+pc.fillRect(aX, aY, hSegW, hSegH, accentIdx);
+pc.fillRect(cX, cY, vSegW, vSegH, accentIdx);
+pc.fillRect(dX, dY, hSegW, hSegH, accentIdx);
+pc.fillRect(fX, fY, vSegW, vSegH, accentIdx);
+pc.fillRect(gX, gY, hSegW, hSegH, accentIdx);
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 48; cvs.height = 32;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(48, 32);
+  for (var y = 0; y < 32; y++) {
+    for (var x = 0; x < 48; x++) {
+      var idx = pc.pixels[y * 48 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 48 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+// === MECHANICS ===
+
+// Entity array normalizer — contract enforcement
+function _toEntityArray(arg) {
+  if (Array.isArray(arg)) return arg;
+  if (arg && typeof arg === 'object') {
+    if (Array.isArray(arg.entities)) return arg.entities;
+    if (Array.isArray(arg.sprites)) return arg.sprites;
+    return [arg];
+  }
+  return [];
+}
+// --- Mechanic: BallPhysics ---
+class BallPhysics {
+  constructor(entities) {
+    this.entities = entities;
+
+    this.ball         = entities.find(e => e.type === 'game-ball');
+    this.playerPaddle = entities.find(e => e.type === 'player-paddle');
+    this.opponentPaddle = entities.find(e => e.type === 'opponent-paddle');
+    this.walls        = entities.filter(e => e.type === 'boundary-wall');
+    this.divider      = entities.find(e => e.type === 'center-divider');
+    this.scorePanel   = entities.find(e => e.type === 'score-panel');
+
+    /* ── Ball velocity ─────────────────────────────────────────── */
+    const startAngle  = (Math.random() * 40 - 20) * Math.PI / 180;
+    const startDir    = Math.random() < 0.5 ? 1 : -1;
+    this.ballVX       = Math.cos(startAngle) * 280 * S * startDir;
+    this.ballVY       = Math.sin(startAngle) * 280 * S;
+
+    /* ── Scores ────────────────────────────────────────────────── */
+    this.playerScore   = 0;
+    this.opponentScore = 0;
+
+    /* ── Ball trail ────────────────────────────────────────────── */
+    this.trail    = [];
+    this.maxTrail = 14;
+
+    /* ── Speed escalation ──────────────────────────────────────── */
+    this.hitCount        = 0;
+    this.speedMultiplier = 1.0;
+    this.baseSpeed       = 280 * S;
+
+    /* ── Reset state ───────────────────────────────────────────── */
+    this.isResetting = false;
+    this.resetTimer  = 0;
+
+    /* ── Visual feedback ───────────────────────────────────────── */
+    this.flashTimer  = 0;
+    this.flashSide   = null;      // 'player' | 'opponent' | 'wall'
+    this.scoreFlash  = { timer: 0, side: null };
+    this.particles   = [];
+
+    /* ── Input ─────────────────────────────────────────────────── */
+    this.keys    = {};
+    this.targetY = null;          // mouse/touch Y for player paddle
+
+    /* ── AI tuning ─────────────────────────────────────────────── */
+    this.aiSpeed     = 260 * S;
+    this.paddleSpeed = 340 * S;
+
+    /* ── Place ball at centre ──────────────────────────────────── */
+    if (this.ball) {
+      this.ball.x = W / 2;
+      this.ball.y = H / 2;
+    }
+  }
+
+  /* ── Helpers ─────────────────────────────────────────────────── */
+  _resetBall() {
+    if (!this.ball) return;
+    this.ball.x = W / 2;
+    this.ball.y = H / 2;
+    this.trail       = [];
+    this.hitCount    = 0;
+    this.speedMultiplier = 1.0;
+    const angle = (Math.random() * 40 - 20) * Math.PI / 180;
+    const dir   = Math.random() < 0.5 ? 1 : -1;
+    this.ballVX = Math.cos(angle) * this.baseSpeed * dir;
+    this.ballVY = Math.sin(angle) * this.baseSpeed;
+  }
+
+  _applySpeedMultiplier() {
+    const spd = Math.hypot(this.ballVX, this.ballVY);
+    if (spd === 0) return;
+    const target = this.baseSpeed * this.speedMultiplier;
+    this.ballVX = (this.ballVX / spd) * target;
+    this.ballVY = (this.ballVY / spd) * target;
+  }
+
+  _emitParticles(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = (60 + Math.random() * 120) * S;
+      this.particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 0.4 + Math.random() * 0.3,
+        maxLife: 0.4 + Math.random() * 0.3,
+        r: (3 + Math.random() * 4) * S,
+        color
+      });
+    }
+  }
+
+  _rectContainsCircle(cx, cy, cr, rx, ry, rw, rh) {
+    const nearX = Math.max(rx, Math.min(cx, rx + rw));
+    const nearY = Math.max(ry, Math.min(cy, ry + rh));
+    return Math.hypot(cx - nearX, cy - nearY) < cr;
+  }
+
+  /* ── Update ──────────────────────────────────────────────────── */
+  update(dt) {
+    const events = [];
+    if (!this.ball) return events;
+
+    /* Score flash decay */
+    if (this.scoreFlash.timer > 0) this.scoreFlash.timer -= dt;
+    if (this.flashTimer > 0)        this.flashTimer       -= dt;
+
+    /* Particle update */
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.x    += p.vx * dt;
+      p.y    += p.vy * dt;
+      p.life -= dt;
+      if (p.life <= 0) this.particles.splice(i, 1);
+    }
+
+    /* Reset countdown */
+    if (this.isResetting) {
+      this.resetTimer -= dt;
+      if (this.resetTimer <= 0) {
+        this.isResetting = false;
+        this._resetBall();
+      }
+      return events;
+    }
+
+    /* ── Player paddle movement ──────────────────────────────── */
+    const pp = this.playerPaddle;
+    if (pp) {
+      const halfH = (pp.height || 80 * S) / 2;
+      const up    = this.keys['ArrowUp']   || this.keys['KeyW'] || this.keys['w'];
+      const down  = this.keys['ArrowDown'] || this.keys['KeyS'] || this.keys['s'];
+      if (up)   pp.y -= this.paddleSpeed * dt;
+      if (down) pp.y += this.paddleSpeed * dt;
+
+      if (this.targetY !== null && !up && !down) {
+        const diff = this.targetY - pp.y;
+        const step = this.paddleSpeed * dt;
+        pp.y += Math.abs(diff) < step ? diff : Math.sign(diff) * step;
+      }
+      pp.y = Math.max(halfH, Math.min(H - halfH, pp.y));
+    }
+
+    /* ── Opponent AI ─────────────────────────────────────────── */
+    const op = this.opponentPaddle;
+    if (op) {
+      const halfH = (op.height || 80 * S) / 2;
+      /* Predict: track ball only when heading toward opponent */
+      const targetY = this.ballVX > 0
+        ? this.ball.y + (this.ballVY / (this.ballVX || 1)) * (op.x - this.ball.x) * 0.85
+        : H / 2;
+      const diff    = targetY - op.y;
+      const step    = Math.min(Math.abs(diff), this.aiSpeed * dt);
+      op.y         += Math.sign(diff) * step;
+      op.y          = Math.max(halfH, Math.min(H - halfH, op.y));
+    }
+
+    /* ── Move ball ───────────────────────────────────────────── */
+    this.ball.x += this.ballVX * dt;
+    this.ball.y += this.ballVY * dt;
+
+    /* Trail */
+    this.trail.push({ x: this.ball.x, y: this.ball.y });
+    if (this.trail.length > this.maxTrail) this.trail.shift();
+
+    const ballR  = (this.ball.width  || 16 * S) / 2;
+    const bx     = this.ball.x;
+    const by     = this.ball.y;
+
+    /* ── Wall bounds ──────────────────────────────────────────── */
+    let topBound    = ballR;
+    let bottomBound = H - ballR;
+
+    for (const w of this.walls) {
+      const wh = w.height || 10 * S;
+      if (w.y < H / 2) topBound    = Math.max(topBound,    w.y + wh + ballR);
+      else              bottomBound = Math.min(bottomBound, w.y        - ballR);
+    }
+
+    if (this.ball.y <= topBound) {
+      this.ball.y    = topBound;
+      this.ballVY    = Math.abs(this.ballVY);
+      this.flashTimer = 0.12;
+      this.flashSide  = 'wall';
+      this._emitParticles(this.ball.x, topBound, '#88ddff', 6);
+      events.push({ type: 'state', key: 'ballBounce', value: 'top' });
+    }
+    if (this.ball.y >= bottomBound) {
+      this.ball.y    = bottomBound;
+      this.ballVY    = -Math.abs(this.ballVY);
+      this.flashTimer = 0.12;
+      this.flashSide  = 'wall';
+      this._emitParticles(this.ball.x, bottomBound, '#88ddff', 6);
+      events.push({ type: 'state', key: 'ballBounce', value: 'bottom' });
+    }
+
+    /* ── Paddle collisions ───────────────────────────────────── */
+    if (pp && this.ballVX < 0) {
+      const pw = pp.width  || 14 * S;
+      const ph = pp.height || 80 * S;
+      const rx = pp.x - pw / 2;
+      const ry = pp.y - ph / 2;
+      if (this._rectContainsCircle(this.ball.x, this.ball.y, ballR, rx, ry, pw, ph)) {
+        this.ball.x   = rx + pw + ballR + 1;
+        const rel     = Math.max(-1, Math.min(1, (this.ball.y - pp.y) / (ph / 2)));
+        this.ballVX   =  Math.abs(this.ballVX);
+        this.ballVY   = rel * 320 * S;
+        this.hitCount++;
+        this.speedMultiplier = Math.min(2.4, 1.0 + this.hitCount * 0.08);
+        this._applySpeedMultiplier();
+        this.flashTimer = 0.22;
+        this.flashSide  = 'player';
+        this._emitParticles(this.ball.x, this.ball.y, '#44ffcc', 10);
+        events.push({ type: 'state', key: 'ballHit', value: 'player' });
+      }
+    }
+
+    if (op && this.ballVX > 0) {
+      const ow = op.width  || 14 * S;
+      const oh = op.height || 80 * S;
+      const rx = op.x - ow / 2;
+      const ry = op.y - oh / 2;
+      if (this._rectContainsCircle(this.ball.x, this.ball.y, ballR, rx, ry, ow, oh)) {
+        this.ball.x   = rx - ballR - 1;
+        const rel     = Math.max(-1, Math.min(1, (this.ball.y - op.y) / (oh / 2)));
+        this.ballVX   = -Math.abs(this.ballVX);
+        this.ballVY   = rel * 320 * S;
+        this.hitCount++;
+        this.speedMultiplier = Math.min(2.4, 1.0 + this.hitCount * 0.08);
+        this._applySpeedMultiplier();
+        this.flashTimer = 0.22;
+        this.flashSide  = 'opponent';
+        this._emitParticles(this.ball.x, this.ball.y, '#ff8844', 10);
+        events.push({ type: 'state', key: 'ballHit', value: 'opponent' });
+      }
+    }
+
+    /* ── Scoring ─────────────────────────────────────────────── */
+    if (this.ball.x + ballR < 0) {
+      this.opponentScore++;
+      this.scoreFlash = { timer: 1.8, side: 'opponent' };
+      this._emitParticles(W * 0.25, H / 2, '#ff4455', 20);
+      events.push({ type: 'score',  value: this.opponentScore });
+      events.push({ type: 'state',  key: 'scorer',        value: 'opponent' });
+      events.push({ type: 'state',  key: 'opponentScore', value: this.opponentScore });
+      this.isResetting = true;
+      this.resetTimer  = 1.8;
+    } else if (this.ball.x - ballR > W) {
+      this.playerScore++;
+      this.scoreFlash = { timer: 1.8, side: 'player' };
+      this._emitParticles(W * 0.75, H / 2, '#44ff88', 20);
+      events.push({ type: 'score',  value: this.playerScore });
+      events.push({ type: 'state',  key: 'scorer',      value: 'player' });
+      events.push({ type: 'state',  key: 'playerScore', value: this.playerScore });
+      this.isResetting = true;
+      this.resetTimer  = 1.8;
+    }
+
+    return events;
+  }
+
+  /* ── Draw ────────────────────────────────────────────────────── */
+  draw(ctx) {
+    /* ── Center divider dashes ─────────────────────────────────── */
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth   = 3 * S;
+    ctx.setLineDash([18 * S, 14 * S]);
+    ctx.beginPath();
+    ctx.moveTo(W / 2, 0);
+    ctx.lineTo(W / 2, H);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    /* ── Ball trail ────────────────────────────────────────────── */
+    if (this.ball && this.trail.length > 1 && !this.isResetting) {
+      const ballR = (this.ball.width || 16 * S) / 2;
+      for (let i = 1; i < this.trail.length; i++) {
+        const frac  = i / this.trail.length;
+        const alpha = frac * 0.55;
+        const r     = ballR * frac * 0.75;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle   = '#00d4ff';
+        ctx.beginPath();
+        ctx.arc(this.trail[i].x, this.trail[i].y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    /* ── Ball glow ─────────────────────────────────────────────── */
+    if (this.ball && !this.isResetting) {
+      const ballR = (this.ball.width || 16 * S) / 2;
+      const spd   = Math.hypot(this.ballVX, this.ballVY);
+      const max   = this.baseSpeed * 2.4;
+      const t     = Math.min(spd / max, 1);
+      const glowR = ballR + 12 * S * t;
+      const grad  = ctx.createRadialGradient(
+        this.ball.x, this.ball.y, ballR * 0.5,
+        this.ball.x, this.ball.y, glowR
+      );
+      grad.addColorStop(0, `rgba(0,220,255,${0.55 * t})`);
+      grad.addColorStop(1, 'rgba(0,220,255,0)');
+      ctx.save();
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(this.ball.x, this.ball.y, glowR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      /* Speed arc indicator */
+      ctx.save();
+      ctx.strokeStyle = `hsl(${(1 - t) * 120},100%,62%)`;
+      ctx.lineWidth   = 2.5 * S;
+      ctx.globalAlpha = 0.75;
+      ctx.beginPath();
+      ctx.arc(this.ball.x, this.ball.y, ballR + 6 * S, -Math.PI / 2,
+              -Math.PI / 2 + Math.PI * 2 * t);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    /* ── Paddle collision flash / glow ─────────────────────────── */
+    if (this.flashTimer > 0) {
+      const a    = (this.flashTimer / 0.22) * 0.7;
+      const pads = this.flashSide === 'player'   ? [this.playerPaddle]   :
+                   this.flashSide === 'opponent' ? [this.opponentPaddle] : [];
+      for (const pad of pads) {
+        if (!pad) continue;
+        const pw   = pad.width  || 14 * S;
+        const ph   = pad.height || 80 * S;
+        const color = this.flashSide === 'player' ? '#44ffcc' : '#ff8844';
+        const grad  = ctx.createRadialGradient(pad.x, pad.y, 0, pad.x, pad.y, pw * 5);
+        grad.addColorStop(0, color.replace(')', `,${a})`).replace('rgb', 'rgba'));
+        grad.addColorStop(0, `rgba(255,255,255,${a})`);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.save();
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(pad.x, pad.y, pw * 4, ph * 1.1, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    /* ── Particles ─────────────────────────────────────────────── */
+    for (const p of this.particles) {
+      const a = p.life / p.maxLife;
+      ctx.save();
+      ctx.globalAlpha = a * 0.9;
+      ctx.fillStyle   = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * a, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    /* ── Score display ─────────────────────────────────────────── */
+    const fontSize = Math.round(52 * S);
+    ctx.save();
+    ctx.font         = `bold ${fontSize}px 'Courier New', monospace`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowBlur   = 12 * S;
+
+    /* Player score */
+    const pflash  = this.scoreFlash.side === 'player'   && this.scoreFlash.timer > 0;
+    const oflash  = this.scoreFlash.side === 'opponent' && this.scoreFlash.timer > 0;
+    ctx.shadowColor = pflash ? '#44ff88' : 'transparent';
+    ctx.fillStyle   = pflash
+      ? `rgba(100,255,150,${Math.min(1, this.scoreFlash.timer)})`
+      : 'rgba(255,255,255,0.28)';
+    ctx.fillText(this.playerScore, W * 0.25, 58 * S);
+
+    /* Opponent score */
+    ctx.shadowColor = oflash ? '#ff4455' : 'transparent';
+    ctx.fillStyle   = oflash
+      ? `rgba(255,100,110,${Math.min(1, this.scoreFlash.timer)})`
+      : 'rgba(255,255,255,0.28)';
+    ctx.fillText(this.opponentScore, W * 0.75, 58 * S);
+    ctx.restore();
+
+    /* ── Speed multiplier badge ────────────────────────────────── */
+    if (!this.isResetting && this.speedMultiplier > 1.15) {
+      const t   = (this.speedMultiplier - 1.0) / 1.4;
+      const hue = (1 - t) * 120;
+      ctx.save();
+      ctx.font         = `bold ${13 * S}px monospace`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle    = `hsl(${hue},100%,65%)`;
+      ctx.globalAlpha  = 0.88;
+      ctx.fillText(`${this.speedMultiplier.toFixed(1)}×`, W / 2, 18 * S);
+      ctx.restore();
+    }
+
+    /* ── Reset / countdown overlay ─────────────────────────────── */
+    if (this.isResetting) {
+      const t      = Math.ceil(this.resetTimer);
+      const pulse  = 0.5 + 0.5 * Math.sin(this.resetTimer * Math.PI * 2);
+      const label  = this.resetTimer < 0.6 ? 'GO!' : String(t);
+      ctx.save();
+      ctx.font         = `bold ${72 * S}px 'Courier New', monospace`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle    = `rgba(255,255,255,${0.35 + 0.55 * pulse})`;
+      ctx.shadowColor  = 'rgba(0,200,255,0.6)';
+      ctx.shadowBlur   = 20 * S;
+      ctx.fillText(label, W / 2, H / 2);
+      ctx.restore();
+    }
+  }
+
+  /* ── handleInput ─────────────────────────────────────────────── */
+  handleInput(type, data) {
+    if (type === 'keydown') {
+      if (data.code) this.keys[data.code] = true;
+      if (data.key)  this.keys[data.key]  = true;
+    } else if (type === 'keyup') {
+      if (data.code) this.keys[data.code] = false;
+      if (data.key)  this.keys[data.key]  = false;
+    } else if (type === 'click' || type === 'touchstart') {
+      if (data.y !== undefined) this.targetY = data.y;
+    }
+  }
+}
+
+
+// --- Mechanic: PaddleControl ---
+class PaddleControl {
+  constructor(entities) {
+    this.entities = entities;
+
+    this.playerPaddle   = entities.find(e => e.type === 'player-paddle')   || null;
+    this.opponentPaddle = entities.find(e => e.type === 'opponent-paddle') || null;
+    this.ball           = entities.find(e => e.type === 'game-ball')        || null;
+    this.divider        = entities.find(e => e.type === 'center-divider')   || null;
+    this.scorePanel     = entities.find(e => e.type === 'score-panel')      || null;
+    this.walls          = entities.filter(e => e.type === 'boundary-wall');
+
+    // Scores
+    this.playerScore   = 0;
+    this.opponentScore = 0;
+
+    // Ball velocity
+    this.baseSpeedX = 300 * S;
+    this.ballVX     = 300 * S;
+    this.ballVY     = 200 * S;
+
+    // AI opponent tracking speed
+    this.aiSpeed     = 280 * S;
+    this.paddleSpeed = 420 * S;
+
+    // Keyboard state
+    this.keysDown = {};
+
+    // Mouse / touch target Y for player paddle
+    this.targetY = this.playerPaddle ? this.playerPaddle.y : H / 2;
+
+    // Ball trail ring-buffer
+    this.trail    = [];
+    this.maxTrail = 14;
+
+    // Post-score reset state
+    this.resetTimer = 0;
+    this.resetDelay = 1.2;
+
+    // Flash overlay after scoring
+    this.flashTimer = 0;
+    this.flashSide  = null; // 'player' | 'opponent'
+
+    // Rally counter (drives speed ramp)
+    this.rallyCount = 0;
+
+    // Pulse animation for paddles
+    this.pulseTime = 0;
+  }
+
+  // ── Private helpers ──────────────────────────────────────────────────────────
+
+  _resetBall(dirSign) {
+    if (!this.ball) return;
+    this.ball.x  = W / 2;
+    this.ball.y  = H / 2;
+    this.ballVX  = this.baseSpeedX * dirSign;
+    this.ballVY  = (Math.random() * 180 * S + 80 * S) * (Math.random() < 0.5 ? 1 : -1);
+    this.rallyCount = 0;
+    this.trail   = [];
+  }
+
+  _rectOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+  }
+
+  // ── Public API ───────────────────────────────────────────────────────────────
+
+  update(dt) {
+    const events = [];
+    if (!this.ball || !this.playerPaddle || !this.opponentPaddle) return events;
+
+    this.pulseTime += dt;
+
+    // ── Reset cooldown after a point ──────────────────────────────────────────
+    if (this.resetTimer > 0) {
+      this.resetTimer -= dt;
+      if (this.flashTimer > 0) this.flashTimer -= dt;
+      if (this.resetTimer <= 0) {
+        this.resetTimer = 0;
+        // Ball launches toward the side that just conceded
+        const dir = this.flashSide === 'player' ? 1 : -1;
+        this._resetBall(dir);
+      }
+      return events;
+    }
+
+    if (this.flashTimer > 0) this.flashTimer -= dt;
+
+    const b  = this.ball;
+    const pp = this.playerPaddle;
+    const op = this.opponentPaddle;
+
+    const bHW = b.width  / 2;
+    const bHH = b.height / 2;
+
+    // ── Player paddle – keyboard ──────────────────────────────────────────────
+    if (this.keysDown['ArrowUp']   || this.keysDown['KeyW']) this.targetY -= this.paddleSpeed * dt;
+    if (this.keysDown['ArrowDown'] || this.keysDown['KeyS']) this.targetY += this.paddleSpeed * dt;
+    this.targetY = Math.max(pp.height / 2, Math.min(H - pp.height / 2, this.targetY));
+
+    // Lerp toward targetY
+    const ppDy = this.targetY - pp.y;
+    pp.y += Math.sign(ppDy) * Math.min(Math.abs(ppDy), this.paddleSpeed * dt);
+    pp.y  = Math.max(pp.height / 2, Math.min(H - pp.height / 2, pp.y));
+
+    // ── Opponent paddle – AI tracks ball ─────────────────────────────────────
+    const aiDy = b.y - op.y;
+    op.y += Math.sign(aiDy) * Math.min(Math.abs(aiDy), this.aiSpeed * dt);
+    op.y  = Math.max(op.height / 2, Math.min(H - op.height / 2, op.y));
+
+    // ── Ball movement ─────────────────────────────────────────────────────────
+    b.x += this.ballVX * dt;
+    b.y += this.ballVY * dt;
+
+    // Trail
+    this.trail.push({ x: b.x, y: b.y });
+    if (this.trail.length > this.maxTrail) this.trail.shift();
+
+    // ── Top / bottom wall bounce ──────────────────────────────────────────────
+    if (b.y - bHH <= 0) {
+      b.y      = bHH;
+      this.ballVY = Math.abs(this.ballVY);
+    } else if (b.y + bHH >= H) {
+      b.y      = H - bHH;
+      this.ballVY = -Math.abs(this.ballVY);
+    }
+
+    // ── Player paddle collision ───────────────────────────────────────────────
+    const ppL = pp.x - pp.width / 2;
+    const ppR = pp.x + pp.width / 2;
+    const ppT = pp.y - pp.height / 2;
+    const ppB = pp.y + pp.height / 2;
+
+    if (this.ballVX < 0 &&
+        this._rectOverlap(b.x - bHW, b.y - bHH, b.width, b.height,
+                          ppL, ppT, pp.width, pp.height)) {
+      b.x = ppR + bHW;
+      const speedMult = 1.04 + Math.min(this.rallyCount * 0.005, 0.15);
+      this.ballVX  = Math.abs(this.ballVX) * speedMult;
+      const offset = (b.y - pp.y) / (pp.height / 2);
+      this.ballVY  = offset * 360 * S;
+      this.rallyCount++;
+      events.push({ type: 'state', key: 'rally', value: this.rallyCount });
+    }
+
+    // ── Opponent paddle collision ─────────────────────────────────────────────
+    const opL = op.x - op.width / 2;
+    const opR = op.x + op.width / 2;
+    const opT = op.y - op.height / 2;
+    const opB = op.y + op.height / 2;
+
+    if (this.ballVX > 0 &&
+        this._rectOverlap(b.x - bHW, b.y - bHH, b.width, b.height,
+                          opL, opT, op.width, op.height)) {
+      b.x = opL - bHW;
+      const speedMult = 1.04 + Math.min(this.rallyCount * 0.005, 0.15);
+      this.ballVX  = -Math.abs(this.ballVX) * speedMult;
+      const offset = (b.y - op.y) / (op.height / 2);
+      this.ballVY  = offset * 360 * S;
+      this.rallyCount++;
+      events.push({ type: 'state', key: 'rally', value: this.rallyCount });
+    }
+
+    // Cap ball speed
+    const maxSpd = 820 * S;
+    if (Math.abs(this.ballVX) > maxSpd) this.ballVX = Math.sign(this.ballVX) * maxSpd;
+    if (Math.abs(this.ballVY) > maxSpd) this.ballVY = Math.sign(this.ballVY) * maxSpd;
+
+    // ── Scoring ───────────────────────────────────────────────────────────────
+    if (b.x + bHW < 0) {
+      // Ball exited left → opponent scores
+      this.opponentScore++;
+      this.flashSide  = 'opponent';
+      this.flashTimer = 0.6;
+      this.resetTimer = this.resetDelay;
+      events.push({ type: 'score', value: this.opponentScore });
+      events.push({ type: 'state', key: 'opponentScore', value: this.opponentScore });
+    } else if (b.x - bHW > W) {
+      // Ball exited right → player scores
+      this.playerScore++;
+      this.flashSide  = 'player';
+      this.flashTimer = 0.6;
+      this.resetTimer = this.resetDelay;
+      events.push({ type: 'score', value: this.playerScore });
+      events.push({ type: 'state', key: 'playerScore', value: this.playerScore });
+    }
+
+    return events;
+  }
+
+  draw(ctx) {
+    if (!this.ball || !this.playerPaddle || !this.opponentPaddle) return;
+
+    const b  = this.ball;
+    const pp = this.playerPaddle;
+    const op = this.opponentPaddle;
+
+    // ── Ball trail ────────────────────────────────────────────────────────────
+    for (let i = 0; i < this.trail.length; i++) {
+      const t      = this.trail[i];
+      const frac   = (i + 1) / this.trail.length;
+      const radius = Math.max(1, (b.width / 2) * frac * 0.85);
+      ctx.save();
+      ctx.globalAlpha = frac * 0.45;
+      ctx.fillStyle   = `hsl(${185 + (1 - frac) * 60}, 100%, 65%)`;
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ── Paddle glows ──────────────────────────────────────────────────────────
+    const pulse = 0.7 + 0.3 * Math.sin(this.pulseTime * 4);
+
+    ctx.save();
+    ctx.shadowColor = '#00e5ff';
+    ctx.shadowBlur  = 22 * S * pulse;
+    ctx.strokeStyle = '#00e5ff';
+    ctx.lineWidth   = 2.5 * S;
+    ctx.strokeRect(pp.x - pp.width / 2, pp.y - pp.height / 2, pp.width, pp.height);
+    ctx.restore();
+
+    ctx.save();
+    ctx.shadowColor = '#ff4081';
+    ctx.shadowBlur  = 22 * S * pulse;
+    ctx.strokeStyle = '#ff4081';
+    ctx.lineWidth   = 2.5 * S;
+    ctx.strokeRect(op.x - op.width / 2, op.y - op.height / 2, op.width, op.height);
+    ctx.restore();
+
+    // ── Ball glow ─────────────────────────────────────────────────────────────
+    ctx.save();
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur  = 16 * S;
+    ctx.fillStyle   = '#00e5ff';
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.width / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // ── Center divider dashes ─────────────────────────────────────────────────
+    const dashLen = 12 * S;
+    const dashGap = 10 * S;
+    ctx.save();
+    ctx.setLineDash([dashLen, dashGap]);
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth   = 3 * S;
+    ctx.beginPath();
+    ctx.moveTo(W / 2, 0);
+    ctx.lineTo(W / 2, H);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // ── Score display ─────────────────────────────────────────────────────────
+    ctx.save();
+    ctx.font         = `bold ${52 * S}px monospace`;
+    ctx.textBaseline = 'top';
+    ctx.textAlign    = 'center';
+    ctx.fillStyle    = 'rgba(0,229,255,0.88)';
+    ctx.fillText(String(this.playerScore),   W * 0.25, 16 * S);
+    ctx.fillStyle    = 'rgba(255,64,129,0.88)';
+    ctx.fillText(String(this.opponentScore), W * 0.75, 16 * S);
+    ctx.restore();
+
+    // ── Ball-speed bar ────────────────────────────────────────────────────────
+    const speed  = Math.hypot(this.ballVX, this.ballVY);
+    const maxSpd = 820 * S;
+    const fill   = Math.min(speed / maxSpd, 1);
+    const barW   = 130 * S;
+    const barH   = 6  * S;
+    const barX   = W / 2 - barW / 2;
+    const barY   = H - 16 * S;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barW, barH, 3 * S);
+    ctx.fill();
+
+    const grad = ctx.createLinearGradient(barX, barY, barX + barW, barY);
+    grad.addColorStop(0, '#00e5ff');
+    grad.addColorStop(1, '#ff4081');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barW * fill, barH, 3 * S);
+    ctx.fill();
+    ctx.restore();
+
+    // ── Flash overlay on score ────────────────────────────────────────────────
+    if (this.flashTimer > 0) {
+      const alpha = (this.flashTimer / 0.6) * 0.28;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle   = this.flashSide === 'player' ? '#00e5ff' : '#ff4081';
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+
+    // ── Reset countdown label ─────────────────────────────────────────────────
+    if (this.resetTimer > 0) {
+      const label = this.resetTimer > 0.6 ? 'POINT!' : 'Ready…';
+      ctx.save();
+      ctx.globalAlpha  = Math.min(1, this.resetTimer / 0.4);
+      ctx.font         = `bold ${32 * S}px monospace`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle    = '#ffffff';
+      ctx.shadowColor  = '#000000';
+      ctx.shadowBlur   = 8 * S;
+      ctx.fillText(label, W / 2, H / 2);
+      ctx.restore();
+    }
+
+    // ── Rally indicator (top-center) ─────────────────────────────────────────
+    if (this.rallyCount > 2) {
+      ctx.save();
+      ctx.font         = `${13 * S}px monospace`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle    = `rgba(255,255,255,${0.4 + 0.3 * Math.sin(this.pulseTime * 6)})`;
+      ctx.fillText(`RALLY ×${this.rallyCount}`, W / 2, 78 * S);
+      ctx.restore();
+    }
+  }
+
+  handleInput(type, data) {
+    const { x, y, code, key } = data || {};
+
+    if (type === 'keydown') {
+      if (code) this.keysDown[code] = true;
+      if (key)  this.keysDown[key]  = true;
+    }
+
+    if (type === 'keyup') {
+      if (code) this.keysDown[code] = false;
+      if (key)  this.keysDown[key]  = false;
+    }
+
+    if ((type === 'click' || type === 'touchstart') && typeof y === 'number') {
+      this.targetY = y;
+    }
+  }
+}
+
+// === GAME STATE & LAYOUT ===
+
+// ── Entity arrays ──
+const playerEntities = [];
+const enemyEntities  = [];
+const projectiles    = [];
+const propEntities   = [];
+
+// ── Core state variables ──
+let lives           = 20;
+let level           = 1;
+let resources       = 100;
+let gameOver        = false;
+let waveTimer       = 0;
+let spawnTimer      = 0;
+let difficultyTimer = 0;
+let spawnInterval   = 2.5;   // seconds between enemy spawns
+let enemyBaseSpeed  = 80;    // base px/s (scaled by S per enemy)
+let entityIdCounter = 0;
+
+// ── Winding path — 12 waypoints forming an S/Z-shaped route ──
+const path = [
+  { x: 0,          y: H * 0.15 },
+  { x: W * 0.25,   y: H * 0.15 },
+  { x: W * 0.25,   y: H * 0.42 },
+  { x: W * 0.58,   y: H * 0.42 },
+  { x: W * 0.58,   y: H * 0.18 },
+  { x: W * 0.82,   y: H * 0.18 },
+  { x: W * 0.82,   y: H * 0.70 },
+  { x: W * 0.40,   y: H * 0.70 },
+  { x: W * 0.40,   y: H * 0.52 },
+  { x: W * 0.12,   y: H * 0.52 },
+  { x: W * 0.12,   y: H * 0.87 },
+  { x: W + 10,     y: H * 0.87 }
+];
+
+// ── Instantiate mechanic classes ──
+const mechBallPhysics = new BallPhysics(_toEntityArray({
+  sprites: {
+    playerPaddle:   sprite_player_paddle,
+    opponentPaddle: sprite_opponent_paddle,
+    gameBall:       sprite_game_ball,
+    boundaryWall:   sprite_boundary_wall,
+    centerDivider:  sprite_center_divider,
+    scorePanel:     sprite_score_panel
+  },
+  canvasWidth:  W,
+  canvasHeight: H,
+  scale:        S
+}));
+
+const mechPaddleControl = new PaddleControl(_toEntityArray({
+  sprites: {
+    playerPaddle:   sprite_player_paddle,
+    opponentPaddle: sprite_opponent_paddle,
+    gameBall:       sprite_game_ball,
+    boundaryWall:   sprite_boundary_wall,
+    centerDivider:  sprite_center_divider,
+    scorePanel:     sprite_score_panel
+  },
+  canvasWidth:  W,
+  canvasHeight: H,
+  scale:        S
+}));
+
+const mechanics = [mechBallPhysics, mechPaddleControl];
+
+// ── Seed one score-panel prop in the HUD strip ──
+propEntities.push({
+  sprite: sprite_score_panel,
+  x:      W * 0.5 - 24 * S,
+  y:      6 * S,
+  width:  48,
+  height: 32,
+  type:   'score-panel'
+});
+
+
+// === INPUT ===
+
+// ── Mouse click — place turret or restart ──
+canvas.addEventListener('mousedown', function(e) {
+  if (gameOver) { location.reload(); return; }
+  const TURRET_COST = 25;
+  if (resources < TURRET_COST) return;
+  const rect   = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  const x = (e.clientX - rect.left) * scaleX;
+  const y = (e.clientY - rect.top)  * scaleY;
+  resources -= TURRET_COST;
+  playerEntities.push({
+    id:          entityIdCounter++,
+    sprite:      sprite_player_paddle,
+    x:           x - 12 * S,
+    y:           y - 32 * S,
+    width:       24,
+    height:      64,
+    shootTimer:  0,
+    type:        'turret'
+  });
+});
+
+// ── Touch — place turret or restart ──
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  if (gameOver) { location.reload(); return; }
+  const TURRET_COST = 25;
+  if (resources < TURRET_COST) return;
+  const rect   = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  const touch  = e.touches[0];
+  const x = (touch.clientX - rect.left) * scaleX;
+  const y = (touch.clientY - rect.top)  * scaleY;
+  resources -= TURRET_COST;
+  playerEntities.push({
+    id:         entityIdCounter++,
+    sprite:     sprite_player_paddle,
+    x:          x - 12 * S,
+    y:          y - 32 * S,
+    width:      24,
+    height:     64,
+    shootTimer: 0,
+    type:       'turret'
+  });
+}, { passive: false });
+
+// ── Touch move — forward swipe to mechanics ──
+canvas.addEventListener('touchmove', function(e) {
+  e.preventDefault();
+  for (const mech of mechanics) {
+    if (typeof mech.onTouchMove === 'function') mech.onTouchMove(e);
+    if (typeof mech.handleInput === 'function') mech.handleInput({ type: 'touchmove', event: e });
+  }
+}, { passive: false });
+
+// ── Touch end — forward tap-end to mechanics ──
+canvas.addEventListener('touchend', function(e) {
+  e.preventDefault();
+  for (const mech of mechanics) {
+    if (typeof mech.onTouchEnd  === 'function') mech.onTouchEnd(e);
+    if (typeof mech.handleInput === 'function') mech.handleInput({ type: 'touchend', event: e });
+  }
+}, { passive: false });
+
+// ── Keyboard — arrow keys / space forwarded to mechanics; R restarts ──
+window.addEventListener('keydown', function(e) {
+  if (gameOver) {
+    if (e.key === 'r' || e.key === 'R') location.reload();
+    return;
+  }
+  for (const mech of mechanics) {
+    if (typeof mech.onKeyDown   === 'function') mech.onKeyDown(e);
+    if (typeof mech.handleInput === 'function') mech.handleInput(e);
+  }
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+    e.preventDefault();
+  }
+});
+
+
+// === GAME LOOP ===
+let lastTime = 0;
+if (typeof score === 'undefined') var score = 0;
+const scoreEl = document.getElementById('score');
+
+function gameLoop(time) {
+  const dt = Math.min((time - lastTime) / 1000, 0.05);
+  lastTime = time;
+
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, W, H);
+
+  
+// Accumulate timers every frame regardless of gameOver
+waveTimer       += dt;
+spawnTimer      += dt;
+difficultyTimer += dt;
+
+// ── Ramp difficulty every 30 seconds ──
+if (!gameOver && difficultyTimer >= 30) {
+  difficultyTimer = 0;
+  level++;
+  spawnInterval  = Math.max(0.8,  spawnInterval  - 0.2);
+  enemyBaseSpeed = Math.min(200,  enemyBaseSpeed + 12);
+}
+
+// ── Spawn enemy at path start ──
+if (!gameOver && spawnTimer >= spawnInterval) {
+  spawnTimer = 0;
+  const maxHp = 1 + Math.floor(level * 0.5);
+  enemyEntities.push({
+    id:            entityIdCounter++,
+    sprite:        sprite_opponent_paddle,
+    x:             path[0].x - 12 * S,
+    y:             path[0].y - 32 * S,
+    width:         24,
+    height:        64,
+    waypointIndex: 1,
+    speed:         enemyBaseSpeed * S,
+    hp:            maxHp,
+    maxHp:         maxHp
+  });
+}
+
+// ── Move enemies along path waypoints ──
+if (!gameOver) {
+  for (let i = enemyEntities.length - 1; i >= 0; i--) {
+    const enemy = enemyEntities[i];
+    if (enemy.waypointIndex >= path.length) {
+      enemyEntities.splice(i, 1);
+      lives = Math.max(0, lives - 1);
+      if (lives <= 0) gameOver = true;
+      continue;
+    }
+    const wp   = path[enemy.waypointIndex];
+    const cx   = enemy.x + 12 * S;
+    const cy   = enemy.y + 32 * S;
+    const dx   = wp.x - cx;
+    const dy   = wp.y - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 4 * S) {
+      enemy.waypointIndex++;
+    } else {
+      const step = enemy.speed * dt;
+      enemy.x += (dx / dist) * step;
+      enemy.y += (dy / dist) * step;
+    }
+  }
+}
+
+// ── Turret targeting and firing ──
+const shootCooldown = Math.max(0.35, 1.2 - level * 0.05);
+const turretRange   = 160 * S;
+const projSpeed     = 220 * S;
+
+if (!gameOver) {
+  for (const turret of playerEntities) {
+    turret.shootTimer = (turret.shootTimer || 0) + dt;
+    if (turret.shootTimer < shootCooldown) continue;
+
+    let nearest     = null;
+    let nearestDist = Infinity;
+    for (const enemy of enemyEntities) {
+      const dx = (enemy.x + 12 * S) - (turret.x + 12 * S);
+      const dy = (enemy.y + 32 * S) - (turret.y + 32 * S);
+      const d  = Math.sqrt(dx * dx + dy * dy);
+      if (d < turretRange && d < nearestDist) {
+        nearestDist = d;
+        nearest     = enemy;
+      }
+    }
+
+    if (nearest) {
+      turret.shootTimer = 0;
+      const dx = (nearest.x + 12 * S) - (turret.x + 12 * S);
+      const dy = (nearest.y + 32 * S) - (turret.y + 32 * S);
+      const d  = Math.sqrt(dx * dx + dy * dy);
+      projectiles.push({
+        id:     entityIdCounter++,
+        sprite: sprite_game_ball,
+        x:      turret.x + 6 * S,
+        y:      turret.y + 26 * S,
+        width:  24,
+        height: 24,
+        vx:     (dx / d) * projSpeed,
+        vy:     (dy / d) * projSpeed
+      });
+    }
+  }
+}
+
+// ── Move projectiles and resolve enemy hits ──
+for (let i = projectiles.length - 1; i >= 0; i--) {
+  const proj = projectiles[i];
+  proj.x += proj.vx * dt;
+  proj.y += proj.vy * dt;
+
+  let hit = false;
+  for (let j = enemyEntities.length - 1; j >= 0; j--) {
+    const enemy = enemyEntities[j];
+    const dx = (proj.x + 12 * S) - (enemy.x + 12 * S);
+    const dy = (proj.y + 12 * S) - (enemy.y + 32 * S);
+    if (Math.abs(dx) < 18 * S && Math.abs(dy) < 32 * S) {
+      enemy.hp--;
+      hit = true;
+      if (enemy.hp <= 0) {
+        score     += 10 * level;
+        resources += 5;
+        enemyEntities.splice(j, 1);
+      }
+      break;
+    }
+  }
+
+  if (hit || proj.x < -60 || proj.x > W + 60 || proj.y < -60 || proj.y > H + 60) {
+    projectiles.splice(i, 1);
+  }
+}
+
+// ── Update each mechanic and drain its event queue ──
+for (const mech of mechanics) {
+  if (typeof mech.update === 'function') mech.update(dt);
+  if (Array.isArray(mech.events) && mech.events.length > 0) {
+    for (const evt of mech.events) {
+      if (evt.type === 'score')                              score += (evt.value || 10);
+      if (evt.type === 'state' && evt.value === 'gameover') gameOver = true;
+    }
+    mech.events.length = 0;
+  }
+}
+
+
+  
+// ── Clear canvas ──
+ctx.fillStyle = '#111';
+ctx.fillRect(0, 0, W, H);
+
+// ── Terrain tile background (sprite_player_paddle) ──
+const tileW = 24 * S;
+const tileH = 64 * S;
+ctx.globalAlpha = 0.10;
+for (let row = 0; row * tileH < H + tileH; row++) {
+  for (let col = 0; col * tileW < W + tileW; col++) {
+    ctx.drawImage(sprite_player_paddle, col * tileW, row * tileH, tileW, tileH);
+  }
+}
+ctx.globalAlpha = 1;
+
+// ── Path (dirt road, two-pass for depth) ──
+ctx.save();
+ctx.lineCap    = 'round';
+ctx.lineJoin   = 'round';
+ctx.strokeStyle = '#4a2f0a';
+ctx.lineWidth   = 34 * S;
+ctx.beginPath();
+ctx.moveTo(path[0].x, path[0].y);
+for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+ctx.stroke();
+ctx.strokeStyle = '#8B5A2B';
+ctx.lineWidth   = 22 * S;
+ctx.beginPath();
+ctx.moveTo(path[0].x, path[0].y);
+for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+ctx.stroke();
+ctx.restore();
+
+// ── Boundary wall corner decorations (sprite_boundary_wall) ──
+const bwSize = 32 * S;
+ctx.drawImage(sprite_boundary_wall, 0,          50 * S,     bwSize, bwSize);
+ctx.drawImage(sprite_boundary_wall, W - bwSize, 50 * S,     bwSize, bwSize);
+ctx.drawImage(sprite_boundary_wall, 0,          H - bwSize, bwSize, bwSize);
+ctx.drawImage(sprite_boundary_wall, W - bwSize, H - bwSize, bwSize, bwSize);
+
+// ── Center divider marker (sprite_center_divider) ──
+ctx.drawImage(sprite_center_divider, W * 0.5 - 16 * S, H * 0.5 - 16 * S, 32 * S, 32 * S);
+
+// ── Score panel in HUD strip (sprite_score_panel) ──
+ctx.drawImage(sprite_score_panel, W * 0.5 - 24 * S, 5 * S, 48 * S, 32 * S);
+
+// ── Prop entities ──
+for (const prop of propEntities) {
+  ctx.drawImage(prop.sprite, prop.x, prop.y, prop.width * S, prop.height * S);
+}
+
+// ── Enemy entities (sprite_opponent_paddle) ──
+for (const enemy of enemyEntities) {
+  ctx.drawImage(sprite_opponent_paddle, enemy.x, enemy.y, 24 * S, 64 * S);
+  // HP bar
+  const barW    = 24 * S;
+  const hpRatio = enemy.hp / enemy.maxHp;
+  ctx.fillStyle = '#222';
+  ctx.fillRect(enemy.x, enemy.y - 8 * S, barW, 5 * S);
+  ctx.fillStyle = hpRatio > 0.5 ? '#44ee44' : hpRatio > 0.25 ? '#ffaa00' : '#ff3333';
+  ctx.fillRect(enemy.x, enemy.y - 8 * S, barW * hpRatio, 5 * S);
+}
+
+// ── Player turrets (sprite_player_paddle) ──
+for (const turret of playerEntities) {
+  ctx.drawImage(sprite_player_paddle, turret.x, turret.y, 24 * S, 64 * S);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(80, 200, 255, 0.22)';
+  ctx.lineWidth   = 1.5 * S;
+  ctx.beginPath();
+  ctx.arc(turret.x + 12 * S, turret.y + 32 * S, 160 * S, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ── Projectiles (sprite_game_ball) ──
+for (const proj of projectiles) {
+  ctx.drawImage(sprite_game_ball, proj.x, proj.y, 24 * S, 24 * S);
+}
+
+// ── Mechanic visual overlays ──
+for (const mech of mechanics) {
+  if (typeof mech.draw === 'function') mech.draw(ctx);
+}
+
+// ── HUD bar ──
+ctx.fillStyle = 'rgba(0,0,0,0.65)';
+ctx.fillRect(0, 0, W, 42 * S);
+ctx.font         = `bold ${Math.round(18 * S)}px monospace`;
+ctx.textBaseline = 'middle';
+ctx.fillStyle    = '#ff6b6b';
+ctx.textAlign    = 'left';
+ctx.fillText(`\u2665 ${lives}`, 10 * S, 21 * S);
+ctx.fillStyle    = '#ffffff';
+ctx.textAlign    = 'center';
+ctx.fillText(`LVL ${level}  \u2502  Score: ${score}`, W * 0.5, 21 * S);
+ctx.fillStyle    = '#ffd700';
+ctx.textAlign    = 'right';
+ctx.fillText(`\u2605 ${resources}`, W - 10 * S, 21 * S);
+ctx.textBaseline = 'alphabetic';
+ctx.textAlign    = 'left';
+
+// ── Game Over overlay ──
+if (gameOver) {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.78)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = '#ff4444';
+  ctx.font      = `bold ${Math.round(54 * S)}px monospace`;
+  ctx.fillText('GAME OVER', W * 0.5, H * 0.40);
+
+  ctx.fillStyle = '#ffd700';
+  ctx.font      = `${Math.round(26 * S)}px monospace`;
+  ctx.fillText(`Final Score: ${score}`, W * 0.5, H * 0.52);
+
+  ctx.fillStyle = '#cccccc';
+  ctx.font      = `${Math.round(18 * S)}px monospace`;
+  ctx.fillText('Tap / Click to Restart  \u2022  Press R to Reload', W * 0.5, H * 0.63);
+
+  ctx.textAlign = 'left';
+}
+
+
+  scoreEl.textContent = 'Score: ' + score;
+  requestAnimationFrame(gameLoop);
+}
+
+// === BOOT ===
+
+// ── Place 3 additional initial prop / terrain entities ──
+propEntities.push({
+  sprite: sprite_boundary_wall,
+  x:      W * 0.05,
+  y:      H * 0.30,
+  width:  32,
+  height: 32,
+  type:   'boundary-wall'
+});
+
+propEntities.push({
+  sprite: sprite_center_divider,
+  x:      W * 0.88,
+  y:      H * 0.46,
+  width:  32,
+  height: 32,
+  type:   'center-divider'
+});
+
+propEntities.push({
+  sprite: sprite_score_panel,
+  x:      W * 0.08,
+  y:      H * 0.78,
+  width:  48,
+  height: 32,
+  type:   'score-panel'
+});
+
+// ── Verify path integrity ──
+console.assert(
+  path.length >= 4,
+  '[TowerDefense] Path must have at least 4 waypoints, found: ' + path.length
+);
+
+// ── Confirm boot ──
+console.log('Game initialized');
+console.log('Canvas size:', W, 'x', H, '| Scale factor S:', S);
+console.log('Path waypoints:', path.length);
+console.log('Mechanics loaded:', mechanics.length, mechanics.map(m => m.constructor ? m.constructor.name : String(m)));
+console.log('Starting state — Lives:', lives, '| Level:', level, '| Resources:', resources);
+
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

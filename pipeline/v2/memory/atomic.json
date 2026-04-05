@@ -1,0 +1,58 @@
+[
+  {
+    "promptKey": "edgeCrossing",
+    "prompt": "Write a JavaScript function body.\nArguments: x, halfW, canvasW (all numbers).\nIf x - halfW < 0, return \"left\".\nIf x + halfW > canvasW, return \"right\".\nOtherwise return \"\".",
+    "output": "if (x - halfW < 0) return \"left\";\nif (x + halfW > canvasW) return \"right\";\nreturn \"\";",
+    "timestamp": 1774324233801,
+    "runId": "atomic"
+  },
+  {
+    "promptKey": "overlaps",
+    "prompt": "Write a JavaScript function body.\nArguments: ax, ay, aw, ah, bx, by, bw, bh (all numbers).\nThese are center coordinates and dimensions of two rectangles.\nReturn true if they overlap, false otherwise.\nOverlap: Math.abs(ax-bx) < (aw+bw)/2 AND Math.abs(ay-by) < (ah+bh)/2.",
+    "output": "return Math.abs(ax - bx) < (aw + bw) / 2 && Math.abs(ay - by) < (ah + bh) / 2;",
+    "timestamp": 1774324234260,
+    "runId": "atomic"
+  },
+  {
+    "promptKey": "bounceHorizontal",
+    "prompt": "Write a JavaScript function body.\nArguments: obj, wallX, pushDir\n- obj has properties: x (number), vx (number)\n- wallX: the x position to push away from (number)\n- pushDir: 1 or -1, the direction to push (number)\nReverse obj.vx (multiply by -1). Set obj.x = wallX + pushDir * 1.",
+    "output": "obj.vx *= -1;\nobj.x = wallX + pushDir;",
+    "timestamp": 1774324234416,
+    "runId": "atomic"
+  },
+  {
+    "promptKey": "integrate",
+    "prompt": "Write a JavaScript function body.\nArguments: obj, dt\n- obj has properties: x, y, vx, vy (all numbers)\n- dt: time step (number)\nAdd vx*dt to x. Add vy*dt to y.",
+    "output": "obj.x += obj.vx * dt;\nobj.y += obj.vy * dt;",
+    "timestamp": 1774324234740,
+    "runId": "atomic"
+  },
+  {
+    "promptKey": "trackTarget",
+    "prompt": "Write a JavaScript function body.\nArguments: obj, targetY, speed, deadzone\n- obj has properties: y (number), vy (number)\n- targetY: the value to move toward (number)\n- speed: movement speed (number)\n- deadzone: threshold below which no movement occurs (number)\nIf obj.y < targetY - deadzone, set obj.vy = speed.\nIf obj.y > targetY + deadzone, set obj.vy = -speed.\nOtherwise set obj.vy = 0.",
+    "output": "if (obj.y < targetY - deadzone) {\n  obj.vy = speed;\n} else if (obj.y > targetY + deadzone) {\n  obj.vy = -speed;\n} else {\n  obj.vy = 0;\n}",
+    "timestamp": 1774324235604,
+    "runId": "atomic"
+  },
+  {
+    "promptKey": "inputToVelocity",
+    "prompt": "Write a JavaScript function body.\nArguments: obj, speed, upHeld, downHeld\n- obj is an object with a \"vy\" property (number)\n- speed is a number\n- upHeld is a boolean\n- downHeld is a boolean\nSet obj.vy to 0. If upHeld is true, set obj.vy to -speed. If downHeld is true, set obj.vy to speed.",
+    "output": "obj.vy = 0;\nif (upHeld) {\n    obj.vy = -speed;\n}\nif (downHeld) {\n    obj.vy = speed;\n}",
+    "timestamp": 1774324235898,
+    "runId": "atomic"
+  },
+  {
+    "promptKey": "clamp",
+    "prompt": "Write a JavaScript function body.\nArguments: val, min, max (all numbers).\nReturn the value clamped to [min, max].\nIf val < min, return min. If val > max, return max. Otherwise return val.",
+    "output": "return Math.max(min, Math.min(val, max));",
+    "timestamp": 1774324236117,
+    "runId": "atomic"
+  },
+  {
+    "promptKey": "bounceVertical",
+    "prompt": "Write a JavaScript function body.\nArguments: obj, minY, maxY\n- obj has properties: y (number), vy (number)\nIf obj.y < minY: set obj.y = minY, set obj.vy = Math.abs(obj.vy).\nIf obj.y > maxY: set obj.y = maxY, set obj.vy = -Math.abs(obj.vy).",
+    "output": "if (obj.y < minY) {\n  obj.y = minY;\n  obj.vy = Math.abs(obj.vy);\n}\nif (obj.y > maxY) {\n  obj.y = maxY;\n  obj.vy = -Math.abs(obj.vy);\n}",
+    "timestamp": 1774324237000,
+    "runId": "atomic"
+  }
+]

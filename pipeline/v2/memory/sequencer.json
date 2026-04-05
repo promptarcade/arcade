@@ -1,0 +1,53 @@
+[
+  {
+    "promptKey": "6 behaviors",
+    "prompt": "sequence 6 code snippets",
+    "output": {
+      "order": [
+        "code-1",
+        "code-2",
+        "code-6",
+        "code-4",
+        "code-3",
+        "code-5"
+      ],
+      "reasoning": "The execution order follows the standard physics/game loop pattern: (1) Input→Velocity, (2) Alternative/AI velocity control, (3) Velocity→Position integration, (4) Object-object collision response, (5) World boundary constraints, (6) Edge status queries. code-1 sets velocity from input; code-2 can set alternative velocities (AI/target-based); code-6 applies all velocities to update positions; code-4 detects/resolves collisions using updated positions; code-3 enforces boundary constraints and bounce physics on velocities; code-5 queries final positions for edge detection. This ordering ensures velocities are established before position updates, positions are finalized before collision checks, and boundaries are enforced before game-logic queries."
+    },
+    "timestamp": 1774322952080,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "6 behaviors",
+    "prompt": "sequence 6 code snippets",
+    "output": {
+      "order": [
+        "code-1",
+        "code-2",
+        "code-6",
+        "code-4",
+        "code-3",
+        "code-5"
+      ],
+      "reasoning": "The execution order follows the standard physics/game loop pattern: (1) Input→Velocity, (2) Alternative/AI velocity control, (3) Velocity→Position integration, (4) Object collision response, (5) World boundary constraints, (6) Edge status queries. code-1 reads user input (ArrowUp/ArrowDown keys) and writes obj.vy; code-2 reads current position and target and writes alternative obj.vy (AI/target-based control); code-6 reads both velocity components and integrates them to update positions; code-4 reads updated positions and velocities to detect and resolve collisions; code-3 reads newly updated positions and enforces boundary constraints with bounce physics; code-5 only queries final positions for edge status. This ordering ensures velocities are established before position updates, positions are finalized before collision checks, collisions are resolved before boundary enforcement, and status queries happen on the fully updated state."
+    },
+    "timestamp": 1774323219385,
+    "runId": "mesh"
+  },
+  {
+    "promptKey": "6 behaviors",
+    "prompt": "sequence 6 code snippets",
+    "output": {
+      "order": [
+        "code-1",
+        "code-2",
+        "code-6",
+        "code-4",
+        "code-3",
+        "code-5"
+      ],
+      "reasoning": "code-1 reads user input keys and writes obj.vy; code-2 reads current obj.y and targetY, writes alternative obj.vy (overriding code-1) and updated obj.y; code-6 reads obj.vx and obj.vy (set by code-1/code-2) and obj.y (written by code-2), integrates velocities into position updates, writes obj.x and obj.y; code-4 reads updated positions a.x, a.y and velocity a.vx from code-6 output for collision detection, writes a.vx and a.x; code-3 reads updated obj.y from code-6 and obj.vy from code-1/code-2, enforces boundary constraints, writes obj.y and obj.vy; code-5 reads final obj.x written by code-6 for edge status query. Execution order ensures input/alternative control set velocities before integration, position updates from code-6 precede collision and boundary enforcement, and status queries execute on fully updated state."
+    },
+    "timestamp": 1774323453297,
+    "runId": "mesh"
+  }
+]

@@ -1,0 +1,4568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="data:,">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Swarm Tower</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #111; font-family: sans-serif; }
+canvas { display: block; touch-action: none; width: 100vw; height: 100vh; }
+#ui { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; color: #fff; padding: 10px; }
+#score { font-size: 24px; font-weight: bold; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui"><div id="score">Score: 0</div></div>
+<script>
+// Generated code — strict mode disabled for compatibility
+
+// === SPRITE ENGINE ===
+// ============================================================
+// SpriteForge v2 — Tier 3 Pixel-Level Sprite Engine
+// ============================================================
+// Procedural sprite generation with pixel-level rendering,
+// directional shading, tinted outlines, and hue-shifted palettes.
+// Designed for inlining into single-file HTML games.
+//
+// Usage:
+//   const { sheet, animator } = SpriteForge.character({
+//     style: 'chibi',
+//     colors: { skin: '#ffcc99', hair: '#553322', shirt: '#3355aa', ... },
+//     body: { build: 'medium', hair: 'flowing' },
+//     animations: { idle: { frames: 4, speed: 0.2 }, walk: { frames: 6, speed: 0.1 } },
+//   });
+//   // In game loop:
+//   animator.play('walk');
+//   animator.update(dt);
+//   animator.draw(ctx, x, y);
+// ============================================================
+
+
+
+// ============================================================
+// UTILITIES
+// ============================================================
+
+function sf2_makeCanvas(w, h) {
+  // Always use DOM canvas — OffscreenCanvas has drawImage compat issues on file://
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+function sf2_seededRNG(seed) {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function sf2_hashStr(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  return h;
+}
+
+// ============================================================
+// MODULE A: COLOR UTILITIES & RAMP GENERATION
+// ============================================================
+
+function sf2_hexToRGB(hex) {
+  if (typeof hex !== 'string') return hex;
+  hex = hex.replace('#', '');
+  if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return {
+    r: parseInt(hex.slice(0,2), 16),
+    g: parseInt(hex.slice(2,4), 16),
+    b: parseInt(hex.slice(4,6), 16),
+  };
+}
+
+function sf2_rgbToHSL(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return { h: h * 360, s, l };
+}
+
+function sf2_hslToRGB(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  h /= 360;
+  let r, g, b;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+}
+
+function sf2_packRGBA(r, g, b, a) {
+  return ((a & 0xFF) << 24) | ((b & 0xFF) << 16) | ((g & 0xFF) << 8) | (r & 0xFF);
+}
+
+function sf2_unpackRGBA(v) {
+  return { r: v & 0xFF, g: (v >> 8) & 0xFF, b: (v >> 16) & 0xFF, a: (v >> 24) & 0xFF };
+}
+
+const ColorRamp = {
+  // Generate a 4-tone ramp with hue shifting
+  generate(baseHex) {
+    const rgb = sf2_hexToRGB(baseHex);
+    const hsl = sf2_rgbToHSL(rgb.r, rgb.g, rgb.b);
+
+    const deepShadow = sf2_hslToRGB(
+      hsl.h + 20, // cool shift
+      Math.min(1, hsl.s * 0.80),
+      Math.max(0.05, hsl.l * 0.45)
+    );
+    const shadow = sf2_hslToRGB(
+      hsl.h + 10,
+      Math.min(1, hsl.s * 0.90),
+      Math.max(0.08, hsl.l * 0.70)
+    );
+    const base = rgb;
+    const highlight = sf2_hslToRGB(
+      hsl.h - 15, // warm shift
+      Math.min(1, hsl.s * 0.85),
+      Math.min(0.95, hsl.l * 1.30)
+    );
+
+    return [deepShadow, shadow, base, highlight];
+  },
+
+  // Generate packed RGBA values
+  generatePacked(baseHex) {
+    return ColorRamp.generate(baseHex).map(c => sf2_packRGBA(c.r, c.g, c.b, 255));
+  },
+
+  // Build a complete indexed palette from color group definitions
+  // Returns { palette: Uint32Array, groups: { name: { startIdx, ramp } }, groupForIndex: Uint8Array }
+  buildPalette(colorGroups) {
+    // Index 0 = transparent
+    const palette = new Uint32Array(256);
+    const groupForIndex = new Uint8Array(256);
+    const groups = {};
+    palette[0] = 0; // transparent
+    let idx = 1;
+    let groupId = 1;
+
+    for (const [name, baseHex] of Object.entries(colorGroups)) {
+      let ramp;
+      if (name === 'eyes') {
+        // Special eye palette: pupil(near-black), iris(user color), white, specular(bright white)
+        const iris = sf2_hexToRGB(baseHex);
+        ramp = [
+          sf2_packRGBA(15, 10, 20, 255),           // 0: pupil — near black
+          sf2_packRGBA(iris.r, iris.g, iris.b, 255), // 1: iris — user's eye color
+          sf2_packRGBA(240, 240, 245, 255),          // 2: white of eye
+          sf2_packRGBA(255, 255, 255, 255),          // 3: specular highlight
+        ];
+      } else {
+        ramp = ColorRamp.generatePacked(baseHex);
+      }
+      const startIdx = idx;
+      for (let i = 0; i < 4; i++) {
+        palette[idx] = ramp[i];
+        groupForIndex[idx] = groupId;
+        idx++;
+      }
+      groups[name] = { startIdx, groupId, ramp };
+      groupId++;
+    }
+
+    // Reserve index for outline (will be set per-pixel by post-processing)
+    palette[idx] = sf2_packRGBA(0, 0, 0, 255); // black fallback
+    const outlineIdx = idx;
+    idx++;
+
+    return { palette, groups, groupForIndex, outlineIdx, nextIdx: idx };
+  },
+};
+
+// ============================================================
+// MODULE B: PIXEL CANVAS
+// ============================================================
+
+class PixelCanvas {
+  constructor(width, height) {
+    this.width = width;
+    this.height = height;
+    this.pixels = new Uint8Array(width * height);       // palette index
+    this.groupMap = new Uint8Array(width * height);      // color group ID
+    this.palette = null;         // Uint32Array(256), set by setPalette
+    this.groupForIndex = null;   // Uint8Array(256), maps palette idx -> group ID
+  }
+
+  setPalette(palette, groupForIndex) {
+    this.palette = palette;
+    this.groupForIndex = groupForIndex;
+  }
+
+  clear() {
+    this.pixels.fill(0);
+    this.groupMap.fill(0);
+  }
+
+  // ---- Pixel Access ----
+
+  setPixel(x, y, idx) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+    const off = y * this.width + x;
+    this.pixels[off] = idx;
+    if (this.groupForIndex) this.groupMap[off] = this.groupForIndex[idx];
+  }
+
+  getPixel(x, y) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return 0;
+    return this.pixels[y * this.width + x];
+  }
+
+  isFilled(x, y) {
+    x = x | 0; y = y | 0;
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return false;
+    return this.pixels[y * this.width + x] !== 0;
+  }
+
+  // ---- Drawing Primitives ----
+
+  hline(x, y, len, idx) {
+    for (let i = 0; i < len; i++) this.setPixel(x + i, y, idx);
+  }
+
+  vline(x, y, len, idx) {
+    for (let i = 0; i < len; i++) this.setPixel(x, y + i, idx);
+  }
+
+  fillRect(x, y, w, h, idx) {
+    for (let row = 0; row < h; row++) {
+      this.hline(x, y + row, w, idx);
+    }
+  }
+
+  // Midpoint ellipse algorithm
+  fillEllipse(cx, cy, rx, ry, idx) {
+    if (rx <= 0 || ry <= 0) return;
+    cx = Math.round(cx); cy = Math.round(cy);
+    rx = Math.round(rx); ry = Math.round(ry);
+    const rx2 = rx * rx, ry2 = ry * ry;
+    for (let y = -ry; y <= ry; y++) {
+      const yf = y * y;
+      const xSpan = Math.floor(rx * Math.sqrt(1 - yf / ry2));
+      this.hline(cx - xSpan, cy + y, xSpan * 2 + 1, idx);
+    }
+  }
+
+  fillCircle(cx, cy, r, idx) {
+    this.fillEllipse(cx, cy, r, r, idx);
+  }
+
+  // Bresenham line
+  line(x0, y0, x1, y1, idx) {
+    x0 = Math.round(x0); y0 = Math.round(y0);
+    x1 = Math.round(x1); y1 = Math.round(y1);
+    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    while (true) {
+      this.setPixel(x0, y0, idx);
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x0 += sx; }
+      if (e2 < dx) { err += dx; y0 += sy; }
+    }
+  }
+
+  // Fill triangle via scanline
+  fillTriangle(x0, y0, x1, y1, x2, y2, idx) {
+    // Sort by Y
+    if (y0 > y1) { [x0,y0,x1,y1] = [x1,y1,x0,y0]; }
+    if (y0 > y2) { [x0,y0,x2,y2] = [x2,y2,x0,y0]; }
+    if (y1 > y2) { [x1,y1,x2,y2] = [x2,y2,x1,y1]; }
+    const lerp = (a, b, t) => a + (b - a) * t;
+    for (let y = Math.round(y0); y <= Math.round(y2); y++) {
+      let xa, xb;
+      if (y < y1) {
+        if (y1 === y0) continue;
+        const t1 = (y - y0) / (y1 - y0);
+        const t2 = (y - y0) / (y2 - y0);
+        xa = lerp(x0, x1, t1);
+        xb = lerp(x0, x2, t2);
+      } else {
+        if (y2 === y1) continue;
+        const t1 = (y - y1) / (y2 - y1);
+        const t2 = (y - y0) / (y2 - y0);
+        xa = lerp(x1, x2, t1);
+        xb = lerp(x0, x2, t2);
+      }
+      if (xa > xb) { const tmp = xa; xa = xb; xb = tmp; }
+      this.hline(Math.round(xa), y, Math.round(xb - xa) + 1, idx);
+    }
+  }
+
+  // ---- Bulk Operations ----
+
+  mirrorHorizontal() {
+    const { width, height, pixels, groupMap } = this;
+    const half = Math.floor(width / 2);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < half; x++) {
+        const src = y * width + x;
+        const dst = y * width + (width - 1 - x);
+        pixels[dst] = pixels[src];
+        groupMap[dst] = groupMap[src];
+      }
+    }
+  }
+
+  scatterNoise(x, y, w, h, idx, density, rng) {
+    rng = rng || Math.random;
+    for (let py = y; py < y + h; py++) {
+      for (let px = x; px < x + w; px++) {
+        if (this.isFilled(px, py) && rng() < density) {
+          this.setPixel(px, py, idx);
+        }
+      }
+    }
+  }
+
+  ditherCheckerboard(x, y, w, h, idxA, idxB) {
+    for (let py = y; py < y + h; py++) {
+      for (let px = x; px < x + w; px++) {
+        if (this.isFilled(px, py)) {
+          this.setPixel(px, py, (px + py) % 2 === 0 ? idxA : idxB);
+        }
+      }
+    }
+  }
+
+  // ---- Export ----
+
+  toCanvas() {
+    const cvs = sf2_makeCanvas(this.width, this.height);
+    const ctx = cvs.getContext('2d');
+    const imgData = ctx.createImageData(this.width, this.height);
+    const data = imgData.data;
+    const { pixels, palette, width, height } = this;
+    for (let i = 0; i < width * height; i++) {
+      const idx = pixels[i];
+      if (idx === 0) continue; // transparent
+      const rgba = palette[idx];
+      const off = i * 4;
+      data[off]     = rgba & 0xFF;
+      data[off + 1] = (rgba >> 8) & 0xFF;
+      data[off + 2] = (rgba >> 16) & 0xFF;
+      data[off + 3] = (rgba >> 24) & 0xFF;
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return cvs;
+  }
+
+  blitTo(ctx, destX, destY) {
+    const cvs = this.toCanvas();
+    ctx.drawImage(cvs, destX, destY);
+  }
+}
+
+// ============================================================
+// MODULE C: POST-PROCESSING
+// ============================================================
+
+const PostProcess = {
+  // Direction vectors for 8 neighbors
+  _dirs: [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]],
+
+  // Normalize light direction
+  _lightDir: (function() {
+    const lx = -0.7, ly = -0.7;
+    const len = Math.sqrt(lx*lx + ly*ly);
+    return { x: lx/len, y: ly/len };
+  })(),
+
+  // Pass 1: Directional shading
+  // Remaps each filled pixel to the correct tone within its color group
+  // based on surface normal computed from empty neighbors
+  applyShading(pc, groups) {
+    const { width, height, pixels, groupMap } = pc;
+    const dirs = PostProcess._dirs;
+    const light = PostProcess._lightDir;
+    const newPixels = new Uint8Array(pixels.length);
+    newPixels.set(pixels);
+
+    // Build group base index lookup: groupId -> startIdx
+    const groupBase = new Uint8Array(256);
+    for (const g of Object.values(groups)) {
+      groupBase[g.groupId] = g.startIdx;
+    }
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const off = y * width + x;
+        if (pixels[off] === 0) continue; // transparent
+
+        const gid = groupMap[off];
+        if (gid === 0) continue;
+        const base = groupBase[gid];
+        if (base === 0) continue;
+
+        // Compute surface normal from empty neighbors
+        let nx = 0, ny = 0;
+        let emptyCount = 0;
+        for (const [dx, dy] of dirs) {
+          const px2 = x + dx, py2 = y + dy;
+          if (px2 < 0 || px2 >= width || py2 < 0 || py2 >= height || pixels[py2 * width + px2] === 0) {
+            // Empty neighbor — normal points away from it (toward center)
+            nx -= dx;
+            ny -= dy;
+            emptyCount++;
+          }
+        }
+
+        if (emptyCount === 0) {
+          // Interior pixel — use base tone
+          newPixels[off] = base + 2; // base
+          continue;
+        }
+
+        // Normalize
+        const len = Math.sqrt(nx * nx + ny * ny);
+        if (len > 0) { nx /= len; ny /= len; }
+
+        // Dot with light direction
+        const dot = nx * light.x + ny * light.y;
+
+        // Map to tone (0=deepShadow, 1=shadow, 2=base, 3=highlight)
+        let tone;
+        if (dot > 0.4) tone = 3;       // highlight (facing light)
+        else if (dot > -0.1) tone = 2;  // base
+        else if (dot > -0.5) tone = 1;  // shadow
+        else tone = 0;                   // deep shadow
+
+        newPixels[off] = base + tone;
+      }
+    }
+
+    pc.pixels.set(newPixels);
+  },
+
+  // Pass 2: Tinted outlines
+  // Empty pixels adjacent to filled pixels become the deepShadow of the nearest filled neighbor's group
+  applyOutlines(pc, groups, mode) {
+    if (mode === 'none') return;
+
+    const { width, height, pixels, groupMap } = pc;
+    const dirs = PostProcess._dirs;
+    const newPixels = new Uint8Array(pixels.length);
+    const newGroupMap = new Uint8Array(groupMap.length);
+    newPixels.set(pixels);
+    newGroupMap.set(groupMap);
+
+    // Build group base index lookup
+    const groupBase = new Uint8Array(256);
+    for (const g of Object.values(groups)) {
+      groupBase[g.groupId] = g.startIdx;
+    }
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const off = y * width + x;
+        if (pixels[off] !== 0) continue; // skip filled pixels
+
+        // Check neighbors for filled pixels
+        let nearestGroup = 0;
+        let found = false;
+        // Check cardinals first (stronger adjacency), then diagonals
+        for (const [dx, dy] of dirs) {
+          const px2 = x + dx, py2 = y + dy;
+          if (px2 >= 0 && px2 < width && py2 >= 0 && py2 < height) {
+            const noff = py2 * width + px2;
+            if (pixels[noff] !== 0) {
+              nearestGroup = groupMap[noff];
+              found = true;
+              break;
+            }
+          }
+        }
+
+        if (!found) continue;
+
+        const base = groupBase[nearestGroup];
+        if (base === 0) continue;
+
+        if (mode === 'tinted') {
+          // Use the deepShadow tone of the neighbor's group
+          newPixels[off] = base + 0; // deepShadow
+        } else if (mode === 'black') {
+          // Use a fixed dark color — we'll set palette index 255 to black
+          newPixels[off] = 255;
+        } else if (mode === 'silhouette') {
+          // Only outline if ALL pixels on one side are empty (exterior edge)
+          let leftEmpty = true, rightEmpty = true, topEmpty = true, bottomEmpty = true;
+          for (let dy = -1; dy <= 1; dy++) {
+            if (x - 1 >= 0 && pixels[(y+dy) * width + (x-1)] !== 0) leftEmpty = false;
+            if (x + 1 < width && pixels[(y+dy) * width + (x+1)] !== 0) rightEmpty = false;
+          }
+          for (let dx = -1; dx <= 1; dx++) {
+            if (y - 1 >= 0 && pixels[(y-1) * width + (x+dx)] !== 0) topEmpty = false;
+            if (y + 1 < height && pixels[(y+1) * width + (x+dx)] !== 0) bottomEmpty = false;
+          }
+          if (leftEmpty || rightEmpty || topEmpty || bottomEmpty) {
+            newPixels[off] = base + 0;
+          }
+        }
+
+        if (newPixels[off] !== 0) {
+          newGroupMap[off] = nearestGroup;
+        }
+      }
+    }
+
+    pc.pixels.set(newPixels);
+    pc.groupMap.set(newGroupMap);
+  },
+};
+
+// ============================================================
+// MODULE D: SHEET BUILDER — helper to turn custom draw functions into animated sprite sheets
+// ============================================================
+
+// Usage:
+//   const { sheet, animator } = SpriteForge.buildSheet({
+//     frameWidth: 24, frameHeight: 32,
+//     palette: ColorRamp.buildPalette({ skin: '#ffddbb', hair: '#664422', ... }),
+//     outlineMode: 'tinted',
+//     animations: {
+//       idle: { frames: 4, speed: 0.2, draw: (pc, pal, t) => { /* draw one frame */ } },
+//       walk: { frames: 6, speed: 0.1, draw: (pc, pal, t) => { /* draw one frame */ } },
+//     },
+//   });
+//
+// Each draw function receives:
+//   pc   — PixelCanvas (cleared, palette set)
+//   pal  — palette object from ColorRamp.buildPalette
+//   t    — animation progress 0..1 for this frame
+//
+// Shading + outlines are applied automatically after each draw call.
+// To protect eyes/details from shading, draw them in the optional `drawPost` callback
+// which runs after shading but before outlines.
+
+// ============================================================
+// MODULE G: SPRITESHEET, ANIMATOR, CACHE (carried from v1)
+// ============================================================
+
+class SpriteSheet {
+  constructor(canvas, frameWidth, frameHeight, cols, rows) {
+    this.canvas = canvas;
+    this.frameWidth = frameWidth;
+    this.frameHeight = frameHeight;
+    this.cols = cols;
+    this.rows = rows;
+    this._names = {};
+  }
+
+  getFrame(index) {
+    const col = index % this.cols;
+    const row = Math.floor(index / this.cols);
+    return {
+      x: col * this.frameWidth,
+      y: row * this.frameHeight,
+      w: this.frameWidth,
+      h: this.frameHeight,
+      canvas: this.canvas,
+    };
+  }
+
+  nameFrame(name, index) { this._names[name] = index; }
+
+  getFrameByName(name) {
+    const idx = this._names[name];
+    return idx != null ? this.getFrame(idx) : null;
+  }
+
+  drawFrame(ctx, index, x, y, opts) {
+    const f = this.getFrame(index);
+    if (!f) return;
+    const o = opts || {};
+    ctx.save();
+    const scale = o.scale || 1;
+    const alpha = o.alpha != null ? o.alpha : 1;
+    ctx.globalAlpha = alpha;
+    if (o.flipX || o.flipY) {
+      ctx.translate(x + f.w * scale / 2, y + f.h * scale / 2);
+      ctx.scale(o.flipX ? -1 : 1, o.flipY ? -1 : 1);
+      ctx.drawImage(f.canvas, f.x, f.y, f.w, f.h, -f.w * scale / 2, -f.h * scale / 2, f.w * scale, f.h * scale);
+    } else {
+      ctx.drawImage(f.canvas, f.x, f.y, f.w, f.h, x, y, f.w * scale, f.h * scale);
+    }
+    ctx.restore();
+  }
+}
+
+class SpriteAnimator {
+  constructor(sheet, animations) {
+    this.sheet = sheet;
+    this.animations = animations;
+    this.current = null;
+    this.frame = 0;
+    this.elapsed = 0;
+    this.playing = false;
+    this._dir = 1; // 1 forward, -1 backward (pingpong)
+  }
+
+  play(name, opts) {
+    if (this.current === name && this.playing) return;
+    this.current = name;
+    this.frame = 0;
+    this.elapsed = 0;
+    this.playing = true;
+    this._dir = 1;
+    this._opts = opts || {};
+  }
+
+  stop() { this.playing = false; }
+
+  update(dt) {
+    if (!this.playing || !this.current) return;
+    const anim = this.animations[this.current];
+    if (!anim) return;
+
+    this.elapsed += dt;
+    if (this.elapsed >= anim.speed) {
+      this.elapsed -= anim.speed;
+      this.frame += this._dir;
+
+      if (this.frame >= anim.frames.length) {
+        if (anim.pingpong) {
+          this._dir = -1;
+          this.frame = anim.frames.length - 2;
+        } else if (anim.loop !== false) {
+          this.frame = 0;
+        } else {
+          this.frame = anim.frames.length - 1;
+          this.playing = false;
+          if (anim.onComplete) anim.onComplete();
+        }
+      } else if (this.frame < 0) {
+        this._dir = 1;
+        this.frame = 1;
+      }
+    }
+  }
+
+  getCurrentFrame() {
+    if (!this.current) return 0;
+    const anim = this.animations[this.current];
+    if (!anim) return 0;
+    return anim.frames[Math.max(0, Math.min(this.frame, anim.frames.length - 1))];
+  }
+
+  draw(ctx, x, y, opts) {
+    this.sheet.drawFrame(ctx, this.getCurrentFrame(), x, y, opts);
+  }
+}
+
+class SpriteCache {
+  constructor(maxEntries) {
+    this.max = maxEntries || 128;
+    this._map = new Map();
+  }
+
+  get(key) {
+    const entry = this._map.get(key);
+    if (!entry) return null;
+    entry.ts = Date.now();
+    return entry.value;
+  }
+
+  set(key, value) {
+    if (this._map.size >= this.max) {
+      let oldest = null, oldestKey = null;
+      for (const [k, v] of this._map) {
+        if (!oldest || v.ts < oldest.ts) { oldest = v; oldestKey = k; }
+      }
+      if (oldestKey) this._map.delete(oldestKey);
+    }
+    this._map.set(key, { value, ts: Date.now() });
+  }
+
+  has(key) { return this._map.has(key); }
+  clear() { this._map.clear(); }
+}
+
+// ============================================================
+// SPRITEFORGE v2 PUBLIC API
+// ============================================================
+
+
+// ============================================================
+// MODULE D: BODY TEMPLATES
+// ============================================================
+
+// ============================================================
+
+const BODY_TEMPLATES = {
+  mini: {
+    canvas: { w: 16, h: 24 },
+    head: { rx: 5, ry: 5, cy: 7 },
+    torso: { w: 8, h: 5, cy: 14 },
+    legs: { w: 2, h: 5, gap: 2 },
+    arms: { w: 1, h: 4, shoulderOff: 0 },
+    eyes: { type: 'dot', w: 1, h: 1, gap: 3, cy: -1 },
+    hair: { maxH: 3 },
+    features: { ears: false, hands: false, belt: false, mouth: false },
+    outline: 'black',
+    toneCount: 3,
+  },
+  retro: {
+    canvas: { w: 24, h: 32 },
+    head: { rx: 7, ry: 7, cy: 9 },
+    torso: { w: 10, h: 6, cy: 19 },
+    legs: { w: 3, h: 6, gap: 2 },
+    arms: { w: 2, h: 5, shoulderOff: 1 },
+    eyes: { type: 'simple', w: 3, h: 2, gap: 4, cy: -1 },
+    hair: { maxH: 4 },
+    features: { ears: false, hands: false, belt: true, mouth: false },
+    outline: 'black',
+    toneCount: 3,
+  },
+  chibi: {
+    canvas: { w: 32, h: 40 },
+    head: { rx: 10, ry: 10, cy: 12 },
+    torso: { w: 14, h: 8, cy: 25 },
+    legs: { w: 4, h: 7, gap: 2 },
+    arms: { w: 3, h: 7, shoulderOff: 1 },
+    eyes: { type: 'detailed', w: 4, h: 4, gap: 5, cy: 0 },
+    hair: { maxH: 6 },
+    features: { ears: true, hands: true, belt: true, mouth: true },
+    outline: 'tinted',
+    toneCount: 4,
+  },
+  tall: {
+    canvas: { w: 32, h: 48 },
+    head: { rx: 8, ry: 9, cy: 11 },
+    torso: { w: 14, h: 12, cy: 24 },
+    legs: { w: 4, h: 11, gap: 2 },
+    arms: { w: 3, h: 10, shoulderOff: 1 },
+    eyes: { type: 'detailed', w: 4, h: 3, gap: 5, cy: 0 },
+    hair: { maxH: 6 },
+    features: { ears: true, hands: true, belt: true, mouth: true },
+    outline: 'tinted',
+    toneCount: 4,
+  },
+  heroic: {
+    canvas: { w: 36, h: 56 },
+    head: { rx: 8, ry: 9, cy: 12 },
+    torso: { w: 16, h: 16, cy: 26 },
+    legs: { w: 5, h: 14, gap: 2 },
+    arms: { w: 4, h: 13, shoulderOff: 2 },
+    eyes: { type: 'detailed', w: 5, h: 4, gap: 6, cy: 0 },
+    hair: { maxH: 7 },
+    features: { ears: true, hands: true, belt: true, mouth: true },
+    outline: 'tinted',
+    toneCount: 4,
+  },
+};
+
+// ============================================================
+// MODULE E: CHARACTER RENDERER
+// ============================================================
+
+const CharacterRenderer = {
+  // Main entry: draw a single animation frame
+  drawFrame(pc, template, pal, config, frameType, frameNum, totalFrames) {
+    const t = totalFrames > 1 ? frameNum / (totalFrames - 1) : 0;
+    const cx = Math.floor(template.canvas.w / 2);
+    const pose = CharacterRenderer._getPose(template, frameType, t);
+
+    // Get palette indices for each group
+    const skin = pal.groups.skin ? pal.groups.skin.startIdx : 1;
+    const hair = pal.groups.hair ? pal.groups.hair.startIdx : 5;
+    const shirt = pal.groups.shirt ? pal.groups.shirt.startIdx : 9;
+    const pants = pal.groups.pants ? pal.groups.pants.startIdx : 13;
+    const shoes = pal.groups.shoes ? pal.groups.shoes.startIdx : 17;
+    const eyeGroup = pal.groups.eyes ? pal.groups.eyes.startIdx : 21;
+    const belt = pal.groups.belt ? pal.groups.belt.startIdx : 25;
+
+    // Use base tone (+2) for initial drawing — shading pass will adjust
+    const skinBase = skin + 2;
+    const hairBase = hair + 2;
+    const shirtBase = shirt + 2;
+    const pantsBase = pants + 2;
+    const shoesBase = shoes + 2;
+    const beltBase = belt + 2;
+
+    const T = template;
+    const headCY = T.head.cy + pose.headBob;
+    const torsoCY = T.torso.cy + pose.torsoShift;
+    const legBase = torsoCY + Math.floor(T.torso.h / 2);
+
+    // 1. Back hair (long styles)
+    if (config.body && config.body.hair === 'long') {
+      CharacterRenderer._drawBackHair(pc, T, cx, headCY, hairBase);
+    }
+
+    // 2. Head
+    pc.fillEllipse(cx, headCY, T.head.rx, T.head.ry, skinBase);
+
+    // 3. Ears
+    if (T.features.ears) {
+      pc.fillCircle(cx - T.head.rx, headCY + 1, 2, skinBase);
+      pc.fillCircle(cx + T.head.rx, headCY + 1, 2, skinBase);
+    }
+
+    // 4. Torso
+    const torsoLeft = cx - Math.floor(T.torso.w / 2);
+    pc.fillRect(torsoLeft, torsoCY - Math.floor(T.torso.h / 2), T.torso.w, T.torso.h, shirtBase);
+    // Shoulder taper — round off top corners
+    if (T.torso.w >= 12) {
+      const tTop = torsoCY - Math.floor(T.torso.h / 2);
+      pc.setPixel(torsoLeft, tTop, 0);
+      pc.setPixel(torsoLeft + T.torso.w - 1, tTop, 0);
+    }
+
+    // 5. Legs
+    const legY = legBase;
+    const leftLegX = cx - Math.floor(T.legs.gap / 2) - T.legs.w + pose.leftLeg;
+    const rightLegX = cx + Math.floor(T.legs.gap / 2) + pose.rightLeg;
+    pc.fillRect(leftLegX, legY, T.legs.w, T.legs.h, pantsBase);
+    pc.fillRect(rightLegX, legY, T.legs.w, T.legs.h, pantsBase);
+
+    // 6. Feet/Shoes
+    const feetY = legY + T.legs.h;
+    pc.fillRect(leftLegX - 1, feetY, T.legs.w + 1, 2, shoesBase);
+    pc.fillRect(rightLegX, feetY, T.legs.w + 1, 2, shoesBase);
+
+    // 7. Belt
+    if (T.features.belt) {
+      const beltY = legY - 1;
+      pc.hline(torsoLeft + 1, beltY, T.torso.w - 2, beltBase);
+    }
+
+    // 8. Arms
+    const armTop = torsoCY - Math.floor(T.torso.h / 2) + T.arms.shoulderOff;
+    const leftArmX = torsoLeft - T.arms.w;
+    const rightArmX = torsoLeft + T.torso.w;
+    pc.fillRect(leftArmX, armTop + pose.leftArm, T.arms.w, T.arms.h, skinBase);
+    pc.fillRect(rightArmX, armTop + pose.rightArm, T.arms.w, T.arms.h, skinBase);
+
+    // 9. Hands
+    if (T.features.hands) {
+      pc.fillRect(leftArmX, armTop + T.arms.h + pose.leftArm, T.arms.w, 2, skinBase);
+      pc.fillRect(rightArmX, armTop + T.arms.h + pose.rightArm, T.arms.w, 2, skinBase);
+    }
+
+    // 10. Hair front
+    CharacterRenderer._drawHairFront(pc, T, cx, headCY, hairBase, config);
+
+    // 11. Face — Eyes (drawn after shading pass, see _drawFace)
+    // Stored for later: pc._eyeParams set here for post-shading draw
+    pc._eyeParams = { T, cx, headCY, eyeGroup, config, frameType, frameNum, totalFrames };
+
+    // 12. Mouth
+    if (T.features.mouth) {
+      const mouthY = headCY + Math.floor(T.head.ry * 0.4);
+      pc.hline(cx - 1, mouthY, 3, skin + 1); // shadow tone for mouth line
+    }
+
+    // Death: clear most pixels for fade effect
+    if (frameType === 'death') {
+      const progress = t;
+      if (progress > 0.5) {
+        const rng = sf2_seededRNG(frameNum * 1000);
+        for (let y = 0; y < pc.height; y++) {
+          for (let x = 0; x < pc.width; x++) {
+            if (rng() < (progress - 0.5) * 2) {
+              pc.pixels[y * pc.width + x] = 0;
+              pc.groupMap[y * pc.width + x] = 0;
+            }
+          }
+        }
+      }
+    }
+  },
+
+  _getPose(T, frameType, t) {
+    const pose = { headBob: 0, torsoShift: 0, leftLeg: 0, rightLeg: 0, leftArm: 0, rightArm: 0 };
+    const sin = Math.sin;
+    const PI = Math.PI;
+    const round = Math.round;
+
+    switch (frameType) {
+      case 'idle':
+        pose.headBob = round(sin(t * PI * 2) * 0.5);
+        break;
+      case 'walk': {
+        const walkSin = sin(t * PI * 2);
+        pose.headBob = round(-Math.abs(walkSin) * 1.5);
+        pose.leftLeg = round(walkSin * 2);
+        pose.rightLeg = round(-walkSin * 2);
+        pose.leftArm = round(-walkSin * 3);
+        pose.rightArm = round(walkSin * 3);
+        break;
+      }
+      case 'attack': {
+        if (t < 0.4) {
+          pose.rightArm = round(-t / 0.4 * 6);
+        } else {
+          pose.rightArm = round(-(1 - (t - 0.4) / 0.6) * 6);
+        }
+        pose.torsoShift = round(sin(t * PI) * -1);
+        break;
+      }
+      case 'hurt': {
+        pose.torsoShift = round(sin(t * PI) * 2);
+        pose.headBob = round(-sin(t * PI) * 1);
+        break;
+      }
+      case 'death': {
+        pose.torsoShift = round(t * 3);
+        pose.headBob = round(t * 2);
+        break;
+      }
+    }
+
+    return pose;
+  },
+
+  _drawBackHair(pc, T, cx, headCY, hairIdx) {
+    const hairTop = headCY - T.head.ry - 1;
+    const hairBottom = headCY + Math.floor(T.head.ry * 0.8);
+    const hairW = T.head.rx + 3;
+    for (let y = hairTop; y <= hairBottom; y++) {
+      const t = (y - hairTop) / (hairBottom - hairTop);
+      const w = Math.round(hairW * (0.7 + t * 0.3));
+      pc.hline(cx - w, y, w * 2 + 1, hairIdx);
+    }
+  },
+
+  _drawHairFront(pc, T, cx, headCY, hairIdx, config) {
+    const style = (config.body && config.body.hair) || 'short';
+    const hairTop = headCY - T.head.ry;
+    const maxH = T.hair.maxH;
+
+    switch (style) {
+      case 'short': {
+        // Cap on top of head
+        pc.fillEllipse(cx, hairTop, T.head.rx - 1, maxH, hairIdx);
+        break;
+      }
+      case 'spiky': {
+        // Triangular tufts above head
+        const spikeCount = Math.max(3, Math.floor(T.head.rx / 2));
+        for (let i = 0; i < spikeCount; i++) {
+          const sx = cx - T.head.rx + 2 + i * Math.floor((T.head.rx * 2 - 4) / (spikeCount - 1));
+          const spikeH = maxH + (i % 2) * 2;
+          pc.fillTriangle(sx - 2, hairTop + 1, sx + 2, hairTop + 1, sx, hairTop - spikeH, hairIdx);
+        }
+        // Base cap
+        pc.fillEllipse(cx, hairTop + 1, T.head.rx - 1, Math.floor(maxH * 0.4), hairIdx);
+        break;
+      }
+      case 'long': {
+        // Fringe/bangs over forehead
+        pc.fillEllipse(cx, hairTop, T.head.rx, Math.floor(maxH * 0.6), hairIdx);
+        // Side curtains
+        pc.fillRect(cx - T.head.rx - 1, hairTop, 2, T.head.ry + 3, hairIdx);
+        pc.fillRect(cx + T.head.rx, hairTop, 2, T.head.ry + 3, hairIdx);
+        break;
+      }
+      case 'flowing': {
+        // Full coverage top + sides flowing down
+        pc.fillEllipse(cx, hairTop, T.head.rx, maxH, hairIdx);
+        const sideLen = T.head.ry + maxH;
+        pc.fillRect(cx - T.head.rx - 1, hairTop, 3, sideLen, hairIdx);
+        pc.fillRect(cx + T.head.rx - 1, hairTop, 3, sideLen, hairIdx);
+        break;
+      }
+      case 'ponytail': {
+        // Short top
+        pc.fillEllipse(cx, hairTop, T.head.rx - 1, Math.floor(maxH * 0.5), hairIdx);
+        // Tail extending right
+        const tailX = cx + T.head.rx;
+        const tailY = hairTop + 2;
+        pc.fillRect(tailX, tailY, 3, maxH + 4, hairIdx);
+        break;
+      }
+      case 'mohawk': {
+        // Narrow vertical strip
+        pc.fillRect(cx - 1, hairTop - maxH, 3, maxH + 2, hairIdx);
+        break;
+      }
+      case 'bun': {
+        // Small dome on top
+        pc.fillEllipse(cx, hairTop, T.head.rx - 1, Math.floor(maxH * 0.4), hairIdx);
+        pc.fillCircle(cx, hairTop - maxH + 1, Math.floor(maxH * 0.6), hairIdx);
+        break;
+      }
+      case 'bob': {
+        // Mid-length with curved bottom
+        pc.fillEllipse(cx, hairTop + 1, T.head.rx, maxH, hairIdx);
+        const bobLen = Math.floor(T.head.ry * 0.5);
+        pc.fillRect(cx - T.head.rx, hairTop, 2, bobLen, hairIdx);
+        pc.fillRect(cx + T.head.rx - 1, hairTop, 2, bobLen, hairIdx);
+        break;
+      }
+      default: // 'none'
+        break;
+    }
+  },
+
+  _drawEyes(pc, T, cx, headCY, eyeStart, config, frameType, frameNum, totalFrames) {
+    const eye = T.eyes;
+    const eyeY = headCY + (eye.cy || 0);
+
+    // Blink on specific idle frames
+    const isBlink = frameType === 'idle' && frameNum === totalFrames - 1;
+    // Hurt = squeezed eyes
+    const isHurt = frameType === 'hurt';
+
+    if (eye.type === 'dot') {
+      // Simple dot eyes — use pupil color (dark) for visibility
+      if (isBlink || isHurt) {
+        pc.hline(cx - Math.floor(eye.gap / 2), eyeY, 1, eyeStart);
+        pc.hline(cx + Math.floor(eye.gap / 2), eyeY, 1, eyeStart);
+      } else {
+        pc.setPixel(cx - Math.floor(eye.gap / 2), eyeY, eyeStart); // pupil (near-black)
+        pc.setPixel(cx + Math.floor(eye.gap / 2), eyeY, eyeStart);
+      }
+    } else if (eye.type === 'simple') {
+      // 3x2 eyes: white bg + dark pupil
+      const lx = cx - Math.floor(eye.gap / 2) - Math.floor(eye.w / 2);
+      const rx = cx + Math.floor(eye.gap / 2) - Math.floor(eye.w / 2);
+      if (isBlink || isHurt) {
+        pc.hline(lx, eyeY, eye.w, eyeStart + 1);
+        pc.hline(rx, eyeY, eye.w, eyeStart + 1);
+      } else {
+        // White
+        pc.fillRect(lx, eyeY, eye.w, eye.h, eyeStart + 3); // highlight = white
+        pc.fillRect(rx, eyeY, eye.w, eye.h, eyeStart + 3);
+        // Pupil (center pixel)
+        pc.setPixel(lx + Math.floor(eye.w / 2), eyeY + Math.floor(eye.h / 2), eyeStart); // deepShadow = pupil
+        pc.setPixel(rx + Math.floor(eye.w / 2), eyeY + Math.floor(eye.h / 2), eyeStart);
+      }
+    } else if (eye.type === 'detailed') {
+      // Full eye: eyeStart+0=pupil(black), +1=iris(color), +2=white, +3=specular
+      const lx = cx - Math.floor(eye.gap / 2) - Math.floor(eye.w / 2);
+      const rx = cx + Math.floor(eye.gap / 2) - Math.floor(eye.w / 2);
+      if (isBlink || isHurt) {
+        pc.hline(lx, eyeY + Math.floor(eye.h / 2), eye.w, eyeStart); // closed eye line
+        pc.hline(rx, eyeY + Math.floor(eye.h / 2), eye.w, eyeStart);
+      } else {
+        // White of eye (background)
+        pc.fillRect(lx, eyeY, eye.w, eye.h, eyeStart + 2);
+        pc.fillRect(rx, eyeY, eye.w, eye.h, eyeStart + 2);
+        // Iris — centered circle within the eye area
+        const irisX = Math.floor(eye.w / 2);
+        const irisR = Math.max(1, Math.floor(Math.min(eye.w, eye.h) / 2) - 1);
+        pc.fillCircle(lx + irisX, eyeY + Math.floor(eye.h / 2), irisR, eyeStart + 1);
+        pc.fillCircle(rx + irisX, eyeY + Math.floor(eye.h / 2), irisR, eyeStart + 1);
+        // Pupil — single dark pixel at center
+        pc.setPixel(lx + irisX, eyeY + Math.floor(eye.h / 2), eyeStart);
+        pc.setPixel(rx + irisX, eyeY + Math.floor(eye.h / 2), eyeStart);
+        // Specular highlight — top-left of each eye
+        pc.setPixel(lx + irisX - 1, eyeY, eyeStart + 3);
+        pc.setPixel(rx + irisX - 1, eyeY, eyeStart + 3);
+      }
+    }
+  },
+};
+
+// ============================================================
+// MODULE F: CREATURE RENDERER
+// ============================================================
+
+
+// ============================================================
+// MODULE F: CREATURE RENDERER
+// ============================================================
+
+// MODULE F: CREATURE RENDERER
+// ============================================================
+
+const CreatureRenderer = {
+  drawFrame(pc, pal, config, frameType, frameNum, totalFrames) {
+    const t = totalFrames > 1 ? frameNum / (totalFrames - 1) : 0;
+    const cx = Math.floor(pc.width / 2);
+    const cy = Math.floor(pc.height / 2);
+    const type = (config.creature && config.creature.bodyShape) || 'blob';
+    const bodyColor = pal.groups.body ? pal.groups.body.startIdx + 2 : 1;
+    const eyeColor = pal.groups.eyes ? pal.groups.eyes.startIdx : 5;
+
+    // Animation offsets
+    let squish = 0, shiftX = 0, shiftY = 0;
+    switch (frameType) {
+      case 'idle':
+        squish = Math.sin(t * Math.PI * 2) * 0.08;
+        shiftY = Math.round(Math.sin(t * Math.PI * 2) * 1);
+        break;
+      case 'walk':
+        shiftX = Math.round(Math.sin(t * Math.PI * 2) * 2);
+        squish = Math.sin(t * Math.PI * 4) * 0.1;
+        shiftY = Math.round(Math.abs(Math.sin(t * Math.PI * 2)) * -2);
+        break;
+      case 'attack':
+        shiftX = t < 0.5 ? Math.round(-t * 4) : Math.round((t - 0.5) * 8 - 2);
+        squish = t < 0.4 ? t * 0.2 : -(t - 0.4) * 0.15;
+        break;
+      case 'hurt':
+        shiftX = Math.round(Math.sin(t * Math.PI) * 3);
+        break;
+      case 'death':
+        squish = t * 0.5;
+        break;
+    }
+
+    const bx = cx + shiftX;
+    const by = cy + shiftY;
+
+    // Deferred eye list — drawn after shading pass
+    const deferredEyes = [];
+    const drawEye = (ex, ey, r) => { deferredEyes.push({ ex, ey, r }); };
+
+    switch (type) {
+      case 'blob': {
+        // Classic slime/blob: dome shape, glossy, cute face
+        const rx = Math.max(4, Math.floor(pc.width * 0.32 * (1 + squish)));
+        const ry = Math.max(4, Math.floor(pc.height * 0.28 * (1 - squish)));
+        // Body — slightly flattened dome
+        pc.fillEllipse(bx, by + 2, rx, ry, bodyColor);
+        // Flat bottom
+        pc.fillRect(bx - rx, by + 2, rx * 2 + 1, Math.floor(ry * 0.3), bodyColor);
+        // Glossy highlight — upper left area
+        pc.fillEllipse(bx - Math.floor(rx * 0.25), by - Math.floor(ry * 0.15), Math.max(2, Math.floor(rx * 0.35)), Math.max(2, Math.floor(ry * 0.25)), bodyColor + 1);
+        // Eyes
+        const eyeCount = (config.creature && config.creature.eyeCount) || 2;
+        const eyeY = by - Math.floor(ry * 0.1);
+        const eyeR = Math.max(1, Math.floor(rx * 0.2));
+        if (eyeCount === 1) {
+          drawEye(bx, eyeY, eyeR);
+        } else {
+          const gap = Math.max(3, Math.floor(rx * 0.4));
+          drawEye(bx - gap, eyeY, eyeR);
+          drawEye(bx + gap, eyeY, eyeR);
+        }
+        // Smile
+        if (rx >= 6) {
+          pc.hline(bx - 2, by + Math.floor(ry * 0.25), 5, bodyColor - 1);
+          pc.setPixel(bx - 3, by + Math.floor(ry * 0.25) - 1, bodyColor - 1);
+          pc.setPixel(bx + 3, by + Math.floor(ry * 0.25) - 1, bodyColor - 1);
+        }
+        break;
+      }
+      case 'quadruped': {
+        // 4-legged animal: distinct head, body, legs
+        const bodyRX = Math.max(5, Math.floor(pc.width * 0.26));
+        const bodyRY = Math.max(3, Math.floor(pc.height * 0.14 * (1 - squish)));
+        const headR = Math.max(3, Math.floor(bodyRY * 0.9));
+        const legH = Math.max(3, Math.floor(pc.height * 0.2));
+        const legW = Math.max(2, Math.floor(pc.width * 0.06));
+        const stride = Math.round(Math.sin(t * Math.PI * 2) * 2);
+        // Body
+        pc.fillEllipse(bx, by, bodyRX, bodyRY, bodyColor);
+        // Head — positioned to the right, slightly higher
+        const headX = bx + bodyRX - Math.floor(headR * 0.3);
+        const headY = by - bodyRY + Math.floor(headR * 0.3);
+        pc.fillCircle(headX, headY, headR, bodyColor);
+        // Ear nubs
+        pc.fillCircle(headX - 2, headY - headR, Math.max(1, Math.floor(headR * 0.4)), bodyColor);
+        pc.fillCircle(headX + 2, headY - headR, Math.max(1, Math.floor(headR * 0.4)), bodyColor);
+        // Legs — side view facing right
+        // Each leg: vertical shin + foot extending RIGHT (forward)
+        const frontBase = bx + Math.floor(bodyRX * 0.35);
+        const backBase = bx - Math.floor(bodyRX * 0.35);
+        const groundY = by + bodyRY - 1;
+        const footW = legW + 2; // foot wider than leg, extends forward
+        const footH = Math.max(1, Math.floor(legH * 0.2));
+        const footY = groundY + legH - footH;
+
+        // Draw leg + foot helper (foot extends to the right = forward)
+        const drawLeg = (lx, color) => {
+          pc.fillRect(lx, groundY, legW, legH, color);        // shin
+          pc.fillRect(lx, footY, footW, footH, color);         // foot extends right
+        };
+
+        // Far legs first (behind, darker)
+        drawLeg(frontBase + 1 - stride, bodyColor - 1);
+        drawLeg(backBase + 1 + stride, bodyColor - 1);
+        // Near legs on top
+        drawLeg(frontBase + stride, bodyColor);
+        drawLeg(backBase - stride, bodyColor);
+        // Tail — small curve from back
+        pc.line(bx - bodyRX, by - 1, bx - bodyRX - 3, by - 4, bodyColor);
+        pc.line(bx - bodyRX - 3, by - 4, bx - bodyRX - 2, by - 6, bodyColor);
+        // Eye on head
+        drawEye(headX + Math.floor(headR * 0.3), headY - 1, Math.max(1, Math.floor(headR * 0.35)));
+        // Nose
+        pc.setPixel(headX + headR - 1, headY + 1, bodyColor - 1);
+        break;
+      }
+      case 'serpent': {
+        // Snake: thick segmented body, tapered tail, distinct head with eyes and tongue
+        const segCount = 8;
+        const maxR = Math.max(3, Math.floor(pc.width * 0.12));
+        const bodyLen = Math.floor(pc.width * 0.7);
+        const startX = bx - Math.floor(bodyLen * 0.35);
+        for (let i = 0; i < segCount; i++) {
+          const sf = i / (segCount - 1);
+          const sx = startX + Math.floor(sf * bodyLen);
+          const sy = by + Math.round(Math.sin(sf * Math.PI * 1.5 + t * Math.PI * 2) * 5);
+          // Taper: head is large, body medium, tail thin
+          let r;
+          if (i === 0) r = Math.floor(maxR * 1.3); // head
+          else if (i < 3) r = maxR;
+          else r = Math.max(1, Math.floor(maxR * (1 - (sf - 0.3) * 0.8)));
+          pc.fillCircle(sx, sy, r, bodyColor);
+        }
+        // Head details
+        const headX = startX;
+        const headY = by + Math.round(Math.sin(t * Math.PI * 2) * 5);
+        const headR = Math.floor(maxR * 1.3);
+        // Eyes — on top of head
+        drawEye(headX - Math.floor(headR * 0.4), headY - Math.floor(headR * 0.4), Math.max(1, Math.floor(headR * 0.35)));
+        drawEye(headX + Math.floor(headR * 0.4), headY - Math.floor(headR * 0.4), Math.max(1, Math.floor(headR * 0.35)));
+        // Forked tongue
+        const tongueX = headX - headR - 1;
+        const tongueY = headY;
+        pc.line(tongueX, tongueY, tongueX - 3, tongueY - 1, eyeColor);
+        pc.line(tongueX, tongueY, tongueX - 3, tongueY + 1, eyeColor);
+        break;
+      }
+      case 'flying': {
+        // Bat/bird: round body, large swept wings, visible face
+        const bodyRX = Math.max(3, Math.floor(pc.width * 0.12));
+        const bodyRY = Math.max(3, Math.floor(pc.height * 0.14));
+        // Body — round
+        pc.fillEllipse(bx, by, bodyRX, bodyRY, bodyColor);
+        // Wings — large triangular, attached to body sides
+        const wingFlap = Math.round(Math.sin(t * Math.PI * 2) * 4);
+        const wingSpan = Math.floor(pc.width * 0.38);
+        const wingTip = by - wingFlap - 2;
+        const wingMid = by + Math.floor(bodyRY * 0.3);
+        // Left wing — triangle from shoulder to tip to elbow
+        pc.fillTriangle(
+          bx - bodyRX, by - 1,          // shoulder
+          bx - wingSpan, wingTip,        // tip
+          bx - bodyRX - 2, wingMid,      // elbow
+          bodyColor
+        );
+        // Right wing — mirror
+        pc.fillTriangle(
+          bx + bodyRX, by - 1,
+          bx + wingSpan, wingTip,
+          bx + bodyRX + 2, wingMid,
+          bodyColor
+        );
+        // Wing membrane detail line
+        pc.line(bx - bodyRX, by, bx - wingSpan + 2, wingTip + 2, bodyColor + 1);
+        pc.line(bx + bodyRX, by, bx + wingSpan - 2, wingTip + 2, bodyColor + 1);
+        // Eyes — prominent on the round body
+        const eyeR = Math.max(1, Math.floor(bodyRX * 0.4));
+        drawEye(bx - Math.floor(bodyRX * 0.45), by - Math.floor(bodyRY * 0.2), eyeR);
+        drawEye(bx + Math.floor(bodyRX * 0.45), by - Math.floor(bodyRY * 0.2), eyeR);
+        // Feet — tiny dangling
+        pc.line(bx - 2, by + bodyRY, bx - 3, by + bodyRY + 3, bodyColor);
+        pc.line(bx + 2, by + bodyRY, bx + 3, by + bodyRY + 3, bodyColor);
+        break;
+      }
+      case 'spider': {
+        // Spider: large round abdomen, smaller cephalothorax, 8 legs spreading outward
+        const abdR = Math.max(4, Math.floor(pc.width * 0.18));
+        const headR = Math.max(2, Math.floor(pc.width * 0.1));
+        const abdY = by + 3;
+        const headY = abdY - abdR - headR + 3;
+        // Abdomen (larger, back)
+        pc.fillEllipse(bx, abdY, abdR, Math.floor(abdR * 0.85), bodyColor);
+        // Cephalothorax (smaller, front)
+        pc.fillCircle(bx, headY, headR, bodyColor);
+        // Connect them
+        pc.fillRect(bx - headR + 1, headY + headR - 1, headR * 2 - 1, 3, bodyColor);
+        // 8 legs — 4 per side, angled outward and bending downward
+        const legLen1 = Math.max(4, Math.floor(pc.width * 0.2));  // upper segment
+        const legLen2 = Math.max(3, Math.floor(pc.width * 0.15)); // lower segment
+        for (let side = -1; side <= 1; side += 2) {
+          for (let i = 0; i < 4; i++) {
+            const angle = (0.3 + i * 0.35) * side; // spread angle
+            const swing = Math.sin(t * Math.PI * 2 + i * 1.2) * 1.5;
+            // Knee point — extends outward and slightly up
+            const kneeX = bx + Math.round((headR + legLen1) * Math.cos(angle) * side);
+            const kneeY = headY + Math.round(-legLen1 * 0.3 + i * 1.5 + swing);
+            // Foot point — from knee downward
+            const footX = kneeX + Math.round(legLen2 * 0.5 * side);
+            const footY = kneeY + legLen2;
+            // Draw leg: body -> knee -> foot
+            pc.line(bx + headR * side, headY + i - 1, kneeX, kneeY, bodyColor);
+            pc.line(kneeX, kneeY, footX, footY, bodyColor);
+          }
+        }
+        // Eyes — cluster of small eyes on cephalothorax
+        const eyeR = Math.max(1, Math.floor(headR * 0.3));
+        drawEye(bx - Math.floor(headR * 0.4), headY - Math.floor(headR * 0.3), eyeR);
+        drawEye(bx + Math.floor(headR * 0.4), headY - Math.floor(headR * 0.3), eyeR);
+        // Smaller secondary eyes
+        pc.setPixel(bx - Math.floor(headR * 0.6), headY, eyeColor + 2);
+        pc.setPixel(bx + Math.floor(headR * 0.6), headY, eyeColor + 2);
+        // Fangs
+        pc.line(bx - 1, headY + headR, bx - 2, headY + headR + 2, eyeColor + 2);
+        pc.line(bx + 1, headY + headR, bx + 2, headY + headR + 2, eyeColor + 2);
+        break;
+      }
+    }
+    // Store deferred eyes for post-shading drawing
+    pc._deferredEyes = deferredEyes;
+    pc._eyeColor = eyeColor;
+  },
+
+  // Draw deferred creature eyes (call after shading pass)
+  drawDeferredEyes(pc) {
+    if (!pc._deferredEyes || !pc._deferredEyes.length) return;
+    const eyeColor = pc._eyeColor || 5;
+    for (const { ex, ey, r } of pc._deferredEyes) {
+      const er = Math.max(1, r);
+      if (er <= 1) {
+        pc.setPixel(ex, ey, eyeColor + 2); // white
+        pc.setPixel(ex, ey, eyeColor);      // pupil on top
+      } else {
+        pc.fillCircle(ex, ey, er, eyeColor + 2);              // white
+        pc.fillCircle(ex, ey, Math.max(1, er - 1), eyeColor + 1); // iris
+        pc.setPixel(ex, ey, eyeColor);                         // pupil
+        pc.setPixel(ex - 1, ey - 1, eyeColor + 3);            // specular
+      }
+    }
+  },
+};
+
+// ============================================================
+
+// ============================================================
+// MODULE H: SPRITEFORGE v2 PUBLIC API
+// ============================================================
+
+// MODULE H: SPRITEFORGE v2 PUBLIC API
+// ============================================================
+
+const _sf2Cache = new SpriteCache(256);
+
+const SpriteForge = {
+  VERSION: 2,
+
+  character(config) {
+    const cacheKey = JSON.stringify({ _t: 'char', ...config });
+    const cached = _sf2Cache.get(cacheKey);
+    if (cached) return cached;
+
+    // Resolve style
+    const styleName = config.style || 'chibi';
+    const template = BODY_TEMPLATES[styleName];
+    if (!template) throw new Error('Unknown style: ' + styleName);
+
+    // Build color palette
+    const colors = config.colors || {};
+    const defaultColors = {
+      skin: '#ffcc99', hair: '#553322', shirt: '#5588bb',
+      pants: '#445566', shoes: '#332211', eyes: '#4488ff', belt: '#8b7355',
+    };
+    const mergedColors = { ...defaultColors, ...colors };
+    const pal = ColorRamp.buildPalette(mergedColors);
+
+    // Set black at index 255 for 'black' outline mode
+    pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+
+    // Resolve animations
+    const defaultAnims = {
+      idle: { frames: 4, speed: 0.2 },
+      walk: { frames: 6, speed: 0.1 },
+      attack: { frames: 4, speed: 0.08 },
+      hurt: { frames: 2, speed: 0.1 },
+      death: { frames: 4, speed: 0.15 },
+    };
+    const animConfig = { ...defaultAnims, ...(config.animations || {}) };
+
+    // Count total frames
+    let totalFrames = 0;
+    const animList = [];
+    for (const [name, def] of Object.entries(animConfig)) {
+      animList.push({ name, frames: def.frames, speed: def.speed });
+      totalFrames += def.frames;
+    }
+
+    // Create sprite sheet grid
+    const cols = Math.ceil(Math.sqrt(totalFrames));
+    const rows = Math.ceil(totalFrames / cols);
+    const fw = template.canvas.w;
+    const fh = template.canvas.h;
+    const sheetCanvas = sf2_makeCanvas(cols * fw, rows * fh);
+    const sheetCtx = sheetCanvas.getContext('2d');
+    sheetCtx.imageSmoothingEnabled = false;
+
+    // Determine outline mode
+    const outlineMode = config.outlineMode || template.outline || 'tinted';
+
+    // Generate each frame
+    let frameIdx = 0;
+    const animationDefs = {};
+
+    for (const anim of animList) {
+      const frameIndices = [];
+      for (let f = 0; f < anim.frames; f++) {
+        const pc = new PixelCanvas(fw, fh);
+        pc.setPalette(pal.palette, pal.groupForIndex);
+
+        // Draw the character frame (without eyes)
+        CharacterRenderer.drawFrame(pc, template, pal, config, anim.name, f, anim.frames);
+
+        // Post-processing: shade body first, then draw eyes, then outlines
+        PostProcess.applyShading(pc, pal.groups);
+
+        // Draw eyes AFTER shading so they aren't modified
+        if (pc._eyeParams) {
+          const ep = pc._eyeParams;
+          CharacterRenderer._drawEyes(pc, ep.T, ep.cx, ep.headCY, ep.eyeGroup, ep.config, ep.frameType, ep.frameNum, ep.totalFrames);
+        }
+
+        PostProcess.applyOutlines(pc, pal.groups, outlineMode);
+
+        // Blit to sheet
+        const col = frameIdx % cols;
+        const row = Math.floor(frameIdx / cols);
+        pc.blitTo(sheetCtx, col * fw, row * fh);
+
+        frameIndices.push(frameIdx);
+        frameIdx++;
+      }
+
+      animationDefs[anim.name] = {
+        frames: frameIndices,
+        speed: anim.speed,
+        loop: anim.name !== 'death' && anim.name !== 'hurt',
+        pingpong: anim.name === 'idle',
+      };
+    }
+
+    const sheet = new SpriteSheet(sheetCanvas, fw, fh, cols, rows);
+    const animator = new SpriteAnimator(sheet, animationDefs);
+    animator.play('idle');
+
+    const result = { sheet, animator, animations: animationDefs };
+    _sf2Cache.set(cacheKey, result);
+    return result;
+  },
+
+  creature(config) {
+    const cacheKey = JSON.stringify({ _t: 'creature', ...config });
+    const cached = _sf2Cache.get(cacheKey);
+    if (cached) return cached;
+
+    const size = config.size || 32;
+    const colors = config.colors || {};
+    const defaultColors = { body: '#66aa44', eyes: '#ffffff' };
+    const mergedColors = { ...defaultColors, ...colors };
+    const pal = ColorRamp.buildPalette(mergedColors);
+    pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+
+    const defaultAnims = {
+      idle: { frames: 4, speed: 0.2 },
+      walk: { frames: 4, speed: 0.12 },
+      attack: { frames: 3, speed: 0.1 },
+      hurt: { frames: 2, speed: 0.1 },
+      death: { frames: 3, speed: 0.15 },
+    };
+    const animConfig = { ...defaultAnims, ...(config.animations || {}) };
+
+    let totalFrames = 0;
+    const animList = [];
+    for (const [name, def] of Object.entries(animConfig)) {
+      animList.push({ name, frames: def.frames, speed: def.speed });
+      totalFrames += def.frames;
+    }
+
+    const cols = Math.ceil(Math.sqrt(totalFrames));
+    const rows = Math.ceil(totalFrames / cols);
+    const sheetCanvas = sf2_makeCanvas(cols * size, rows * size);
+    const sheetCtx = sheetCanvas.getContext('2d');
+    sheetCtx.imageSmoothingEnabled = false;
+
+    const outlineMode = config.outlineMode || 'tinted';
+    let frameIdx = 0;
+    const animationDefs = {};
+
+    for (const anim of animList) {
+      const frameIndices = [];
+      for (let f = 0; f < anim.frames; f++) {
+        const pc = new PixelCanvas(size, size);
+        pc.setPalette(pal.palette, pal.groupForIndex);
+
+        CreatureRenderer.drawFrame(pc, pal, config, anim.name, f, anim.frames);
+
+        PostProcess.applyShading(pc, pal.groups);
+        CreatureRenderer.drawDeferredEyes(pc);
+        PostProcess.applyOutlines(pc, pal.groups, outlineMode);
+
+        const col = frameIdx % cols;
+        const row = Math.floor(frameIdx / cols);
+        pc.blitTo(sheetCtx, col * size, row * size);
+
+        frameIndices.push(frameIdx);
+        frameIdx++;
+      }
+
+      animationDefs[anim.name] = {
+        frames: frameIndices,
+        speed: anim.speed,
+        loop: anim.name !== 'death' && anim.name !== 'hurt',
+        pingpong: anim.name === 'idle',
+      };
+    }
+
+    const sheet = new SpriteSheet(sheetCanvas, size, size, cols, rows);
+    const animator = new SpriteAnimator(sheet, animationDefs);
+    animator.play('idle');
+
+    const result = { sheet, animator, animations: animationDefs };
+    _sf2Cache.set(cacheKey, result);
+    return result;
+  },
+
+  // Build a sprite sheet from custom drawing functions (no templates).
+  buildSheet(config) {
+    const fw = config.frameWidth;
+    const fh = config.frameHeight;
+    const pal = config.palette;
+    const outlineMode = config.outlineMode || 'tinted';
+    pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+
+    let totalFrames = 0;
+    const animList = [];
+    for (const [name, def] of Object.entries(config.animations)) {
+      animList.push({ name, ...def });
+      totalFrames += def.frames;
+    }
+
+    const cols = Math.ceil(Math.sqrt(totalFrames));
+    const rows = Math.ceil(totalFrames / cols);
+    const sheetCanvas = sf2_makeCanvas(cols * fw, rows * fh);
+    const sheetCtx = sheetCanvas.getContext('2d');
+    sheetCtx.imageSmoothingEnabled = false;
+
+    let frameIdx = 0;
+    const animationDefs = {};
+
+    for (const anim of animList) {
+      const frameIndices = [];
+      for (let f = 0; f < anim.frames; f++) {
+        const pc = new PixelCanvas(fw, fh);
+        pc.setPalette(pal.palette, pal.groupForIndex);
+        const t = anim.frames > 1 ? f / (anim.frames - 1) : 0;
+        anim.draw(pc, pal, t);
+        PostProcess.applyShading(pc, pal.groups);
+        if (anim.drawPost) anim.drawPost(pc, pal, t);
+        PostProcess.applyOutlines(pc, pal.groups, outlineMode);
+        const col = frameIdx % cols;
+        const row = Math.floor(frameIdx / cols);
+        pc.blitTo(sheetCtx, col * fw, row * fh);
+        frameIndices.push(frameIdx);
+        frameIdx++;
+      }
+      animationDefs[anim.name] = {
+        frames: frameIndices,
+        speed: anim.speed || 0.15,
+        loop: anim.loop !== false,
+        pingpong: !!anim.pingpong,
+      };
+    }
+
+    const sheet = new SpriteSheet(sheetCanvas, fw, fh, cols, rows);
+    const animator = new SpriteAnimator(sheet, animationDefs);
+    animator.play(animList[0] ? animList[0].name : 'idle');
+    return { sheet, animator, animations: animationDefs };
+  },
+
+  // Render a single static sprite (no animation). For props, furniture, terrain.
+  // config = { width, height, palette, outlineMode, draw(pc, pal), drawPost(pc, pal) }
+  // Returns { canvas, pc } — canvas is the rendered image, pc is the PixelCanvas for inspection.
+  static(config) {
+    const w = config.width || 32;
+    const h = config.height || 32;
+    const pal = config.palette;
+    const outlineMode = config.outlineMode || 'tinted';
+    pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+
+    const pc = new PixelCanvas(w, h);
+    pc.setPalette(pal.palette, pal.groupForIndex);
+    config.draw(pc, pal);
+    PostProcess.applyShading(pc, pal.groups);
+    if (config.drawPost) config.drawPost(pc, pal);
+    PostProcess.applyOutlines(pc, pal.groups, outlineMode);
+
+    const cvs = sf2_makeCanvas(w, h);
+    const ctx = cvs.getContext('2d');
+    pc.blitTo(ctx, 0, 0);
+    return { canvas: cvs, pc };
+  },
+
+  clearCache() { _sf2Cache.clear(); },
+};
+
+if (typeof window !== 'undefined') {
+  window.SpriteForge = SpriteForge;
+  window.SpriteSheet = SpriteSheet;
+  window.SpriteAnimator = SpriteAnimator;
+  window.PixelCanvas = PixelCanvas;
+  window.ColorRamp = ColorRamp;
+  window.PostProcess = PostProcess;
+}
+
+
+// === CANVAS SETUP ===
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, S;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  S = Math.min(W, H) / 600;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// === SPRITES ===
+
+// --- Sprite: beetle-turret (40x56) ---
+const sprite_beetle_turret = (function() {
+  var colors = {
+    'base': '#3D2B1F',
+    'highlight': '#7B4F2E',
+    'shadow': '#1A1008',
+    'accent': '#E63946',
+    'glow': '#FFD166',
+    'underbelly': '#F5ECD7'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(40, 56);
+
+  // Draw
+  (function(pc, pal) {
+    const baseCol = pal.groups.base.startIdx;
+const highlightCol = pal.groups.highlight.startIdx;
+const shadowCol = pal.groups.shadow.startIdx;
+const accentCol = pal.groups.accent.startIdx;
+const glowCol = pal.groups.glow.startIdx;
+const underbellyColo = pal.groups.underbelly.startIdx;
+
+// SPOOL - wooden base
+pc.fillRect(2, 40, 36, 13, baseCol + 1);
+pc.fillEllipse(20, 40, 18, 3, baseCol + 0);
+
+// BEETLE ABDOMEN - scarlet glossy elytra wings
+pc.fillEllipse(20, 27, 14, 15, accentCol + 2);
+
+// Black spots on wings
+pc.fillCircle(14, 20, 2, shadowCol + 0);
+pc.fillCircle(26, 20, 2, shadowCol + 0);
+pc.fillCircle(14, 34, 2, shadowCol + 0);
+pc.fillCircle(26, 34, 2, shadowCol + 0);
+
+// BEETLE HEAD
+pc.fillCircle(20, 13, 8, underbellyColo + 2);
+
+// HORN - long pointed cannon barrel
+pc.fillTriangle(20, 0, 18, 6, 22, 6, baseCol + 0);
+
+// LEGS - six stubby legs gripping spool
+pc.fillRect(9, 26, 3, 11, baseCol + 1);
+pc.fillRect(28, 26, 3, 11, baseCol + 1);
+pc.fillRect(6, 32, 3, 8, baseCol + 0);
+pc.fillRect(31, 32, 3, 8, baseCol + 0);
+pc.fillRect(9, 38, 3, 5, baseCol + 1);
+pc.fillRect(28, 38, 3, 5, baseCol + 1);
+
+// UNDERBELLY - pale cream with line hatching
+pc.fillEllipse(20, 30, 11, 12, underbellyColo + 3);
+
+// Fine line hatching on underbelly
+pc.hline(13, 23, 14, underbellyColo + 1);
+pc.hline(12, 25, 16, underbellyColo + 1);
+pc.hline(11, 27, 18, underbellyColo + 1);
+pc.hline(10, 29, 20, underbellyColo + 1);
+pc.hline(10, 31, 20, underbellyColo + 1);
+pc.hline(11, 33, 18, underbellyColo + 1);
+pc.hline(12, 35, 16, underbellyColo + 1);
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  // Post-draw
+  (function(pc, pal) {
+    const glowCol = pal.groups.glow.startIdx;
+const shadowCol = pal.groups.shadow.startIdx;
+
+// Large shiny compound eyes
+pc.fillCircle(16, 10, 2, shadowCol + 0);
+pc.fillCircle(24, 10, 2, shadowCol + 0);
+pc.fillCircle(15, 9, 1, glowCol + 3);
+pc.fillCircle(23, 9, 1, glowCol + 3);
+
+// Glowing amber horn tip when charged
+pc.fillCircle(20, 1, 2, glowCol + 2);
+pc.fillCircle(20, 1, 1, glowCol + 3);
+
+// Wood grain texture
+pc.scatterNoise(2, 40, 36, 13, shadowCol + 0, 0.25);
+  })(pc, pal);
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 40; cvs.height = 56;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(40, 56);
+  for (var y = 0; y < 56; y++) {
+    for (var x = 0; x < 40; x++) {
+      var idx = pc.pixels[y * 40 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 40 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: ant-grunt (36x52) ---
+const sprite_ant_grunt = (function() {
+  var colors = {
+    'base': '#C1440E',
+    'highlight': '#E8783D',
+    'shadow': '#7A2306',
+    'accent': '#F5E642',
+    'outline': '#3D0F00',
+    'eye': '#FFFFFF'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(36, 52);
+
+  // Draw
+  (function(pc, pal) {
+    const base = pal.groups.base.startIdx;
+const highlight = pal.groups.highlight.startIdx;
+const shadow = pal.groups.shadow.startIdx;
+const accent = pal.groups.accent.startIdx;
+const outline = pal.groups.outline.startIdx;
+const eye = pal.groups.eye.startIdx;
+
+// Large oversized head
+pc.fillCircle(18, 12, 9, base + 3);
+pc.fillCircle(18, 12, 8, base + 2);
+
+// Head highlight (lighter on top-left)
+pc.fillCircle(16, 9, 5, highlight + 2);
+pc.fillCircle(15, 8, 3, highlight + 3);
+
+// Large serrated mandibles
+// Left mandible
+pc.fillTriangle(13, 19, 10, 27, 15, 25, shadow);
+pc.fillTriangle(14, 20, 11, 26, 16, 23, base + 1);
+
+// Right mandible
+pc.fillTriangle(23, 19, 26, 27, 21, 25, shadow);
+pc.fillTriangle(22, 20, 25, 26, 20, 23, base + 1);
+
+// Thorax (middle body segment)
+pc.fillEllipse(18, 26, 8, 6, base + 2);
+pc.fillEllipse(18, 26, 7, 5, base + 3);
+
+// Abdomen (large bottom segment)
+pc.fillEllipse(18, 38, 10, 13, base + 1);
+pc.fillEllipse(18, 38, 9, 12, base + 2);
+
+// Abdomen highlight (orange sheen on top-left)
+pc.fillEllipse(16, 32, 7, 8, highlight + 2);
+
+// Six legs with bent, waddling stance
+// Left front leg
+pc.fillRect(10, 22, 2, 3, base + 2);
+pc.fillRect(8, 25, 2, 3, base + 1);
+pc.fillRect(7, 28, 2, 2, shadow + 1);
+
+// Right front leg
+pc.fillRect(26, 22, 2, 3, base + 2);
+pc.fillRect(28, 25, 2, 3, base + 1);
+pc.fillRect(29, 28, 2, 2, shadow + 1);
+
+// Left middle leg
+pc.fillRect(10, 32, 2, 3, base + 1);
+pc.fillRect(8, 35, 2, 3, base + 1);
+pc.fillRect(6, 38, 2, 2, shadow);
+
+// Right middle leg
+pc.fillRect(26, 32, 2, 3, base + 1);
+pc.fillRect(28, 35, 2, 3, base + 1);
+pc.fillRect(30, 38, 2, 2, shadow);
+
+// Left back leg
+pc.fillRect(10, 42, 2, 3, shadow);
+pc.fillRect(8, 45, 2, 3, shadow + 1);
+pc.fillRect(6, 48, 2, 2, outline);
+
+// Right back leg
+pc.fillRect(26, 42, 2, 3, shadow);
+pc.fillRect(28, 45, 2, 3, shadow + 1);
+pc.fillRect(30, 48, 2, 2, outline);
+
+// Antennae with round tips curving upward
+// Left antenna
+pc.hline(14, 2, -3, highlight + 1);
+pc.vline(11, 2, 6, highlight + 1);
+pc.fillCircle(11, 1, 2, highlight + 2);
+
+// Right antenna
+pc.hline(22, 2, 3, highlight + 1);
+pc.vline(25, 2, 6, highlight + 1);
+pc.fillCircle(25, 1, 2, highlight + 2);
+
+// Leaf shield on left front leg
+pc.fillEllipse(8, 23, 2, 3, accent + 2);
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  // Post-draw
+  (function(pc, pal) {
+    const eye = pal.groups.eye.startIdx;
+const outline = pal.groups.outline.startIdx;
+const highlight = pal.groups.highlight.startIdx;
+const shadow = pal.groups.shadow.startIdx;
+
+// Beady white eyes with black pupils
+pc.fillCircle(15, 10, 2, eye);
+pc.fillCircle(21, 10, 2, eye);
+
+// Black pupils
+pc.fillCircle(15, 10, 1, outline);
+pc.fillCircle(21, 10, 1, outline);
+
+// Eye shine
+pc.setPixel(14, 9, eye);
+pc.setPixel(20, 9, eye);
+
+// Mandible shine
+pc.setPixel(12, 22, highlight + 3);
+pc.setPixel(24, 22, highlight + 3);
+
+// Body texture detail with scattered noise
+pc.scatterNoise(7, 20, 22, 30, shadow, 0.06);
+  })(pc, pal);
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 36; cvs.height = 52;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(36, 52);
+  for (var y = 0; y < 52; y++) {
+    for (var x = 0; x < 36; x++) {
+      var idx = pc.pixels[y * 36 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 36 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: mosquito-flyer (36x48) ---
+const sprite_mosquito_flyer = (function() {
+  var colors = {
+    'base': '#2D6A4F',
+    'highlight': '#52B788',
+    'shadow': '#1B4332',
+    'accent': '#C77DFF',
+    'wing': '#B7E4C7',
+    'stripe': '#1A1A2E'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(36, 48);
+
+  // Draw
+  (function(pc, pal) {
+    const baseIdx = pal.groups.base.startIdx;
+const highlightIdx = pal.groups.highlight.startIdx;
+const shadowIdx = pal.groups.shadow.startIdx;
+const accentIdx = pal.groups.accent.startIdx;
+const wingIdx = pal.groups.wing.startIdx;
+const stripeIdx = pal.groups.stripe.startIdx;
+
+// EYES - Large bulging purple multifaceted eyes (dominate the head)
+pc.fillCircle(13, 6, 5, accentIdx + 3);
+pc.fillCircle(23, 6, 5, accentIdx + 3);
+
+// Multifaceted eye details - darker spots for compound eye effect
+pc.fillCircle(11, 4, 1, accentIdx + 0);
+pc.fillCircle(13, 3, 1, accentIdx + 1);
+pc.fillCircle(15, 4, 1, accentIdx + 0);
+pc.fillCircle(21, 4, 1, accentIdx + 0);
+pc.fillCircle(23, 3, 1, accentIdx + 1);
+pc.fillCircle(25, 4, 1, accentIdx + 0);
+
+// Small head body (subtle behind eyes)
+pc.fillCircle(18, 9, 2, baseIdx + 2);
+
+// PROBOSCIS - Elongated needle curving downward with slight leftward bend
+pc.fillRect(18, 11, 1, 5, baseIdx + 2);
+pc.hline(17, 16, 2, baseIdx + 2);
+pc.hline(16, 17, 3, baseIdx + 2);
+pc.hline(15, 18, 4, baseIdx + 1);
+pc.hline(14, 19, 5, baseIdx + 1);
+pc.hline(13, 20, 6, baseIdx + 1);
+pc.hline(12, 21, 4, baseIdx + 0);
+
+// THORAX - Central body where wings and legs attach
+pc.fillEllipse(18, 15, 7, 6, baseIdx + 2);
+
+// ABDOMEN - Navy and teal striped segments (comically elongated)
+pc.fillRect(10, 23, 16, 2, stripeIdx + 1);
+pc.fillRect(10, 25, 16, 2, highlightIdx + 2);
+pc.fillRect(9, 27, 18, 2, stripeIdx + 0);
+pc.fillRect(9, 29, 18, 2, highlightIdx + 3);
+pc.fillRect(8, 31, 20, 2, stripeIdx + 0);
+pc.fillRect(8, 33, 20, 2, highlightIdx + 2);
+pc.fillRect(9, 35, 18, 2, stripeIdx + 0);
+pc.fillRect(9, 37, 18, 2, highlightIdx + 2);
+pc.fillRect(10, 39, 16, 2, stripeIdx + 1);
+
+// WINGS - Two pairs of delicate iridescent semi-transparent wings
+// Front pair (larger, upper position)
+pc.fillEllipse(7, 13, 5, 8, wingIdx + 3);
+pc.fillEllipse(29, 13, 5, 8, wingIdx + 3);
+// Back pair (smaller, angled outward lower position)
+pc.fillEllipse(4, 19, 3, 6, wingIdx + 1);
+pc.fillEllipse(32, 19, 3, 6, wingIdx + 1);
+
+// SIX SPINDLY LEGS - Dangly beneath body
+pc.vline(10, 15, 14, shadowIdx + 2);
+pc.vline(26, 15, 14, shadowIdx + 2);
+pc.vline(6, 19, 16, shadowIdx + 1);
+pc.vline(30, 19, 16, shadowIdx + 1);
+pc.vline(3, 24, 14, shadowIdx + 0);
+pc.vline(33, 24, 14, shadowIdx + 0);
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  // Post-draw
+  (function(pc, pal) {
+    // Eye highlights - glossy multifaceted shine
+pc.fillCircle(11, 4, 1, accentIdx + 3);
+pc.fillCircle(25, 4, 1, accentIdx + 3);
+
+// Wing shimmer and iridescent detail
+pc.scatterNoise(4, 13, 8, 10, wingIdx + 2, 0.2);
+pc.scatterNoise(28, 13, 8, 10, wingIdx + 2, 0.2);
+
+// Leg joint articulation details
+pc.setPixel(10, 20, shadowIdx + 2);
+pc.setPixel(26, 20, shadowIdx + 2);
+pc.setPixel(6, 25, shadowIdx + 1);
+pc.setPixel(30, 25, shadowIdx + 1);
+  })(pc, pal);
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 36; cvs.height = 48;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(36, 48);
+  for (var y = 0; y < 48; y++) {
+    for (var x = 0; x < 36; x++) {
+      var idx = pc.pixels[y * 36 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 36 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: acorn-shot (24x24) ---
+const sprite_acorn_shot = (function() {
+  var colors = {
+    'base': '#8B5E3C',
+    'highlight': '#C8956C',
+    'shadow': '#4A2E10',
+    'cap': '#5C3D1E',
+    'glint': '#FFFFFF',
+    'trail': '#D4A96A'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(24, 24);
+
+  // Draw
+  (function(pc, pal) {
+    const base = pal.groups.base.startIdx;
+const highlight = pal.groups.highlight.startIdx;
+const shadow = pal.groups.shadow.startIdx;
+const cap = pal.groups.cap.startIdx;
+const glint = pal.groups.glint.startIdx;
+const trail = pal.groups.trail.startIdx;
+
+// Main acorn body - smooth round chestnut-brown body
+pc.fillCircle(12, 13, 6, base + 1);
+
+// Acorn cap - scaly textured portion at top
+pc.fillRect(7, 5, 10, 4, cap + 1);
+
+// Stem - tiny cork-screw curl on top of cap
+pc.setPixel(12, 3, cap + 2);
+pc.setPixel(12, 2, cap + 1);
+pc.setPixel(13, 2, cap + 0);
+
+// Specular glint - bright white highlight on upper body
+pc.fillCircle(13, 10, 1, glint + 3);
+
+// Motion blur trail - horizontal golden-brown smear to the left
+pc.hline(2, 12, 4, trail + 1);
+pc.hline(1, 13, 5, trail + 0);
+pc.hline(2, 14, 4, trail + 1);
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  // Post-draw
+  (function(pc, pal) {
+    // Cap texture - scaly detail with varied darker and lighter tones
+pc.scatterNoise(7, 5, 10, 4, cap + 0, 0.25);
+pc.scatterNoise(7, 5, 10, 4, cap + 2, 0.1);
+
+// Body shading - darker shadow on bottom-right for depth
+pc.fillEllipse(14, 15, 4, 3, shadow + 0);
+
+// Body highlight - lighter tones on top-left for roundness
+pc.fillEllipse(10, 11, 3, 2, highlight + 2);
+
+// Additional glint details for bright specular effect
+pc.setPixel(14, 9, glint + 2);
+pc.setPixel(13, 9, glint + 1);
+  })(pc, pal);
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 24; cvs.height = 24;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(24, 24);
+  for (var y = 0; y < 24; y++) {
+    for (var x = 0; x < 24; x++) {
+      var idx = pc.pixels[y * 24 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 24 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: leaf-path (32x32) ---
+const sprite_leaf_path = (function() {
+  var colors = {
+    'base': '#52B788',
+    'highlight': '#95D5B2',
+    'shadow': '#2D6A4F',
+    'vein': '#1B4332',
+    'rim': '#D8F3DC'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(32, 32);
+
+  // Draw
+  (function(pc, pal) {
+    const baseIdx = pal.groups.base.startIdx;
+const highlightIdx = pal.groups.highlight.startIdx;
+const shadowIdx = pal.groups.shadow.startIdx;
+const veinIdx = pal.groups.vein.startIdx;
+const rimIdx = pal.groups.rim.startIdx;
+
+// Fill entire canvas with base color (light tone for top-left bias)
+pc.fillRect(0, 0, 32, 32, baseIdx + 2);
+
+// Add natural texture variation across the surface
+pc.scatterNoise(0, 0, 32, 32, baseIdx + 1, 0.18);
+pc.scatterNoise(0, 0, 32, 32, baseIdx + 3, 0.12);
+
+// Add directional shading - darker tones toward bottom-right
+for (let y = 22; y < 32; y++) {
+  for (let x = 20; x < 32; x++) {
+    if (Math.random() < 0.35) {
+      pc.setPixel(x, y, shadowIdx + 1);
+    }
+  }
+}
+
+// Central midrib - prominent dark vertical vein running top-to-bottom
+pc.vline(16, 0, 32, veinIdx + 0);
+for (let y = 0; y < 32; y++) {
+  if (Math.random() < 0.35) {
+    pc.setPixel(17, y, veinIdx + 1);
+  }
+}
+
+// Six diagonal veins branching outward (3 left, 3 right)
+// Upper-left vein
+for (let i = 0; i < 11; i++) {
+  pc.setPixel(14 - i, 5 + i, veinIdx + 1);
+}
+// Middle-left vein
+for (let i = 0; i < 13; i++) {
+  pc.setPixel(15 - i, 10 + i, veinIdx + 1);
+}
+// Lower-left vein
+for (let i = 0; i < 11; i++) {
+  pc.setPixel(14 - i, 19 + i, veinIdx + 1);
+}
+// Upper-right vein
+for (let i = 0; i < 11; i++) {
+  pc.setPixel(18 + i, 5 + i, veinIdx + 1);
+}
+// Middle-right vein
+for (let i = 0; i < 13; i++) {
+  pc.setPixel(17 + i, 10 + i, veinIdx + 1);
+}
+// Lower-right vein
+for (let i = 0; i < 11; i++) {
+  pc.setPixel(18 + i, 19 + i, veinIdx + 1);
+}
+
+// Sheen highlight bar - diagonal band in upper-left third
+for (let y = 0; y < 14; y++) {
+  for (let x = 0; x < 18; x++) {
+    if (x + y < 16) {
+      pc.setPixel(x, y, highlightIdx + 3);
+    }
+  }
+}
+
+// Curled-under lip edge detail at bottom
+for (let x = 0; x < 32; x++) {
+  pc.setPixel(x, 31, rimIdx + 2);
+  if (x % 4 === 0) {
+    pc.setPixel(x, 30, rimIdx + 1);
+  }
+}
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  // Post-draw
+  (function(pc, pal) {
+    // Enhance highlight sheen with subtle texture
+pc.scatterNoise(0, 0, 18, 14, highlightIdx + 2, 0.08);
+
+// Add shadow accent to curled lip edge
+for (let x = 0; x < 32; x++) {
+  if (Math.random() < 0.4) {
+    pc.setPixel(x, 30, shadowIdx + 0);
+  }
+}
+  })(pc, pal);
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 32; cvs.height = 32;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(32, 32);
+  for (var y = 0; y < 32; y++) {
+    for (var x = 0; x < 32; x++) {
+      var idx = pc.pixels[y * 32 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 32 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: dirt-mound (32x32) ---
+const sprite_dirt_mound = (function() {
+  var colors = {
+    'base': '#A0522D',
+    'highlight': '#C8845A',
+    'shadow': '#6B2D0E',
+    'pebble': '#D4C5A9',
+    'crack': '#3D1C08'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(32, 32);
+
+  // Draw
+  (function(pc, pal) {
+    const baseIdx = pal.groups.base.startIdx;
+const highlightIdx = pal.groups.highlight.startIdx;
+const shadowIdx = pal.groups.shadow.startIdx;
+const pebbleIdx = pal.groups.pebble.startIdx;
+const crackIdx = pal.groups.crack.startIdx;
+
+// Fill entire canvas with base color and diagonal shading (lighter top-left, darker bottom-right)
+for (let y = 0; y < 32; y++) {
+  for (let x = 0; x < 32; x++) {
+    let shadeValue = (x + y) / 64;
+    let shadeLevel = Math.min(3, Math.floor(shadeValue * 4));
+    pc.setPixel(x, y, baseIdx + shadeLevel);
+  }
+}
+
+// Beveled rim around edges - lighter on top/left (highlight), darker on bottom/right (shadow)
+for (let i = 0; i < 32; i++) {
+  pc.setPixel(i, 0, highlightIdx + 2);
+  pc.setPixel(0, i, highlightIdx + 2);
+  pc.setPixel(i, 31, shadowIdx + 1);
+  pc.setPixel(31, i, shadowIdx + 1);
+}
+
+// Draw main diagonal fissure from upper-left to lower-right
+for (let i = 0; i < 32; i++) {
+  pc.setPixel(i, i, crackIdx);
+  if (i > 0) pc.setPixel(i - 1, i, crackIdx);
+}
+
+// Draw three pebbles of varying sizes embedded in the surface
+// Pebble 1: large, upper-right area
+pc.fillCircle(23, 9, 3, pebbleIdx + 1);
+pc.fillCircle(23, 9, 2, pebbleIdx + 3);
+
+// Pebble 2: medium, lower-left area
+pc.fillCircle(9, 22, 2, pebbleIdx + 1);
+pc.fillCircle(9, 22, 1, pebbleIdx + 3);
+
+// Pebble 3: small, center area
+pc.fillCircle(16, 16, 1, pebbleIdx + 2);
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  // Post-draw
+  (function(pc, pal) {
+    const baseIdx = pal.groups.base.startIdx;
+const highlightIdx = pal.groups.highlight.startIdx;
+
+// Add scattered texture noise for natural cracked soil appearance
+pc.scatterNoise(0, 0, 32, 32, baseIdx + 1, 0.1);
+
+// Add warm amber highlight spots in top-left corner to catch the light source
+for (let y = 0; y < 8; y++) {
+  for (let x = 0; x < 8; x++) {
+    if (Math.random() < 0.15) {
+      pc.setPixel(x + 1, y + 1, highlightIdx + 3);
+    }
+  }
+}
+  })(pc, pal);
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 32; cvs.height = 32;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(32, 32);
+  for (var y = 0; y < 32; y++) {
+    for (var x = 0; x < 32; x++) {
+      var idx = pc.pixels[y * 32 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 32 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: bark-wall (32x32) ---
+const sprite_bark_wall = (function() {
+  var colors = {
+    'base': '#4A2C17',
+    'highlight': '#7B4F2E',
+    'shadow': '#1E0F06',
+    'ridge': '#8B6240',
+    'lichen': '#95D5B2'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(32, 32);
+
+  // Draw
+  (function(pc, pal) {
+    const baseColor = pal.groups.base.startIdx;
+const shadowColor = pal.groups.shadow.startIdx;
+const ridgeColor = pal.groups.ridge.startIdx;
+const lichColor = pal.groups.lichen.startIdx;
+
+// Base layer covers entire canvas for seamless tiling
+pc.fillRect(0, 0, 32, 32, baseColor + 1);
+
+// Lighting gradient: lighter at top-left, darker at bottom-right
+pc.fillRect(0, 0, 32, 8, baseColor + 2);
+pc.fillRect(0, 24, 32, 8, baseColor + 0);
+
+// Deep vertical grain lines throughout full height
+for (let x = 0; x < 32; x += 2) {
+  pc.vline(x, 0, 32, shadowColor + 1);
+}
+for (let x = 4; x < 32; x += 6) {
+  pc.vline(x, 0, 32, shadowColor + 0);
+}
+
+// Three pronounced horizontal ridge lines with warm mahogany tone
+pc.hline(0, 8, 32, ridgeColor + 2);
+pc.hline(0, 9, 32, ridgeColor + 1);
+
+pc.hline(0, 16, 32, ridgeColor + 2);
+pc.hline(0, 17, 32, ridgeColor + 1);
+
+pc.hline(0, 24, 32, ridgeColor + 2);
+pc.hline(0, 25, 32, ridgeColor + 1);
+
+// Rough, layered texture between ridges
+pc.scatterNoise(0, 10, 32, 6, baseColor + 0, 0.15);
+pc.scatterNoise(0, 18, 32, 6, baseColor + 0, 0.15);
+
+// Slightly irregular, hand-hewn top edge
+for (let x = 0; x < 32; x++) {
+  const edge = ((x * 11 + 3) % 12);
+  if (edge < 3) pc.setPixel(x, 0, shadowColor + 0);
+  if (edge > 8) pc.setPixel(x, 1, shadowColor + 1);
+}
+
+// Pale-green lichen clump in upper-right corner
+pc.fillCircle(26, 5, 2, lichColor + 2);
+pc.fillCircle(28, 7, 2, lichColor + 3);
+pc.fillCircle(24, 7, 1, lichColor + 1);
+
+// Natural texture variation across bark surface
+pc.scatterNoise(0, 0, 32, 32, baseColor + 0, 0.12);
+pc.scatterNoise(23, 2, 9, 8, lichColor + 1, 0.3);
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 32; cvs.height = 32;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(32, 32);
+  for (var y = 0; y < 32; y++) {
+    for (var x = 0; x < 32; x++) {
+      var idx = pc.pixels[y * 32 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 32 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: mushroom-stool (32x40) ---
+const sprite_mushroom_stool = (function() {
+  var colors = {
+    'base': '#E63946',
+    'highlight': '#FF8080',
+    'shadow': '#9B1C22',
+    'stalk': '#FFF8E7',
+    'spot': '#FFFFFF',
+    'gill': '#F4C2C2'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(32, 40);
+
+  // Draw
+  (function(pc, pal) {
+    const baseIdx = pal.groups.base.startIdx;
+const highlightIdx = pal.groups.highlight.startIdx;
+const shadowIdx = pal.groups.shadow.startIdx;
+const stalkIdx = pal.groups.stalk.startIdx;
+const spotIdx = pal.groups.spot.startIdx;
+const gillIdx = pal.groups.gill.startIdx;
+
+// Draw gills underneath cap (pale pink fan pattern)
+pc.fillRect(3, 21, 26, 2, gillIdx + 2);
+for (let i = 0; i < 13; i++) {
+  pc.vline(4 + i * 2, 21, 2, gillIdx + 0);
+}
+
+// Draw mushroom cap dome with shading (lighter on top, darker at bottom)
+pc.fillEllipse(16, 11, 14, 11, baseIdx + 3);
+pc.fillEllipse(16, 13, 13, 9, baseIdx + 2);
+pc.fillEllipse(16, 15, 11, 7, baseIdx + 1);
+pc.fillEllipse(18, 17, 8, 4, baseIdx + 0);
+
+// Draw white polka dots with dark ring borders (raised effect)
+const dots = [
+  {x: 8, y: 6},
+  {x: 16, y: 3},
+  {x: 24, y: 6},
+  {x: 11, y: 13},
+  {x: 21, y: 13},
+  {x: 16, y: 17}
+];
+for (let dot of dots) {
+  pc.fillCircle(dot.x, dot.y, 4, baseIdx + 0);
+  pc.fillCircle(dot.x, dot.y, 3, spotIdx + 3);
+}
+
+// Draw barrel-shaped cream stalk with slight waist
+pc.fillRect(11, 22, 10, 2, stalkIdx + 3);
+pc.fillRect(10, 24, 12, 2, stalkIdx + 2);
+pc.fillRect(10, 26, 12, 6, stalkIdx + 2);
+pc.fillRect(11, 26, 10, 6, stalkIdx + 3);
+pc.fillRect(13, 32, 6, 2, stalkIdx + 2);
+pc.fillRect(11, 34, 10, 5, stalkIdx + 1);
+
+// Add shadow shading on sides of stalk
+pc.vline(10, 26, 8, stalkIdx + 0);
+pc.vline(22, 26, 8, stalkIdx + 0);
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  // Post-draw
+  (function(pc, pal) {
+    const baseIdx = pal.groups.base.startIdx;
+const shadowIdx = pal.groups.shadow.startIdx;
+const spotIdx = pal.groups.spot.startIdx;
+
+// Draw two small expressive oval eyes with pupils
+pc.fillEllipse(13, 29, 3, 2, shadowIdx + 0);
+pc.fillCircle(13, 29, 1, spotIdx + 3);
+pc.setPixel(13, 29, shadowIdx + 0);
+
+pc.fillEllipse(19, 29, 3, 2, shadowIdx + 0);
+pc.fillCircle(19, 29, 1, spotIdx + 3);
+pc.setPixel(19, 29, shadowIdx + 0);
+
+// Add subtle texture detail to cap surface
+pc.scatterNoise(5, 5, 22, 14, baseIdx + 0, 0.08);
+  })(pc, pal);
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 32; cvs.height = 40;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(32, 40);
+  for (var y = 0; y < 40; y++) {
+    for (var x = 0; x < 32; x++) {
+      var idx = pc.pixels[y * 32 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 32 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+
+// --- Sprite: flower-node (28x36) ---
+const sprite_flower_node = (function() {
+  var colors = {
+    'base': '#FFD166',
+    'highlight': '#FFED99',
+    'shadow': '#C8960C',
+    'center': '#EF8C3B',
+    'stem': '#40916C',
+    'face': '#3D1C08'
+  };
+  var pal = ColorRamp.buildPalette(colors);
+  pal.palette[255] = sf2_packRGBA(20, 15, 10, 255);
+  var pc = new PixelCanvas(28, 36);
+
+  // Draw
+  (function(pc, pal) {
+    const baseColor = pal.groups.base.startIdx;
+const centerColor = pal.groups.center.startIdx;
+const stemColor = pal.groups.stem.startIdx;
+const faceColor = pal.groups.face.startIdx;
+
+const cx = 14;
+const cy = 12;
+
+// Draw 5 petals in bright yellow
+// Top petal
+pc.fillEllipse(cx, cy - 10, 3, 8, baseColor + 3);
+pc.fillEllipse(cx, cy - 10, 2, 6, baseColor + 3);
+
+// Top-right petal
+pc.fillEllipse(cx + 7, cy - 7, 4, 5, baseColor + 2);
+pc.fillEllipse(cx + 7, cy - 7, 3, 4, baseColor + 3);
+
+// Bottom-right petal
+pc.fillEllipse(cx + 7, cy + 7, 4, 5, baseColor + 1);
+pc.fillEllipse(cx + 7, cy + 7, 3, 4, baseColor + 2);
+
+// Bottom-left petal
+pc.fillEllipse(cx - 7, cy + 7, 4, 5, baseColor + 1);
+pc.fillEllipse(cx - 7, cy + 7, 3, 4, baseColor + 2);
+
+// Top-left petal
+pc.fillEllipse(cx - 7, cy - 7, 4, 5, baseColor + 2);
+pc.fillEllipse(cx - 7, cy - 7, 3, 4, baseColor + 3);
+
+// Draw center disc (orange) with 3D effect
+pc.fillCircle(cx, cy, 6, centerColor + 0);
+pc.fillCircle(cx, cy, 5, centerColor + 1);
+pc.fillCircle(cx, cy, 4, centerColor + 2);
+
+// Highlight on center disc
+pc.fillCircle(cx - 1, cy - 1, 2, centerColor + 3);
+
+// Draw stem (green)
+pc.vline(cx, cy + 7, 14, stemColor + 1);
+pc.vline(cx - 1, cy + 8, 13, stemColor + 2);
+
+// Draw leaves
+pc.fillEllipse(cx - 4, cy + 11, 2, 3, stemColor + 2);
+pc.fillEllipse(cx + 4, cy + 11, 2, 3, stemColor + 2);
+  })(pc, pal);
+
+  // Shading
+  PostProcess.applyShading(pc, pal, { lightAngle: Math.PI * 0.75 });
+
+  // Post-draw
+  (function(pc, pal) {
+    // Eyes (dark brown)
+pc.setPixel(cx - 2, cy - 1, faceColor);
+pc.setPixel(cx + 2, cy - 1, faceColor);
+
+// Mouth (smile curve)
+pc.setPixel(cx - 2, cy + 2, faceColor);
+pc.setPixel(cx - 1, cy + 3, faceColor);
+pc.setPixel(cx, cy + 3, faceColor);
+pc.setPixel(cx + 1, cy + 3, faceColor);
+pc.setPixel(cx + 2, cy + 2, faceColor);
+
+// Glow effect (light pixels radiating from center)
+pc.setPixel(cx, cy - 7, centerColor + 3);
+pc.setPixel(cx, cy + 8, centerColor + 3);
+pc.setPixel(cx - 5, cy - 3, centerColor + 3);
+pc.setPixel(cx + 5, cy - 3, centerColor + 3);
+pc.setPixel(cx - 5, cy + 5, centerColor + 3);
+pc.setPixel(cx + 5, cy + 5, centerColor + 3);
+  })(pc, pal);
+
+  // Render to ImageData
+  var cvs = document.createElement('canvas');
+  cvs.width = 28; cvs.height = 36;
+  var sCtx = cvs.getContext('2d');
+  var img = sCtx.createImageData(28, 36);
+  for (var y = 0; y < 36; y++) {
+    for (var x = 0; x < 28; x++) {
+      var idx = pc.pixels[y * 28 + x];
+      var rgba = pal.palette[idx] || 0;
+      var pi = (y * 28 + x) * 4;
+      img.data[pi]     = rgba & 0xFF;
+      img.data[pi + 1] = (rgba >> 8) & 0xFF;
+      img.data[pi + 2] = (rgba >> 16) & 0xFF;
+      img.data[pi + 3] = (rgba >> 24) & 0xFF;
+    }
+  }
+  sCtx.putImageData(img, 0, 0);
+  return cvs;
+})();
+
+// === MECHANICS ===
+
+// Entity array normalizer — contract enforcement
+function _toEntityArray(arg) {
+  if (arg === undefined || arg === null) return [];
+  if (Array.isArray(arg)) return arg;
+  if (arg && typeof arg === 'object') {
+    if (Array.isArray(arg.entities)) return arg.entities;
+    if (Array.isArray(arg.sprites)) return arg.sprites;
+    return [arg];
+  }
+  return [];
+}
+// --- Mechanic: TurretPlacement ---
+class TurretPlacement {
+  constructor(entities) {
+    this.entities = entities;
+
+    // Placement UI state
+    this.placementMode = false;
+    this.ghostX = W / 2;
+    this.ghostY = H / 2;
+    this.selectedTurret = null;    // turret entity highlighted for range ring
+    this.placementFlash = 0;       // success flash timer
+    this.errorFlash    = 0;        // invalid-placement flash timer
+
+    // Resources (placement tokens)
+    this.resources = 10;
+    this.TURRET_COST = 1;
+
+    // Turret constants (baseline px, multiplied by S at use-time)
+    this.TURRET_RANGE      = 120;   // px
+    this.TURRET_FIRE_RATE  = 1.5;   // shots / second
+    this.TURRET_DAMAGE     = 25;
+    this.PROJECTILE_SPEED  = 220;   // px/s
+
+    // Enemy baseline HP
+    this.ENEMY_HP_BASE = { 'ant-grunt': 100, 'mosquito-flyer': 60 };
+
+    // Per-entity state maps
+    this.turretCooldowns = new Map();   // entity  -> seconds until next shot
+    this.enemyHealth     = new Map();   // entity  -> current hp
+    this.enemyMaxHealth  = new Map();   // entity  -> max hp
+
+    // Active projectiles
+    this.projectiles = [];
+    // { x, y, vx, vy, target (entity ref), damage, life }
+
+    // Seed state for entities already present
+    this._initEntity(entities);
+  }
+
+  /* ─── helpers ─────────────────────────────────────── */
+
+  _initEntity(list) {
+    for (const e of list) {
+      if (e.type === 'beetle-turret' && !this.turretCooldowns.has(e)) {
+        this.turretCooldowns.set(e, 0);
+      }
+      if ((e.type === 'ant-grunt' || e.type === 'mosquito-flyer') && !this.enemyHealth.has(e)) {
+        const hp = this.ENEMY_HP_BASE[e.type] || 80;
+        this.enemyHealth.set(e, hp);
+        this.enemyMaxHealth.set(e, hp);
+      }
+    }
+  }
+
+  _turrets()  { return this.entities.filter(e => e.type === 'beetle-turret'); }
+  _enemies()  { return this.entities.filter(e => e.type === 'ant-grunt' || e.type === 'mosquito-flyer'); }
+  _paths()    { return this.entities.filter(e => e.type === 'leaf-path'); }
+  _walls()    { return this.entities.filter(e => e.type === 'bark-wall'); }
+  _mounds()   { return this.entities.filter(e => e.type === 'dirt-mound'); }
+
+  _ew(e) { return e.width  || 32 * S; }
+  _eh(e) { return e.height || 32 * S; }
+
+  _overlapsRect(ax, ay, aw, ah, bx, by, bw, bh) {
+    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+  }
+
+  _canPlace(cx, cy) {
+    const tw = 32 * S, th = 32 * S;
+    const hx = cx - tw / 2, hy = cy - th / 2;
+    if (hx < 0 || hy < 0 || hx + tw > W || hy + th > H) return false;
+    for (const b of [...this._walls(), ...this._paths(), ...this._mounds(), ...this._turrets()]) {
+      if (this._overlapsRect(hx, hy, tw, th, b.x - this._ew(b) / 2, b.y - this._eh(b) / 2, this._ew(b), this._eh(b))) return false;
+    }
+    return true;
+  }
+
+  _roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  /* ─── update ──────────────────────────────────────── */
+
+  update(dt) {
+    const events = [];
+    const safeDt = Math.min(dt, 0.1);
+
+    // Sync any newly-spawned entities
+    this._initEntity(this.entities);
+
+    /* ── 1. Move enemies toward nearest leaf-path node then dirt-mound ── */
+    const paths  = this._paths();
+    const mounds = this._mounds();
+    const SPEED  = { 'ant-grunt': 40 * S, 'mosquito-flyer': 65 * S };
+
+    for (const enemy of this._enemies()) {
+      const hp = this.enemyHealth.get(enemy) || 0;
+      if (hp <= 0 || enemy.x < -100) continue;
+
+      const speed = SPEED[enemy.type] || 40 * S;
+
+      // Build a simple waypoint list: path nodes sorted by distance, then mound
+      let target  = null;
+      let minDist = Infinity;
+
+      // Prefer the closest unvisited path segment ahead
+      for (const p of paths) {
+        const d = Math.hypot(p.x - enemy.x, p.y - enemy.y);
+        if (d > 6 * S && d < minDist) { minDist = d; target = p; }
+      }
+      // Fall back to nearest mound
+      for (const m of mounds) {
+        const d = Math.hypot(m.x - enemy.x, m.y - enemy.y);
+        if (d < minDist) { minDist = d; target = m; }
+      }
+
+      if (target) {
+        const dx = target.x - enemy.x, dy = target.y - enemy.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        if (dist > 2 * S) {
+          enemy.x += (dx / dist) * speed * safeDt;
+          enemy.y += (dy / dist) * speed * safeDt;
+        }
+      }
+    }
+
+    /* ── 2. Turret fire logic ── */
+    for (const turret of this._turrets()) {
+      let cd = (this.turretCooldowns.get(turret) || 0) - safeDt;
+      if (cd < 0) cd = 0;
+
+      if (cd <= 0) {
+        const range = this.TURRET_RANGE * S;
+        let nearest = null, nearestDist = Infinity;
+
+        for (const enemy of this._enemies()) {
+          const hp = this.enemyHealth.get(enemy) || 0;
+          if (hp <= 0 || enemy.x < -100) continue;
+          const d = Math.hypot(turret.x - enemy.x, turret.y - enemy.y);
+          if (d <= range && d < nearestDist) { nearestDist = d; nearest = enemy; }
+        }
+
+        if (nearest) {
+          const dx = nearest.x - turret.x, dy = nearest.y - turret.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const spd  = this.PROJECTILE_SPEED * S;
+          this.projectiles.push({
+            x: turret.x, y: turret.y,
+            vx: (dx / dist) * spd,
+            vy: (dy / dist) * spd,
+            target: nearest,
+            damage: this.TURRET_DAMAGE,
+            life: 2.5
+          });
+          cd = 1 / this.TURRET_FIRE_RATE;
+        }
+      }
+
+      this.turretCooldowns.set(turret, cd);
+    }
+
+    /* ── 3. Advance & resolve projectiles ── */
+    const alive = [];
+    for (const proj of this.projectiles) {
+      proj.x    += proj.vx * safeDt;
+      proj.y    += proj.vy * safeDt;
+      proj.life -= safeDt;
+
+      if (proj.life <= 0) continue;
+
+      const tgt = proj.target;
+      const tgtHp = this.enemyHealth.get(tgt);
+      if (tgtHp === undefined || tgtHp <= 0 || tgt.x < -100) continue;
+
+      const hitDist = Math.hypot(proj.x - tgt.x, proj.y - tgt.y);
+      if (hitDist < 10 * S) {
+        // Impact
+        const newHp = Math.max(0, tgtHp - proj.damage);
+        this.enemyHealth.set(tgt, newHp);
+
+        if (newHp <= 0) {
+          const score = tgt.type === 'mosquito-flyer' ? 15 : 10;
+          events.push({ type: 'score', value: score });
+          events.push({ type: 'state', key: 'enemyKilled', value: tgt.type });
+          tgt.x = -9999; tgt.y = -9999;   // banish off-canvas
+        }
+        continue;   // projectile consumed
+      }
+
+      alive.push(proj);
+    }
+    this.projectiles = alive;
+
+    /* ── 4. Tick flash timers ── */
+    if (this.placementFlash > 0) this.placementFlash -= safeDt;
+    if (this.errorFlash    > 0) this.errorFlash    -= safeDt;
+
+    return events;
+  }
+
+  /* ─── draw ────────────────────────────────────────── */
+
+  draw(ctx) {
+    const tw = 32 * S;
+
+    /* ── dim range rings for every turret ── */
+    for (const turret of this._turrets()) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(turret.x, turret.y, this.TURRET_RANGE * S, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(100,210,100,0.16)';
+      ctx.lineWidth   = 1.5 * S;
+      ctx.setLineDash([4 * S, 4 * S]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    /* ── bright range ring for selected / hovered turret ── */
+    if (this.selectedTurret) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(this.selectedTurret.x, this.selectedTurret.y, this.TURRET_RANGE * S, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(80,240,100,0.75)';
+      ctx.lineWidth   = 2 * S;
+      ctx.stroke();
+      // HP label
+      ctx.fillStyle   = '#cfffcc';
+      ctx.font        = `bold ${10 * S}px sans-serif`;
+      ctx.textAlign   = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('Range: ' + Math.round(this.TURRET_RANGE) + 'px',
+        this.selectedTurret.x, this.selectedTurret.y - tw / 2 - 4 * S);
+      ctx.restore();
+    }
+
+    /* ── ghost turret preview ── */
+    if (this.placementMode) {
+      const valid = this._canPlace(this.ghostX, this.ghostY);
+      const hx = this.ghostX - tw / 2, hy = this.ghostY - tw / 2;
+      const col = valid ? [60, 220, 80] : [220, 60, 60];
+
+      ctx.save();
+      // Range circle
+      ctx.beginPath();
+      ctx.arc(this.ghostX, this.ghostY, this.TURRET_RANGE * S, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},0.38)`;
+      ctx.lineWidth   = 1.5 * S;
+      ctx.setLineDash([5 * S, 4 * S]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Ghost body
+      this._roundRect(ctx, hx, hy, tw, tw, 5 * S);
+      ctx.fillStyle   = `rgba(${col[0]},${col[1]},${col[2]},0.28)`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},0.85)`;
+      ctx.lineWidth   = 2 * S;
+      ctx.stroke();
+      // Label
+      ctx.fillStyle    = valid ? '#82ff9a' : '#ff8282';
+      ctx.font         = `bold ${11 * S}px sans-serif`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(valid ? `Place (-${this.TURRET_COST} token)` : 'Invalid spot',
+        this.ghostX, hy - 5 * S);
+      ctx.restore();
+    }
+
+    /* ── enemy health bars ── */
+    for (const enemy of this._enemies()) {
+      if (enemy.x < -100) continue;
+      const hp    = this.enemyHealth.get(enemy);
+      const maxHp = this.enemyMaxHealth.get(enemy);
+      if (!hp || !maxHp || hp <= 0) continue;
+
+      const bw = this._ew(enemy);
+      const bh = 5 * S;
+      const bx = enemy.x - bw / 2;
+      const by = enemy.y - this._eh(enemy) / 2 - 9 * S;
+      const ratio = Math.max(0, hp / maxHp);
+
+      ctx.save();
+      ctx.fillStyle = '#222';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle = ratio > 0.5 ? '#44ef60' : ratio > 0.25 ? '#f0c040' : '#ef4444';
+      ctx.fillRect(bx, by, bw * ratio, bh);
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth   = 1;
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.restore();
+    }
+
+    /* ── projectiles ── */
+    for (const proj of this.projectiles) {
+      ctx.save();
+      // Outer glow
+      ctx.beginPath();
+      ctx.arc(proj.x, proj.y, 5 * S, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(200,160,20,0.45)';
+      ctx.fill();
+      // Core
+      ctx.beginPath();
+      ctx.arc(proj.x, proj.y, 3.5 * S, 0, Math.PI * 2);
+      ctx.fillStyle = '#c8a020';
+      ctx.fill();
+      // Highlight
+      ctx.beginPath();
+      ctx.arc(proj.x - 1 * S, proj.y - 1 * S, 1.5 * S, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff5a0';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    /* ── HUD: token counter ── */
+    ctx.save();
+    const hudX = 8 * S, hudY = 8 * S, hudW = 118 * S, hudH = 28 * S;
+    this._roundRect(ctx, hudX, hudY, hudW, hudH, 6 * S);
+    ctx.fillStyle = 'rgba(15,25,10,0.75)';
+    ctx.fill();
+    ctx.strokeStyle = '#3a6a3a';
+    ctx.lineWidth   = 1.5 * S;
+    ctx.stroke();
+    ctx.fillStyle    = '#cfffb0';
+    ctx.font         = `bold ${12 * S}px sans-serif`;
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\uD83E\uDEB2 Tokens: ' + this.resources, hudX + 8 * S, hudY + 14 * S);
+    ctx.restore();
+
+    /* ── HUD: placement toggle button ── */
+    ctx.save();
+    const btnW = 100 * S, btnH = 28 * S;
+    const btnX = W - btnW - 8 * S, btnY = 8 * S;
+    this._roundRect(ctx, btnX, btnY, btnW, btnH, 6 * S);
+    ctx.fillStyle   = this.placementMode ? 'rgba(40,160,50,0.88)' : 'rgba(25,55,25,0.78)';
+    ctx.fill();
+    ctx.strokeStyle = this.placementMode ? '#7eff8a' : '#3a6a3a';
+    ctx.lineWidth   = 1.5 * S;
+    ctx.stroke();
+    ctx.fillStyle    = '#e8ffcc';
+    ctx.font         = `bold ${11 * S}px sans-serif`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.placementMode ? '\u2715 Cancel  [P]' : '\uFF0B Place  [P]',
+      btnX + btnW / 2, btnY + btnH / 2);
+    ctx.restore();
+
+    /* ── full-screen flash overlays ── */
+    if (this.placementFlash > 0) {
+      const a = Math.min(1, this.placementFlash / 0.35) * 0.2;
+      ctx.save();
+      ctx.fillStyle = `rgba(60,230,80,${a})`;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+    if (this.errorFlash > 0) {
+      const a = Math.min(1, this.errorFlash / 0.25) * 0.2;
+      ctx.save();
+      ctx.fillStyle = `rgba(230,50,50,${a})`;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+  }
+
+  /* ─── handleInput ─────────────────────────────────── */
+
+  handleInput(type, data) {
+    /* ── pointer tracking for ghost preview ── */
+    if (type === 'mousemove' || type === 'pointermove') {
+      this.ghostX = data.x;
+      this.ghostY = data.y;
+      // Hover-select nearest turret
+      this.selectedTurret = null;
+      for (const t of this._turrets()) {
+        if (Math.hypot(t.x - data.x, t.y - data.y) < this._ew(t) / 2 + 5 * S) {
+          this.selectedTurret = t;
+          break;
+        }
+      }
+      return;
+    }
+
+    /* ── keyboard: P toggles placement mode ── */
+    if (type === 'keydown') {
+      const k = (data.key || '').toLowerCase();
+      if (k === 'p' || data.code === 'KeyP') {
+        this.placementMode = !this.placementMode;
+      }
+      return;
+    }
+
+    /* ── click / touch ── */
+    if (type === 'click' || type === 'touchstart') {
+      const x = data.x, y = data.y;
+
+      // Update ghost position from touch/click coordinates
+      this.ghostX = x;
+      this.ghostY = y;
+
+      // Hit-test the placement toggle button
+      const btnW = 100 * S, btnH = 28 * S;
+      const btnX = W - btnW - 8 * S, btnY = 8 * S;
+      if (x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH) {
+        this.placementMode = !this.placementMode;
+        return;
+      }
+
+      if (this.placementMode) {
+        /* ─ Try to place a turret ─ */
+        if (this.resources >= this.TURRET_COST && this._canPlace(x, y)) {
+          const tw = 32 * S;
+          const newTurret = {
+            name:   'beetle-turret-' + Date.now(),
+            type:   'beetle-turret',
+            x, y,
+            width:  tw,
+            height: tw,
+            sprite: null
+          };
+          this.entities.push(newTurret);
+          this.turretCooldowns.set(newTurret, 0);
+          this.resources -= this.TURRET_COST;
+          this.placementFlash = 0.45;
+          if (this.resources <= 0) this.placementMode = false;
+        } else {
+          this.errorFlash = 0.3;
+        }
+      } else {
+        /* ─ Select turret for range display ─ */
+        this.selectedTurret = null;
+        for (const t of this._turrets()) {
+          if (Math.hypot(t.x - x, t.y - y) < this._ew(t) / 2 + 6 * S) {
+            this.selectedTurret = t;
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+
+
+// --- Mechanic: WaveSpawner ---
+class WaveSpawner {
+  constructor(entities) {
+    this.entities = entities;
+
+    this.waveNumber = 0;
+    this.waveTimer = 5;
+    this.betweenWaves = true;
+    this.lives = 20;
+
+    this.spawnQueue = [];
+    this.spawnTimer = 0;
+    this.spawnInterval = 1.2;
+
+    this.enemies = [];
+    this.projectiles = [];
+    this.turretCooldowns = new Map();
+    this.turrets = [];
+    this.particles = [];
+    this.waypoints = [];
+
+    this.selectedEntity = null;
+    this.announceTimer = 0;
+    this.announceText = '';
+
+    this._initialize();
+  }
+
+  _initialize() {
+    this.waypoints = this.entities
+      .filter(e => e.type === 'flower-node')
+      .sort((a, b) => a.x - b.x)
+      .map(e => ({ x: e.x + (e.width || 32 * S) / 2, y: e.y + (e.height || 32 * S) / 2 }));
+
+    if (this.waypoints.length === 0) {
+      this.waypoints = [
+        { x: 0,        y: H * 0.5 },
+        { x: W * 0.2,  y: H * 0.5 },
+        { x: W * 0.4,  y: H * 0.3 },
+        { x: W * 0.6,  y: H * 0.65 },
+        { x: W * 0.8,  y: H * 0.4 },
+        { x: W,        y: H * 0.5 }
+      ];
+    }
+
+    const beetles = this.entities.filter(e => e.type === 'beetle-turret');
+    const stools  = this.entities.filter(e => e.type === 'mushroom-stool');
+
+    for (const t of beetles) {
+      t._range    = 130 * S;
+      t._damage   = 18;
+      t._fireRate = 1.5;
+      this.turrets.push(t);
+      this.turretCooldowns.set(t, Math.random());
+    }
+    for (const t of stools) {
+      t._range    = 95 * S;
+      t._damage   = 9;
+      t._fireRate = 0.75;
+      this.turrets.push(t);
+      this.turretCooldowns.set(t, Math.random());
+    }
+  }
+
+  _buildWave(waveNum) {
+    const queue = [];
+    const antCount = 3 + waveNum * 2;
+    const flyCount = Math.max(0, waveNum - 1);
+    for (let i = 0; i < antCount; i++)
+      queue.push({ type: 'ant-grunt',      hp: 40 + waveNum * 15, speed: (38 + waveNum * 5) * S });
+    for (let i = 0; i < flyCount; i++)
+      queue.push({ type: 'mosquito-flyer', hp: 25 + waveNum * 10, speed: (62 + waveNum * 8) * S });
+    for (let i = queue.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [queue[i], queue[j]] = [queue[j], queue[i]];
+    }
+    return queue;
+  }
+
+  _spawnEnemy(spec) {
+    const start   = this.waypoints[0];
+    const isFlyer = spec.type === 'mosquito-flyer';
+    const w       = (isFlyer ? 24 : 28) * S;
+    const h       = (isFlyer ? 20 : 26) * S;
+
+    let entity = this.entities.find(
+      e => e.type === spec.type && !this.enemies.some(en => en.entity === e)
+    );
+
+    if (!entity) {
+      entity = {
+        name: spec.type + '_virt_' + Date.now() + Math.random(),
+        x: start.x, y: start.y,
+        width: w, height: h,
+        type: spec.type, sprite: null, _virtual: true
+      };
+      this.entities.push(entity);
+    }
+
+    entity.x = start.x;
+    entity.y = isFlyer ? start.y - 28 * S : start.y;
+
+    this.enemies.push({
+      entity, hp: spec.hp, maxHp: spec.hp,
+      speed: spec.speed, waypointIdx: 1,
+      type: spec.type, dead: false,
+      isFlyer, wobble: Math.random() * Math.PI * 2
+    });
+  }
+
+  _fireProjectile(turret, target) {
+    const cx = turret.x + (turret.width  || 32 * S) / 2;
+    const cy = turret.y + (turret.height || 32 * S) / 2;
+    this.projectiles.push({
+      x: cx, y: cy, target,
+      speed: 210 * S,
+      damage: turret._damage || 15,
+      life: 3.5, trail: []
+    });
+  }
+
+  _spawnParticles(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const spd   = (25 + Math.random() * 65) * S;
+      this.particles.push({
+        x, y,
+        vx: Math.cos(angle) * spd,
+        vy: Math.sin(angle) * spd,
+        life: 0.35 + Math.random() * 0.45,
+        maxLife: 0.8, color,
+        r: (2.5 + Math.random() * 4) * S
+      });
+    }
+  }
+
+  _removeVirtual(entity) {
+    if (entity._virtual) {
+      const idx = this.entities.indexOf(entity);
+      if (idx !== -1) this.entities.splice(idx, 1);
+    }
+  }
+
+  update(dt) {
+    const events = [];
+    dt = Math.min(dt, 0.1);
+
+    // ── Wave countdown ──────────────────────────────────────────────────────
+    if (this.betweenWaves) {
+      this.waveTimer -= dt;
+      if (this.waveTimer <= 0) {
+        this.waveNumber++;
+        this.spawnQueue    = this._buildWave(this.waveNumber);
+        this.spawnTimer    = 0;
+        this.betweenWaves  = false;
+        this.announceText  = `Wave ${this.waveNumber}!`;
+        this.announceTimer = 2.2;
+        events.push({ type: 'state', key: 'wave', value: this.waveNumber });
+      }
+    }
+
+    // ── Spawn from queue ────────────────────────────────────────────────────
+    if (!this.betweenWaves && this.spawnQueue.length > 0) {
+      this.spawnTimer -= dt;
+      if (this.spawnTimer <= 0) {
+        this._spawnEnemy(this.spawnQueue.shift());
+        this.spawnTimer = this.spawnInterval;
+      }
+    }
+
+    // ── Wave complete check ─────────────────────────────────────────────────
+    if (!this.betweenWaves && this.spawnQueue.length === 0 && this.enemies.length === 0) {
+      this.betweenWaves = true;
+      this.waveTimer    = 8;
+      events.push({ type: 'state', key: 'waveComplete', value: this.waveNumber });
+      events.push({ type: 'score', value: 50 + this.waveNumber * 25 });
+    }
+
+    // ── Move enemies along waypoints ────────────────────────────────────────
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const en = this.enemies[i];
+      if (en.dead) { this.enemies.splice(i, 1); continue; }
+
+      if (en.waypointIdx >= this.waypoints.length) {
+        this.lives = Math.max(0, this.lives - 1);
+        en.dead = true;
+        this._spawnParticles(en.entity.x, en.entity.y, '#ff4455', 8);
+        this._removeVirtual(en.entity);
+        this.enemies.splice(i, 1);
+        events.push({ type: 'state', key: 'lives', value: this.lives });
+        events.push({ type: 'score', value: -10 });
+        if (this.lives <= 0) events.push({ type: 'state', key: 'gameOver', value: true });
+        continue;
+      }
+
+      const wp = this.waypoints[en.waypointIdx];
+      en.wobble += dt * 3.2;
+      const wobbleY = en.isFlyer ? Math.sin(en.wobble) * 6 * S : 0;
+      const targetY = en.isFlyer ? wp.y - 28 * S : wp.y;
+      const dx   = wp.x - en.entity.x;
+      const dy   = (targetY + wobbleY) - en.entity.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist < 5 * S) {
+        en.waypointIdx++;
+      } else {
+        en.entity.x += (dx / dist) * en.speed * dt;
+        en.entity.y += (dy / dist) * en.speed * dt;
+      }
+    }
+
+    // ── Turret targeting ────────────────────────────────────────────────────
+    for (const turret of this.turrets) {
+      if (!this.turretCooldowns.has(turret)) {
+        turret._range = 120 * S; turret._damage = 15; turret._fireRate = 1.2;
+        this.turretCooldowns.set(turret, 0);
+      }
+      const cd = (this.turretCooldowns.get(turret) || 0) - dt;
+      this.turretCooldowns.set(turret, cd);
+      if (cd > 0) continue;
+
+      const tx = turret.x + (turret.width  || 32 * S) / 2;
+      const ty = turret.y + (turret.height || 32 * S) / 2;
+      let closest = null, closestDist = Infinity;
+
+      for (const en of this.enemies) {
+        if (en.dead) continue;
+        const ex = en.entity.x + (en.entity.width  || 28 * S) / 2;
+        const ey = en.entity.y + (en.entity.height || 26 * S) / 2;
+        const d  = Math.hypot(tx - ex, ty - ey);
+        if (d <= turret._range && d < closestDist) { closestDist = d; closest = en; }
+      }
+
+      if (closest) {
+        this._fireProjectile(turret, closest);
+        this.turretCooldowns.set(turret, 1 / (turret._fireRate || 1.2));
+      }
+    }
+
+    // ── Move projectiles ────────────────────────────────────────────────────
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const p = this.projectiles[i];
+      p.life -= dt;
+      if (p.life <= 0 || !p.target || p.target.dead) { this.projectiles.splice(i, 1); continue; }
+
+      const ex   = p.target.entity.x + (p.target.entity.width  || 28 * S) / 2;
+      const ey   = p.target.entity.y + (p.target.entity.height || 26 * S) / 2;
+      const dx   = ex - p.x;
+      const dy   = ey - p.y;
+      const dist = Math.hypot(dx, dy);
+
+      p.trail.push({ x: p.x, y: p.y });
+      if (p.trail.length > 6) p.trail.shift();
+
+      if (dist < 7 * S) {
+        p.target.hp -= p.damage;
+        this._spawnParticles(ex, ey, '#aada55', 4);
+        if (p.target.hp <= 0) {
+          p.target.dead = true;
+          this._spawnParticles(ex, ey, '#ffaa22', 12);
+          this._removeVirtual(p.target.entity);
+          events.push({ type: 'score', value: 10 + this.waveNumber * 5 });
+        }
+        this.projectiles.splice(i, 1);
+        continue;
+      }
+
+      const mv = p.speed * dt / dist;
+      p.x += dx * mv;
+      p.y += dy * mv;
+    }
+
+    // ── Particles ───────────────────────────────────────────────────────────
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const pt = this.particles[i];
+      pt.life -= dt;
+      if (pt.life <= 0) { this.particles.splice(i, 1); continue; }
+      pt.x  += pt.vx * dt;
+      pt.y  += pt.vy * dt;
+      pt.vy += 90 * S * dt;
+    }
+
+    if (this.announceTimer > 0) this.announceTimer -= dt;
+
+    return events;
+  }
+
+  draw(ctx) {
+    // ── Waypoint path ───────────────────────────────────────────────────────
+    if (this.waypoints.length >= 2) {
+      ctx.save();
+      ctx.setLineDash([7 * S, 9 * S]);
+      ctx.strokeStyle = 'rgba(139,90,43,0.32)';
+      ctx.lineWidth   = 3 * S;
+      ctx.beginPath();
+      ctx.moveTo(this.waypoints[0].x, this.waypoints[0].y);
+      for (let i = 1; i < this.waypoints.length; i++)
+        ctx.lineTo(this.waypoints[i].x, this.waypoints[i].y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // Waypoint dots
+      ctx.save();
+      for (const wp of this.waypoints) {
+        ctx.beginPath();
+        ctx.arc(wp.x, wp.y, 5 * S, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,220,80,0.45)';
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // ── Turret range rings (selected) ───────────────────────────────────────
+    for (const turret of this.turrets) {
+      if (turret !== this.selectedEntity) continue;
+      const tx = turret.x + (turret.width  || 32 * S) / 2;
+      const ty = turret.y + (turret.height || 32 * S) / 2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(tx, ty, turret._range || 120 * S, 0, Math.PI * 2);
+      ctx.setLineDash([5 * S, 5 * S]);
+      ctx.strokeStyle = 'rgba(80,220,130,0.75)';
+      ctx.lineWidth   = 2 * S;
+      ctx.stroke();
+      ctx.fillStyle   = 'rgba(80,220,130,0.07)';
+      ctx.fill();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    // ── Projectile trails & bodies ──────────────────────────────────────────
+    for (const p of this.projectiles) {
+      ctx.save();
+      if (p.trail.length >= 2) {
+        ctx.beginPath();
+        ctx.moveTo(p.trail[0].x, p.trail[0].y);
+        for (let i = 1; i < p.trail.length; i++) ctx.lineTo(p.trail[i].x, p.trail[i].y);
+        ctx.lineTo(p.x, p.y);
+        ctx.strokeStyle = 'rgba(180,110,35,0.5)';
+        ctx.lineWidth   = 2 * S;
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 5 * S, 0, Math.PI * 2);
+      ctx.fillStyle = '#7B3A10';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(p.x - 1.5 * S, p.y - 1.5 * S, 2 * S, 0, Math.PI * 2);
+      ctx.fillStyle = '#c8763a';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ── Enemy health bars ───────────────────────────────────────────────────
+    for (const en of this.enemies) {
+      if (en.dead) continue;
+      const ex      = en.entity.x;
+      const ey      = en.entity.y;
+      const ew      = en.entity.width  || 28 * S;
+      const hpRatio = Math.max(0, en.hp / en.maxHp);
+      const barH    = 5 * S;
+      const barY    = ey - 11 * S;
+
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(ex, barY, ew, barH);
+
+      const hpColor = hpRatio > 0.6 ? '#44dd55' : hpRatio > 0.3 ? '#ddcc00' : '#ee3333';
+      ctx.fillStyle = hpColor;
+      ctx.fillRect(ex, barY, ew * hpRatio, barH);
+
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+      ctx.lineWidth   = 1;
+      ctx.strokeRect(ex, barY, ew, barH);
+
+      // Waypoint progress pip
+      const progress = (en.waypointIdx - 1) / Math.max(1, this.waypoints.length - 1);
+      ctx.save();
+      ctx.font      = `${8 * S}px sans-serif`;
+      ctx.fillStyle = en.isFlyer ? '#aaeeff' : '#ffd08a';
+      ctx.textAlign = 'center';
+      ctx.fillText(en.isFlyer ? '✈' : '🐜', ex + ew / 2, ey - 14 * S);
+      ctx.restore();
+
+      // Thin progress bar below hp bar
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(ex, barY + barH + 1, ew, 2 * S);
+      ctx.fillStyle = 'rgba(255,200,80,0.6)';
+      ctx.fillRect(ex, barY + barH + 1, ew * progress, 2 * S);
+    }
+
+    // ── Particles ───────────────────────────────────────────────────────────
+    for (const pt of this.particles) {
+      const alpha = Math.max(0, pt.life / pt.maxLife);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, pt.r * (0.4 + alpha * 0.6), 0, Math.PI * 2);
+      ctx.fillStyle = pt.color;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ── HUD panel ───────────────────────────────────────────────────────────
+    ctx.save();
+    ctx.fillStyle = 'rgba(10,20,10,0.6)';
+    ctx.beginPath();
+    ctx.roundRect(8 * S, 8 * S, 162 * S, 52 * S, 6 * S);
+    ctx.fill();
+
+    ctx.font      = `bold ${13 * S}px sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffe066';
+    ctx.fillText(`Wave: ${this.waveNumber}`, 16 * S, 28 * S);
+    ctx.fillStyle = this.lives > 5 ? '#88ff88' : '#ff6666';
+    ctx.fillText(`Lives: ${'♥'.repeat(Math.min(this.lives, 10))}${this.lives > 10 ? ` (${this.lives})` : ''}`, 16 * S, 48 * S);
+    ctx.restore();
+
+    // ── Spawn progress bar ──────────────────────────────────────────────────
+    if (!this.betweenWaves && this.spawnQueue.length > 0) {
+      const total    = (3 + this.waveNumber * 2) + Math.max(0, this.waveNumber - 1);
+      const spawned  = total - this.spawnQueue.length;
+      const progress = spawned / total;
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(W - 92 * S, 10 * S, 82 * S, 13 * S);
+      ctx.fillStyle = '#5599ff';
+      ctx.fillRect(W - 92 * S, 10 * S, 82 * S * progress, 13 * S);
+      ctx.strokeStyle = 'rgba(200,220,255,0.4)';
+      ctx.lineWidth   = 1;
+      ctx.strokeRect(W - 92 * S, 10 * S, 82 * S, 13 * S);
+      ctx.fillStyle   = '#ffffff';
+      ctx.font        = `${9 * S}px sans-serif`;
+      ctx.textAlign   = 'center';
+      ctx.fillText(`Spawning ${spawned}/${total}`, W - 51 * S, 30 * S);
+      ctx.restore();
+    }
+
+    // ── Between-wave countdown ──────────────────────────────────────────────
+    if (this.betweenWaves && this.waveTimer > 0) {
+      const secs = Math.ceil(this.waveTimer);
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.beginPath();
+      ctx.roundRect(W / 2 - 95 * S, H - 44 * S, 190 * S, 30 * S, 6 * S);
+      ctx.fill();
+      ctx.font      = `bold ${12 * S}px sans-serif`;
+      ctx.fillStyle = '#aaffaa';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Next wave in: ${secs}s  (press N to rush)`, W / 2, H - 24 * S);
+      ctx.restore();
+    }
+
+    // ── Wave announcement banner ────────────────────────────────────────────
+    if (this.announceTimer > 0) {
+      const alpha   = Math.min(1, this.announceTimer);
+      const eased   = 1 - Math.min(1, this.announceTimer / 1.8);
+      const scale   = 1 + eased * 0.25;
+      const fontSize = Math.round(38 * S * scale);
+      ctx.save();
+      ctx.globalAlpha    = alpha;
+      ctx.textAlign      = 'center';
+      ctx.textBaseline   = 'middle';
+      ctx.font           = `bold ${fontSize}px sans-serif`;
+      ctx.fillStyle      = 'rgba(0,0,0,0.55)';
+      ctx.fillText(this.announceText, W / 2 + 3 * S, H / 2 + 3 * S);
+      const grad = ctx.createLinearGradient(W / 2 - 100 * S, 0, W / 2 + 100 * S, 0);
+      grad.addColorStop(0, '#ffee44');
+      grad.addColorStop(1, '#ff8800');
+      ctx.fillStyle = grad;
+      ctx.fillText(this.announceText, W / 2, H / 2);
+      ctx.restore();
+    }
+  }
+
+  handleInput(type, data) {
+    if (type === 'click' || type === 'touchstart') {
+      const { x, y } = data;
+      let hit = null;
+      for (const turret of this.turrets) {
+        const cx = turret.x + (turret.width  || 32 * S) / 2;
+        const cy = turret.y + (turret.height || 32 * S) / 2;
+        const hw = (turret.width  || 32 * S) / 2 + 5 * S;
+        const hh = (turret.height || 32 * S) / 2 + 5 * S;
+        if (Math.abs(x - cx) < hw && Math.abs(y - cy) < hh) { hit = turret; break; }
+      }
+      this.selectedEntity = (hit && hit !== this.selectedEntity) ? hit : null;
+    }
+
+    if (type === 'keydown') {
+      if ((data.key === 'n' || data.key === 'N') && this.betweenWaves && this.waveTimer > 1)
+        this.waveTimer = 0.8;
+      if (data.code === 'Escape')
+        this.selectedEntity = null;
+    }
+  }
+}
+
+
+// --- Mechanic: ResourceManagement ---
+class ResourceManagement {
+  constructor(entities) {
+    this.entities = entities;
+    this.resources = 50;
+    this.resourceCap = 999;
+    this.selectedEntity = null;
+    this.projectiles = [];
+    this.floatingTexts = [];
+    this.resourceFlash = 0;
+    this._entityState = new Map();
+    for (const e of entities) this._initEntity(e);
+  }
+
+  _initEntity(e) {
+    const s = { alive: true };
+    switch (e.type) {
+      case 'flower-node':
+        s.hp = 60; s.maxHp = 60; s.genRate = 8; s.genTimer = 0; s.pulsePhase = Math.random() * Math.PI * 2; break;
+      case 'dirt-mound':
+        s.hp = 100; s.maxHp = 100; s.genRate = 4; s.genTimer = 0; break;
+      case 'beetle-turret':
+        s.hp = 80; s.maxHp = 80; s.range = 130 * S; s.attackTimer = 0; s.attackRate = 1.5; s.damage = 20; s.angle = 0; break;
+      case 'ant-grunt':
+        s.hp = 40; s.maxHp = 40; s.speed = 60 * S; s.state = 'seeking'; s.carrying = 0; s.carryMax = 10; s.moveTimer = 0; s.wanderAngle = Math.random() * Math.PI * 2; break;
+      case 'mosquito-flyer':
+        s.hp = 30; s.maxHp = 30; s.speed = 80 * S; s.attackTimer = 0; s.damage = 10; s.angle = Math.random() * Math.PI * 2; s.wobble = Math.random() * Math.PI * 2; break;
+      case 'bark-wall':
+        s.hp = 150; s.maxHp = 150; break;
+      case 'mushroom-stool':
+        s.hp = 50; s.maxHp = 50; s.healRate = 5; s.healRange = 110 * S; s.healTimer = 0; s.pulsePhase = Math.random() * Math.PI * 2; break;
+      case 'leaf-path':
+        s.throughput = 0; break;
+      case 'acorn-shot':
+        s.speed = 200 * S; s.damage = 20; break;
+    }
+    this._entityState.set(e, s);
+  }
+
+  _gs(e) {
+    if (!this._entityState.has(e)) this._initEntity(e);
+    return this._entityState.get(e);
+  }
+
+  _float(x, y, text, life, color) {
+    this.floatingTexts.push({ x, y, text, life, maxLife: life, color });
+  }
+
+  update(dt) {
+    const emitted = [];
+    this.resourceFlash = Math.max(0, this.resourceFlash - dt);
+    this.floatingTexts.forEach(t => { t.life -= dt; });
+    this.floatingTexts = this.floatingTexts.filter(t => t.life > 0);
+
+    const byType = (type) => this.entities.filter(e => e.type === type);
+    const flowerNodes  = byType('flower-node');
+    const dirtMounds   = byType('dirt-mound');
+    const beetles      = byType('beetle-turret');
+    const ants         = byType('ant-grunt');
+    const mosquitoes   = byType('mosquito-flyer');
+    const walls        = byType('bark-wall');
+    const mushrooms    = byType('mushroom-stool');
+
+    // 1. Flower-nodes generate resources quickly
+    for (const fn of flowerNodes) {
+      const s = this._gs(fn);
+      if (!s.alive) continue;
+      s.pulsePhase += dt * 2.2;
+      s.genTimer += dt;
+      if (s.genTimer >= 1) {
+        const gained = Math.floor(s.genRate * s.genTimer);
+        this.resources = Math.min(this.resourceCap, this.resources + gained);
+        s.genTimer = 0;
+        this._float(fn.x, fn.y - (fn.height || 32 * S) / 2, `+${gained}`, 1.2, '#ffe066');
+        this.resourceFlash = 0.3;
+        emitted.push({ type: 'state', key: 'resources', value: this.resources });
+      }
+    }
+
+    // 2. Dirt-mounds generate resources slowly
+    for (const dm of dirtMounds) {
+      const s = this._gs(dm);
+      if (!s.alive) continue;
+      s.genTimer += dt;
+      if (s.genTimer >= 2) {
+        const gained = Math.floor(s.genRate * s.genTimer);
+        this.resources = Math.min(this.resourceCap, this.resources + gained);
+        s.genTimer = 0;
+        this._float(dm.x, dm.y - (dm.height || 32 * S) / 2, `+${gained}`, 1.2, '#c8a870');
+        emitted.push({ type: 'state', key: 'resources', value: this.resources });
+      }
+    }
+
+    // 3. Ant-grunts seek dirt-mounds, harvest, then return to nearest mushroom-stool
+    for (const ant of ants) {
+      const s = this._gs(ant);
+      if (!s.alive) continue;
+      const hw = (ant.width  || 24 * S) / 2;
+      const hh = (ant.height || 24 * S) / 2;
+
+      if (s.state === 'seeking') {
+        const targets = dirtMounds.filter(d => this._gs(d).alive);
+        if (targets.length > 0) {
+          const nearest = targets.reduce((a, b) =>
+            Math.hypot(ant.x - a.x, ant.y - a.y) <= Math.hypot(ant.x - b.x, ant.y - b.y) ? a : b);
+          const dist = Math.hypot(nearest.x - ant.x, nearest.y - ant.y);
+          if (dist < 18 * S) {
+            s.carrying = s.carryMax;
+            s.state = 'returning';
+            this._float(ant.x, ant.y - hh - 4 * S, 'Harvested!', 0.9, '#a0d080');
+          } else {
+            ant.x += ((nearest.x - ant.x) / dist) * s.speed * dt;
+            ant.y += ((nearest.y - ant.y) / dist) * s.speed * dt;
+          }
+        } else {
+          s.moveTimer -= dt;
+          if (s.moveTimer <= 0) {
+            s.wanderAngle += (Math.random() - 0.5) * Math.PI;
+            s.moveTimer = 1 + Math.random();
+          }
+          ant.x += Math.cos(s.wanderAngle) * s.speed * 0.3 * dt;
+          ant.y += Math.sin(s.wanderAngle) * s.speed * 0.3 * dt;
+          ant.x = Math.max(hw, Math.min(W - hw, ant.x));
+          ant.y = Math.max(hh, Math.min(H - hh, ant.y));
+        }
+      } else if (s.state === 'returning') {
+        const base = mushrooms.filter(m => this._gs(m).alive)[0] || { x: W / 2, y: H / 2 };
+        const dist = Math.hypot(base.x - ant.x, base.y - ant.y);
+        if (dist < 18 * S) {
+          const bonus = s.carrying * 2;
+          this.resources = Math.min(this.resourceCap, this.resources + bonus);
+          s.carrying = 0;
+          s.state = 'seeking';
+          this.resourceFlash = 0.5;
+          this._float(ant.x, ant.y - hh - 4 * S, `+${bonus}`, 1.3, '#ffffff');
+          emitted.push({ type: 'score', value: bonus });
+          emitted.push({ type: 'state', key: 'resources', value: this.resources });
+        } else {
+          ant.x += ((base.x - ant.x) / dist) * s.speed * dt;
+          ant.y += ((base.y - ant.y) / dist) * s.speed * dt;
+        }
+      }
+    }
+
+    // 4. Mosquito-flyers move toward and attack bark-walls or beetle-turrets
+    for (const mosq of mosquitoes) {
+      const s = this._gs(mosq);
+      if (!s.alive) continue;
+      s.wobble += dt * 3;
+
+      const potTargets = [...walls, ...beetles].filter(t => this._gs(t).alive);
+      if (potTargets.length > 0) {
+        const nearest = potTargets.reduce((a, b) =>
+          Math.hypot(mosq.x - a.x, mosq.y - a.y) <= Math.hypot(mosq.x - b.x, mosq.y - b.y) ? a : b);
+        const dist = Math.hypot(nearest.x - mosq.x, nearest.y - mosq.y);
+        s.angle = Math.atan2(nearest.y - mosq.y, nearest.x - mosq.x);
+        if (dist < 18 * S) {
+          s.attackTimer += dt;
+          if (s.attackTimer >= 1) {
+            s.attackTimer = 0;
+            const ts = this._gs(nearest);
+            ts.hp = Math.max(0, ts.hp - s.damage);
+            this._float(nearest.x, nearest.y - (nearest.height || 32 * S) / 2, `-${s.damage}`, 0.8, '#ff4444');
+            if (ts.hp <= 0) {
+              ts.alive = false;
+              emitted.push({ type: 'state', key: 'structureDestroyed', value: nearest.type });
+            }
+          }
+        } else {
+          const wx = Math.cos(s.wobble) * 12 * S;
+          const wy = Math.sin(s.wobble * 1.4) * 8 * S;
+          mosq.x += (Math.cos(s.angle) * s.speed + wx * 0.4) * dt;
+          mosq.y += (Math.sin(s.angle) * s.speed + wy * 0.4) * dt;
+        }
+      } else {
+        mosq.x += Math.cos(s.angle + Math.cos(s.wobble) * 0.5) * s.speed * 0.4 * dt;
+        mosq.y += Math.sin(s.angle + Math.sin(s.wobble * 0.9) * 0.5) * s.speed * 0.4 * dt;
+        if (mosq.x < 0 || mosq.x > W) s.angle = Math.PI - s.angle;
+        if (mosq.y < 0 || mosq.y > H) s.angle = -s.angle;
+        mosq.x = Math.max(0, Math.min(W, mosq.x));
+        mosq.y = Math.max(0, Math.min(H, mosq.y));
+      }
+    }
+
+    // 5. Beetle-turrets aim at and fire acorn-shots at mosquito-flyers in range
+    const liveMosqs = mosquitoes.filter(m => this._gs(m).alive);
+    for (const beetle of beetles) {
+      const s = this._gs(beetle);
+      if (!s.alive) continue;
+      s.attackTimer += dt;
+      const inRange = liveMosqs.filter(m => Math.hypot(beetle.x - m.x, beetle.y - m.y) <= s.range);
+      if (inRange.length > 0) {
+        const tgt = inRange.reduce((a, b) =>
+          Math.hypot(beetle.x - a.x, beetle.y - a.y) <= Math.hypot(beetle.x - b.x, beetle.y - b.y) ? a : b);
+        s.angle = Math.atan2(tgt.y - beetle.y, tgt.x - beetle.x);
+        if (s.attackTimer >= 1 / s.attackRate) {
+          s.attackTimer = 0;
+          this.projectiles.push({ x: beetle.x, y: beetle.y, target: tgt, speed: 220 * S, damage: s.damage, life: 3 });
+        }
+      }
+    }
+
+    // 6. Move projectiles, resolve hits
+    this.projectiles = this.projectiles.filter(p => {
+      p.life -= dt;
+      if (p.life <= 0) return false;
+      const ts = this._gs(p.target);
+      if (!ts || !ts.alive) return false;
+      const dist = Math.hypot(p.target.x - p.x, p.target.y - p.y);
+      if (dist < 8 * S) {
+        ts.hp = Math.max(0, ts.hp - p.damage);
+        this._float(p.target.x, p.target.y - (p.target.height || 32 * S) / 2, `-${p.damage}`, 0.7, '#ff8800');
+        if (ts.hp <= 0) {
+          ts.alive = false;
+          this.resources = Math.min(this.resourceCap, this.resources + 15);
+          this.resourceFlash = 0.5;
+          this._float(p.target.x, p.target.y, '+25 🏆', 1.6, '#ffff44');
+          emitted.push({ type: 'score', value: 25 });
+          emitted.push({ type: 'state', key: 'resources', value: this.resources });
+        }
+        return false;
+      }
+      p.x += ((p.target.x - p.x) / dist) * p.speed * dt;
+      p.y += ((p.target.y - p.y) / dist) * p.speed * dt;
+      return true;
+    });
+
+    // 7. Mushroom-stools heal nearby bark-walls and beetle-turrets
+    for (const mush of mushrooms) {
+      const s = this._gs(mush);
+      if (!s.alive) continue;
+      s.pulsePhase += dt * 1.6;
+      s.healTimer += dt;
+      if (s.healTimer >= 1) {
+        s.healTimer = 0;
+        const healTargets = [...walls, ...beetles].filter(t => {
+          const ts = this._gs(t);
+          return ts.alive && ts.hp < ts.maxHp && Math.hypot(mush.x - t.x, mush.y - t.y) <= s.healRange;
+        });
+        for (const ht of healTargets) {
+          const ts = this._gs(ht);
+          const healed = Math.min(s.healRate, ts.maxHp - ts.hp);
+          if (healed > 0) {
+            ts.hp += healed;
+            this._float(ht.x, ht.y - (ht.height || 32 * S) / 2, `+${healed}`, 0.8, '#80ff80');
+          }
+        }
+      }
+    }
+
+    return emitted;
+  }
+
+  draw(ctx) {
+    const now = performance.now() / 1000;
+
+    // --- Resource HUD ---
+    const barX = 12 * S, barY = 12 * S, barW = 170 * S, barH = 30 * S, r = 7 * S;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, r); ctx.fill();
+    if (this.resourceFlash > 0) {
+      const fa = this.resourceFlash * Math.abs(Math.sin(now * 18));
+      ctx.fillStyle = `rgba(255,220,50,${fa * 0.45})`;
+      ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, r); ctx.fill();
+    }
+    ctx.fillStyle = '#ffe066';
+    ctx.font = `bold ${Math.round(14 * S)}px monospace`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(`\uD83C\uDF30 ${Math.floor(this.resources)} / ${this.resourceCap}`, barX + 9 * S, barY + barH / 2);
+    ctx.restore();
+
+    // --- Health bars ---
+    for (const [e, s] of this._entityState) {
+      if (!s.alive || s.maxHp === undefined) continue;
+      const bw = (e.width  || 32 * S) * 0.9;
+      const bh = 5 * S;
+      const bx = e.x - bw / 2;
+      const by = e.y - (e.height || 32 * S) / 2 - 9 * S;
+      const pct = Math.max(0, s.hp / s.maxHp);
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle = pct > 0.6 ? '#44ee44' : pct > 0.3 ? '#ffaa00' : '#ff3333';
+      ctx.fillRect(bx, by, bw * pct, bh);
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.restore();
+    }
+
+    // --- Selected beetle-turret range ring ---
+    if (this.selectedEntity && this.selectedEntity.type === 'beetle-turret') {
+      const e = this.selectedEntity;
+      const s = this._gs(e);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, s.range, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(100,200,255,0.55)';
+      ctx.lineWidth = 2 * S;
+      ctx.setLineDash([7 * S, 5 * S]);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(100,200,255,0.06)';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // --- Beetle-turret aim lines when enemies are in range ---
+    for (const [e, s] of this._entityState) {
+      if (e.type !== 'beetle-turret' || !s.alive) continue;
+      const liveMosqs = this.entities.filter(m => m.type === 'mosquito-flyer' && this._gs(m).alive);
+      const inRange = liveMosqs.some(m => Math.hypot(e.x - m.x, e.y - m.y) <= s.range);
+      if (inRange) {
+        ctx.save();
+        const pulse = 0.5 + 0.5 * Math.sin(now * 8);
+        ctx.strokeStyle = `rgba(255,140,40,${0.35 + 0.3 * pulse})`;
+        ctx.lineWidth = 1.5 * S;
+        ctx.beginPath();
+        ctx.moveTo(e.x, e.y);
+        ctx.lineTo(e.x + Math.cos(s.angle) * s.range * 0.85, e.y + Math.sin(s.angle) * s.range * 0.85);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // --- Mushroom-stool heal aura ---
+    for (const [e, s] of this._entityState) {
+      if (e.type !== 'mushroom-stool' || !s.alive) continue;
+      const pulse = 0.5 + 0.5 * Math.sin(s.pulsePhase);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, s.healRange, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(100,255,150,${0.12 + 0.18 * pulse})`;
+      ctx.lineWidth = 2 * S;
+      ctx.stroke();
+      ctx.fillStyle = `rgba(100,255,150,${0.03 + 0.05 * pulse})`;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // --- Flower-node resource pulse ring ---
+    for (const [e, s] of this._entityState) {
+      if (e.type !== 'flower-node' || !s.alive) continue;
+      const pulse = 0.5 + 0.5 * Math.sin(s.pulsePhase);
+      const radius = (e.width || 32 * S) * 0.5 * (1.15 + 0.45 * pulse);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,220,50,${0.35 * pulse})`;
+      ctx.lineWidth = 2.5 * S;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // --- Projectiles (acorn-shots) ---
+    for (const p of this.projectiles) {
+      const angle = Math.atan2(p.target.y - p.y, p.target.x - p.x);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(angle);
+      // Trail
+      ctx.fillStyle = 'rgba(139,69,19,0.28)';
+      ctx.beginPath();
+      ctx.ellipse(-10 * S, 0, 9 * S, 3 * S, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Body
+      ctx.fillStyle = '#7B4A1E';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 7 * S, 5 * S, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#4a2c0a';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // Cap highlight
+      ctx.fillStyle = 'rgba(255,200,100,0.4)';
+      ctx.beginPath();
+      ctx.ellipse(-1 * S, -1.5 * S, 3 * S, 2 * S, -0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // --- Ant carry indicator ---
+    for (const [e, s] of this._entityState) {
+      if (e.type !== 'ant-grunt' || !s.alive || s.carrying <= 0) continue;
+      ctx.save();
+      ctx.fillStyle = '#c8a870';
+      ctx.beginPath();
+      ctx.arc(e.x + 9 * S, e.y - 9 * S, 5 * S, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#7a5c14';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // --- Dead entity markers ---
+    for (const [e, s] of this._entityState) {
+      if (s.alive || s.maxHp === undefined) continue;
+      ctx.save();
+      ctx.globalAlpha = 0.45;
+      ctx.fillStyle = '#ff2222';
+      ctx.font = `${Math.round(22 * S)}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('\u2717', e.x, e.y);
+      ctx.restore();
+    }
+
+    // --- Floating damage / gain texts ---
+    for (const ft of this.floatingTexts) {
+      const alpha = ft.life / ft.maxLife;
+      const rise = (1 - alpha) * 32 * S;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = `bold ${Math.round(12 * S)}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+      ctx.lineWidth = 3;
+      ctx.strokeText(ft.text, ft.x, ft.y - rise);
+      ctx.fillStyle = ft.color;
+      ctx.fillText(ft.text, ft.x, ft.y - rise);
+      ctx.restore();
+    }
+
+    // --- Selection highlight ---
+    if (this.selectedEntity) {
+      const e = this.selectedEntity;
+      const hw = (e.width  || 32 * S) / 2 + 4 * S;
+      const hh = (e.height || 32 * S) / 2 + 4 * S;
+      const pulse = 0.5 + 0.5 * Math.sin(now * 5);
+      ctx.save();
+      ctx.strokeStyle = `rgba(255,255,255,${0.5 + 0.4 * pulse})`;
+      ctx.lineWidth = 2 * S;
+      ctx.setLineDash([5 * S, 3 * S]);
+      ctx.strokeRect(e.x - hw, e.y - hh, hw * 2, hh * 2);
+      ctx.restore();
+
+      // Tooltip
+      const s = this._gs(e);
+      if (s.maxHp !== undefined) {
+        const label = `${e.type}  HP:${Math.ceil(s.hp)}/${s.maxHp}  [R] Repair(20)`;
+        const tx = Math.min(e.x, W - 200 * S);
+        const ty = e.y + (e.height || 32 * S) / 2 + 14 * S;
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.beginPath(); ctx.roundRect(tx - 4 * S, ty - 9 * S, (label.length * 6.2 + 8) * S, 18 * S, 4 * S); ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `${Math.round(10 * S)}px monospace`;
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(label, tx, ty);
+        ctx.restore();
+      }
+    }
+  }
+
+  handleInput(type, data) {
+    if (type === 'click' || type === 'touchstart') {
+      const { x, y } = data;
+      let hit = null;
+      for (const e of this.entities) {
+        const hw = (e.width  || 32 * S) / 2;
+        const hh = (e.height || 32 * S) / 2;
+        if (x >= e.x - hw && x <= e.x + hw && y >= e.y - hh && y <= e.y + hh) { hit = e; break; }
+      }
+      this.selectedEntity = (hit && hit !== this.selectedEntity) ? hit : null;
+    }
+
+    if (type === 'keydown') {
+      const { code } = data;
+      if (code === 'Escape') {
+        this.selectedEntity = null;
+        return;
+      }
+      if (code === 'KeyR' && this.selectedEntity) {
+        const e = this.selectedEntity;
+        const s = this._gs(e);
+        const cost = 20;
+        if (s.maxHp !== undefined && s.alive && s.hp < s.maxHp && this.resources >= cost) {
+          this.resources -= cost;
+          const healed = Math.min(30, s.maxHp - s.hp);
+          s.hp += healed;
+          this._float(e.x, e.y - (e.height || 32 * S) / 2 - 6 * S, `Repaired +${healed}`, 1.5, '#80ff80');
+        } else if (this.resources < cost) {
+          this._float(e.x, e.y - (e.height || 32 * S) / 2 - 6 * S, 'Not enough!', 1.0, '#ff6666');
+        }
+      }
+      if (code === 'KeyU' && this.selectedEntity) {
+        const e = this.selectedEntity;
+        const s = this._gs(e);
+        const cost = 30;
+        if (e.type === 'beetle-turret' && s.alive && this.resources >= cost) {
+          this.resources -= cost;
+          s.range  = Math.min(s.range  + 20 * S, 220 * S);
+          s.damage = Math.min(s.damage + 5,       50);
+          this._float(e.x, e.y - (e.height || 32 * S) / 2 - 6 * S, 'Upgraded!', 1.5, '#44ccff');
+        } else if (this.resources < cost) {
+          this._float(e.x, e.y - (e.height || 32 * S) / 2 - 6 * S, 'Not enough!', 1.0, '#ff6666');
+        }
+      }
+    }
+  }
+}
+
+// === GAME STATE & LAYOUT ===
+
+// ── Entity arrays ─────────────────────────────────────────────────
+const playerEntities = [];   // beetle-turrets placed by player
+const enemyEntities  = [];   // ant-grunts and mosquito-flyers
+const projectiles    = [];   // acorn-shots
+const propEntities   = [];   // mushroom-stools, flower-nodes
+
+// ── Winding enemy path: 8 waypoints, coords relative to W / H ────
+const path = [
+  { x: 0,        y: H * 0.18 },
+  { x: W * 0.22, y: H * 0.18 },
+  { x: W * 0.22, y: H * 0.55 },
+  { x: W * 0.50, y: H * 0.55 },
+  { x: W * 0.50, y: H * 0.28 },
+  { x: W * 0.78, y: H * 0.28 },
+  { x: W * 0.78, y: H * 0.72 },
+  { x: W + 48,   y: H * 0.72 }
+];
+
+// ── Core game-state variables ─────────────────────────────────────
+let lives         = 20;
+let level         = 1;
+let resources     = 100;
+let gameOver      = false;
+let waveTimer     = 0;      // general tick counter (available for mechanics)
+let spawnTimer    = 0;      // counts toward next enemy spawn
+let diffTimer     = 0;      // drives difficulty ramp
+let spawnInterval = 2.5;    // seconds between enemy spawns
+let baseSpeed     = 70;     // enemy speed px/s at S=1
+let flyerRatio    = 0.25;   // probability a new spawn is a mosquito-flyer
+
+// Unique-ID counter & per-turret fire-cooldown registry
+let _nextId = 0;
+const turretCooldowns = new Map(); // turret.id → remaining seconds
+
+// ── Mechanic instances ────────────────────────────────────────────
+const mechTurretPlacement    = new TurretPlacement([]);
+const mechWaveSpawner        = new WaveSpawner([]);
+const mechResourceManagement = new ResourceManagement([]);
+const mechanics = [mechTurretPlacement, mechWaveSpawner, mechResourceManagement];
+
+
+// === INPUT ===
+
+// ── Shared turret-placement helper ────────────────────────────────
+const TURRET_COST = 25;
+
+function _canvasCoords(clientX, clientY) {
+  const rect   = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top)  * scaleY
+  };
+}
+
+function _placeTurret(cx, cy) {
+  if (resources < TURRET_COST) return; // not enough resources
+  resources -= TURRET_COST;
+  playerEntities.push({
+    id:     _nextId++,
+    type:   'beetle-turret',
+    sprite: sprite_beetle_turret,
+    width:  40,
+    height: 56,
+    x:      cx - 20 * S,
+    y:      cy - 28 * S
+  });
+}
+
+// ── Mouse click ───────────────────────────────────────────────────
+canvas.addEventListener('mousedown', (e) => {
+  if (gameOver) { location.reload(); return; }
+  const { x, y } = _canvasCoords(e.clientX, e.clientY);
+  _placeTurret(x, y);
+});
+
+// ── Touch tap ─────────────────────────────────────────────────────
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (gameOver) { location.reload(); return; }
+  const touch    = e.touches[0];
+  const { x, y } = _canvasCoords(touch.clientX, touch.clientY);
+  _placeTurret(x, y);
+}, { passive: false });
+
+// Prevent accidental scrolling during drag / pinch on canvas
+canvas.addEventListener('touchmove',  (e) => e.preventDefault(), { passive: false });
+canvas.addEventListener('touchend',   (e) => e.preventDefault(), { passive: false });
+
+// ── Keyboard ──────────────────────────────────────────────────────
+window.addEventListener('keydown', (e) => {
+  // Restart on R when game is over
+  if (gameOver) {
+    if (e.key === 'r' || e.key === 'R') location.reload();
+    return;
+  }
+
+  // Prevent spacebar / arrow scroll on the page
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+    e.preventDefault();
+  }
+
+  // Forward ALL key events to every mechanic that supports it
+  for (const mech of mechanics) {
+    if (typeof mech.onKeyDown === 'function') mech.onKeyDown(e);
+  }
+
+  // Numeric shortcut: key "1" selects/confirms turret placement mode
+  if (e.key === '1') {
+    // Placeholder hook for mechanic-driven selection
+    if (typeof mechTurretPlacement.selectEntity === 'function') {
+      mechTurretPlacement.selectEntity('beetle-turret');
+    }
+  }
+});
+
+
+// === GAME LOOP ===
+let lastTime = 0;
+if (typeof score === 'undefined') var score = 0;
+const scoreEl = document.getElementById('score');
+
+function gameLoop(time) {
+  const dt = Math.min((time - lastTime) / 1000, 0.05);
+  lastTime = time;
+
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, W, H);
+
+  
+// ── Difficulty ramp (every 30 s, regardless of gameOver) ──────────
+diffTimer += dt;
+if (diffTimer >= 30) {
+  diffTimer    -= 30;
+  level         = Math.min(level + 1, 10);
+  spawnInterval = Math.max(0.7, spawnInterval - 0.18);
+  baseSpeed     = Math.min(220, baseSpeed + 12);
+  flyerRatio    = Math.min(0.65, flyerRatio + 0.05);
+}
+
+if (!gameOver) {
+  waveTimer += dt;
+
+  // ── Spawn enemies periodically ──────────────────────────────────
+  spawnTimer += dt;
+  if (spawnTimer >= spawnInterval) {
+    spawnTimer -= spawnInterval;
+    const isFlyer = Math.random() < flyerRatio;
+    const ew = isFlyer ? 36 : 36;
+    const eh = isFlyer ? 48 : 52;
+    enemyEntities.push({
+      id:        _nextId++,
+      type:      isFlyer ? 'mosquito-flyer' : 'ant-grunt',
+      sprite:    isFlyer ? sprite_mosquito_flyer : sprite_ant_grunt,
+      width:     ew,
+      height:    eh,
+      x:         path[0].x - (ew * S) / 2,
+      y:         path[0].y - (eh * S) / 2,
+      pathIndex: 1,
+      speed:     baseSpeed * (1 + (level - 1) * 0.08),
+      hp:        1 + Math.floor((level - 1) * 0.6)
+    });
+  }
+
+  // ── Move each enemy along path waypoints ───────────────────────
+  for (let i = enemyEntities.length - 1; i >= 0; i--) {
+    const e = enemyEntities[i];
+    if (e.pathIndex >= path.length) {
+      enemyEntities.splice(i, 1);
+      lives--;
+      if (lives <= 0) { lives = 0; gameOver = true; }
+      continue;
+    }
+    const wp   = path[e.pathIndex];
+    const cx   = e.x + (e.width  * S) / 2;
+    const cy   = e.y + (e.height * S) / 2;
+    const dx   = wp.x - cx;
+    const dy   = wp.y - cy;
+    const dist = Math.hypot(dx, dy);
+    const step = e.speed * S * dt;
+    if (dist <= step) {
+      e.x = wp.x - (e.width  * S) / 2;
+      e.y = wp.y - (e.height * S) / 2;
+      e.pathIndex++;
+    } else {
+      e.x += (dx / dist) * step;
+      e.y += (dy / dist) * step;
+    }
+  }
+
+  // ── Turret targeting & projectile spawning ─────────────────────
+  const RANGE    = 150;  // turret range px at S=1
+  const COOLDOWN = 1.1;  // seconds between shots per turret
+  const PSPEED   = 230;  // projectile speed px/s at S=1
+
+  for (const turret of playerEntities) {
+    let cd = turretCooldowns.get(turret.id) || 0;
+    cd -= dt;
+    if (cd <= 0 && enemyEntities.length > 0) {
+      const tx = turret.x + (turret.width  * S) / 2;
+      const ty = turret.y + (turret.height * S) / 2;
+      let nearest = null, nearDist = Infinity;
+      for (const e of enemyEntities) {
+        const ex = e.x + (e.width  * S) / 2;
+        const ey = e.y + (e.height * S) / 2;
+        const d  = Math.hypot(ex - tx, ey - ty);
+        if (d < nearDist && d <= RANGE * S) { nearDist = d; nearest = e; }
+      }
+      if (nearest) {
+        const ex  = nearest.x + (nearest.width  * S) / 2;
+        const ey  = nearest.y + (nearest.height * S) / 2;
+        const ang = Math.atan2(ey - ty, ex - tx);
+        projectiles.push({
+          id:     _nextId++,
+          sprite: sprite_acorn_shot,
+          width:  24,
+          height: 24,
+          x:      tx - 12 * S,
+          y:      ty - 12 * S,
+          vx:     Math.cos(ang) * PSPEED * S,
+          vy:     Math.sin(ang) * PSPEED * S
+        });
+        cd = COOLDOWN;
+      }
+    }
+    turretCooldowns.set(turret.id, Math.max(cd, 0));
+  }
+
+  // ── Move projectiles & detect hits ────────────────────────────
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    if (p.x < -60 || p.x > W + 60 || p.y < -60 || p.y > H + 60) {
+      projectiles.splice(i, 1); continue;
+    }
+    const pcx = p.x + 12 * S, pcy = p.y + 12 * S;
+    let hit = false;
+    for (let j = enemyEntities.length - 1; j >= 0; j--) {
+      const e   = enemyEntities[j];
+      const ecx = e.x + (e.width  * S) / 2;
+      const ecy = e.y + (e.height * S) / 2;
+      if (Math.hypot(pcx - ecx, pcy - ecy) < 18 * S) {
+        e.hp--;
+        if (e.hp <= 0) {
+          enemyEntities.splice(j, 1);
+          score     += 10 * level;
+          resources += 5;
+        }
+        hit = true;
+        break;
+      }
+    }
+    if (hit) projectiles.splice(i, 1);
+  }
+
+  // ── Update mechanics & drain their event queues ────────────────
+  for (const mech of mechanics) {
+    if (typeof mech.update === 'function') mech.update(dt);
+    if (Array.isArray(mech.events) && mech.events.length > 0) {
+      for (const evt of mech.events) {
+        if (evt.type === 'score') {
+          score += (evt.value ?? 10);
+        }
+        if (evt.type === 'state') {
+          if (evt.key === 'lives')     lives     = evt.value;
+          if (evt.key === 'resources') resources = evt.value;
+          if (evt.key === 'gameOver')  gameOver  = true;
+        }
+      }
+      mech.events.length = 0;
+    }
+  }
+}
+
+
+  
+// ── 1. Tile entire background with dirt-mound ─────────────────────
+const tileW = 32 * S, tileH = 32 * S;
+const cols = Math.ceil(W / tileW) + 1;
+const rows = Math.ceil(H / tileH) + 1;
+for (let r = 0; r < rows; r++) {
+  for (let c = 0; c < cols; c++) {
+    ctx.drawImage(sprite_dirt_mound, c * tileW, r * tileH, tileW, tileH);
+  }
+}
+
+// ── 2. Draw leaf-path tiles along every path segment ──────────────
+const leafSize = 32 * S;
+for (let seg = 0; seg < path.length - 1; seg++) {
+  const a = path[seg], b = path[seg + 1];
+  const sdx = b.x - a.x, sdy = b.y - a.y;
+  const segLen = Math.hypot(sdx, sdy);
+  const steps  = Math.ceil(segLen / leafSize) + 2;
+  for (let t = 0; t <= steps; t++) {
+    const f  = t / steps;
+    const lx = a.x + sdx * f - leafSize / 2;
+    const ly = a.y + sdy * f - leafSize / 2;
+    ctx.drawImage(sprite_leaf_path, lx, ly, leafSize, leafSize);
+  }
+}
+
+// ── 3. Draw bark-wall decorations at interior path corners ────────
+const wallSz = 32 * S;
+for (let i = 1; i < path.length - 1; i++) {
+  ctx.drawImage(sprite_bark_wall,
+    path[i].x - wallSz,       path[i].y - wallSz,       wallSz, wallSz);
+  ctx.drawImage(sprite_bark_wall,
+    path[i].x + wallSz * 0.5, path[i].y - wallSz,       wallSz, wallSz);
+  ctx.drawImage(sprite_bark_wall,
+    path[i].x - wallSz,       path[i].y + wallSz * 0.5, wallSz, wallSz);
+}
+
+// ── 4. Draw prop entities (mushroom-stool & flower-node) ──────────
+for (const prop of propEntities) {
+  if (prop.type === 'mushroom-stool') {
+    ctx.drawImage(sprite_mushroom_stool,
+      prop.x, prop.y, prop.width * S, prop.height * S);
+  } else if (prop.type === 'flower-node') {
+    ctx.drawImage(sprite_flower_node,
+      prop.x, prop.y, prop.width * S, prop.height * S);
+  }
+}
+
+// ── 5. Draw enemies ───────────────────────────────────────────────
+for (const e of enemyEntities) {
+  if (e.type === 'ant-grunt') {
+    ctx.drawImage(sprite_ant_grunt, e.x, e.y, e.width * S, e.height * S);
+  } else if (e.type === 'mosquito-flyer') {
+    ctx.drawImage(sprite_mosquito_flyer, e.x, e.y, e.width * S, e.height * S);
+  }
+  // HP bar (only when damaged)
+  if (e.hp > 1) {
+    const bw = e.width * S;
+    ctx.fillStyle = '#300';
+    ctx.fillRect(e.x, e.y - 6 * S, bw, 4 * S);
+    ctx.fillStyle = '#0f0';
+    ctx.fillRect(e.x, e.y - 6 * S, bw * (e.hp / (1 + Math.floor((level - 1) * 0.6))), 4 * S);
+  }
+}
+
+// ── 6. Draw player turrets ────────────────────────────────────────
+for (const t of playerEntities) {
+  ctx.drawImage(sprite_beetle_turret, t.x, t.y, t.width * S, t.height * S);
+  // Range ring on hover (always subtle)
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,220,80,0.18)';
+  ctx.lineWidth   = 1.5 * S;
+  ctx.beginPath();
+  ctx.arc(t.x + (t.width * S) / 2, t.y + (t.height * S) / 2, 150 * S, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ── 7. Draw projectiles ───────────────────────────────────────────
+for (const p of projectiles) {
+  ctx.drawImage(sprite_acorn_shot, p.x, p.y, p.width * S, p.height * S);
+}
+
+// ── 8. Mechanic visual overlays ───────────────────────────────────
+for (const mech of mechanics) {
+  if (typeof mech.draw === 'function') mech.draw(ctx);
+}
+
+// ── 9. HUD ────────────────────────────────────────────────────────
+ctx.save();
+ctx.font         = `bold ${Math.round(18 * S)}px sans-serif`;
+ctx.textBaseline = 'top';
+ctx.textAlign    = 'left';
+// shadow for legibility
+ctx.fillStyle = 'rgba(0,0,0,0.55)';
+ctx.fillRect(0, 0, W, 34 * S);
+ctx.fillStyle = '#fff';
+ctx.fillText(`\u2665 ${lives}`,          10 * S,  8 * S);
+ctx.fillText(`Lv ${level}`,             110 * S,  8 * S);
+ctx.fillText(`\uD83E\uDE99 ${resources}`, 175 * S,  8 * S);
+ctx.fillText(`Score: ${score}`,         300 * S,  8 * S);
+ctx.restore();
+
+// ── 10. Game-over overlay ─────────────────────────────────────────
+if (gameOver) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.68)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle    = '#ff3a3a';
+  ctx.font         = `bold ${Math.round(56 * S)}px sans-serif`;
+  ctx.fillText('GAME OVER', W / 2, H / 2 - 34 * S);
+  ctx.fillStyle = '#ffffff';
+  ctx.font      = `${Math.round(24 * S)}px sans-serif`;
+  ctx.fillText(`Final Score: ${score}`, W / 2, H / 2 + 4 * S);
+  ctx.fillStyle = '#aaddff';
+  ctx.font      = `${Math.round(20 * S)}px sans-serif`;
+  ctx.fillText('Tap / Click to restart  \u2014  R to restart', W / 2, H / 2 + 38 * S);
+  ctx.restore();
+}
+
+
+  scoreEl.textContent = 'Score: ' + score;
+  requestAnimationFrame(gameLoop);
+}
+
+// === BOOT ===
+
+// ── Verify path integrity ─────────────────────────────────────────
+console.assert(path.length >= 4,
+  `Path needs at least 4 waypoints, found ${path.length}`);
+
+// ── Place initial prop entities at scenic positions ───────────────
+propEntities.push(
+  {
+    id:     _nextId++,
+    type:   'mushroom-stool',
+    sprite: sprite_mushroom_stool,
+    width:  32,
+    height: 40,
+    x:      W * 0.08,
+    y:      H * 0.45
+  },
+  {
+    id:     _nextId++,
+    type:   'flower-node',
+    sprite: sprite_flower_node,
+    width:  28,
+    height: 36,
+    x:      W * 0.60,
+    y:      H * 0.68
+  },
+  {
+    id:     _nextId++,
+    type:   'mushroom-stool',
+    sprite: sprite_mushroom_stool,
+    width:  32,
+    height: 40,
+    x:      W * 0.87,
+    y:      H * 0.10
+  },
+  {
+    id:     _nextId++,
+    type:   'flower-node',
+    sprite: sprite_flower_node,
+    width:  28,
+    height: 36,
+    x:      W * 0.38,
+    y:      H * 0.82
+  }
+);
+
+// ── Confirm mechanics are alive ───────────────────────────────────
+console.assert(mechanics.length === 3, 'Expected 3 mechanic instances');
+
+// ── Ready ─────────────────────────────────────────────────────────
+console.log('Game initialized');
+
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
