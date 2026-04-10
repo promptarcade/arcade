@@ -26,8 +26,7 @@ body{position:fixed;inset:0}
 .category-cards{display:flex;flex-direction:column;gap:16px;width:100%;max-width:400px}
 .category-card{position:relative;border-radius:16px;overflow:hidden;cursor:pointer;
   aspect-ratio:16/9;box-shadow:0 4px 16px rgba(0,0,0,0.12);
-  transition:transform 0.15s,box-shadow 0.15s;
-  display:grid;grid-template-columns:repeat(6,1fr);grid-template-rows:repeat(3,1fr);gap:2px;background:#ddd}
+  transition:transform 0.15s,box-shadow 0.15s;background:#ddd}
 .category-card:active{transform:scale(0.97)}
 .category-card img{width:100%;height:100%;object-fit:cover;display:block}
 
@@ -259,28 +258,27 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
-function buildThumbnails(cat) {
+var HERO_IMAGES = {
+  animals: 'lion',
+  instruments: 'drums',
+  machines: 'formula1'
+};
+
+function buildHero(cat) {
   var container = document.getElementById('thumb-' + cat);
-  var items = DATA[cat];
-  var count = 18;
-  var step = Math.max(1, Math.floor(items.length / count));
-  for (var i = 0; i < count; i++) {
-    var idx = (i * step) % items.length;
-    var img = document.createElement('img');
-    img.src = getImagePath(cat, items[idx]);
-    img.alt = '';
-    img.loading = 'lazy';
-    img.draggable = false;
-    container.appendChild(img);
-  }
+  var img = document.createElement('img');
+  img.src = getImagePath(cat, HERO_IMAGES[cat]);
+  img.alt = cat;
+  img.draggable = false;
+  container.appendChild(img);
 }
 
 buildGrid('animals');
 buildGrid('instruments');
 buildGrid('machines');
-buildThumbnails('animals');
-buildThumbnails('instruments');
-buildThumbnails('machines');
+buildHero('animals');
+buildHero('instruments');
+buildHero('machines');
 
 // Register service worker for offline support
 if ('serviceWorker' in navigator) {
