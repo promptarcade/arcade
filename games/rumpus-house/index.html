@@ -23,7 +23,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#bfe6fb;overscroll-beh
 <canvas id="bgc"></canvas>
 <canvas id="cc"></canvas>
 <div id="safe"></div>
-<!-- built from src/ by build.js (7f29e5da43) — edit the sources, not this file -->
+<!-- built from src/ by build.js (c60352cec9) — edit the sources, not this file -->
 <script>
 /* ---------- src/util.js ---------- */
 /* util.js — numbers, easing, seeded randomness, colours and path helpers shared by every module. */
@@ -8299,6 +8299,7 @@ const Game = {
 
 /* ---------- the frame ---------- */
 function update(dt) {
+  if (!G.started) return;
   G.t += dt;
   Input.update(dt);
   Cam.update(dt);
