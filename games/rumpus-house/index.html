@@ -23,7 +23,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#bfe6fb;overscroll-beh
 <canvas id="bgc"></canvas>
 <canvas id="cc"></canvas>
 <div id="safe"></div>
-<!-- built from src/ by build.js (c60352cec9) — edit the sources, not this file -->
+<!-- built from src/ by build.js (7a547e135c) — edit the sources, not this file -->
 <script>
 /* ---------- src/util.js ---------- */
 /* util.js — numbers, easing, seeded randomness, colours and path helpers shared by every module. */
@@ -1645,13 +1645,10 @@ const Art = {
 
 function makeCanvas(w, h) { const c = document.createElement('canvas'); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; }
 function copyCanvas(src) { const c = makeCanvas(src.width, src.height); c.getContext('2d').drawImage(src, 0, 0); return c; }
-// the painted part of a sprite: the box around its opaque pixels
-function opaqueBox(c) {
-  const g = c.getContext('2d'), { width: w, height: h } = c, d = g.getImageData(0, 0, w, h).data;
-  let x0 = w, y0 = h, x1 = -1, y1 = -1;
-  for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) if (d[(y * w + x) * 4 + 3] > 40) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-  return x1 < 0 ? { x: 0, y: 0, w, h } : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
-}
+// the painted part of a sprite: the whole copy, as every picture is cut tight to its paint. Never
+// read back from the pixels: where the pictures count as from another address (the claude.ai copy)
+// the browser refuses, and the refusal stopped the frame before an eater's head was drawn.
+function opaqueBox(c) { return { x: 0, y: 0, w: c.width, h: c.height }; }
 
 /* ---------- bites: a copy of a food with n mouthfuls gone from its top ---------- */
 function bitten(src, n, seed) {
