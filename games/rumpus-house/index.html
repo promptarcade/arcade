@@ -23,7 +23,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#bfe6fb;overscroll-beh
 <canvas id="bgc"></canvas>
 <canvas id="cc"></canvas>
 <div id="safe"></div>
-<!-- built from src/ by build.js (7a547e135c) — edit the sources, not this file -->
+<!-- built from src/ by build.js (78b109790a) — edit the sources, not this file -->
 <script>
 /* ---------- src/util.js ---------- */
 /* util.js — numbers, easing, seeded randomness, colours and path helpers shared by every module. */
@@ -1651,12 +1651,14 @@ function copyCanvas(src) { const c = makeCanvas(src.width, src.height); c.getCon
 function opaqueBox(c) { return { x: 0, y: 0, w: c.width, h: c.height }; }
 
 /* ---------- bites: a copy of a food with n mouthfuls gone from its top ---------- */
+// how far down the food each mouthful reaches, as a fraction of its height
+const BITE_DEPTH = [0, 0.3, 0.58, 0.86];
 function bitten(src, n, seed) {
   const c = copyCanvas(src), g = c.getContext('2d'), b = src._box || (src._box = opaqueBox(src));
   const f = seeded(seed || 3);
   g.globalCompositeOperation = 'destination-out';
   for (let k = 1; k <= n; k++) {
-    const depth = b.y + b.h * (k === 1 ? 0.3 : k === 2 ? 0.58 : 0.86), R = b.w * 0.2;
+    const depth = b.y + b.h * BITE_DEPTH[k], R = b.w * 0.2;
     for (let i = -2; i <= 2; i++) {
       g.beginPath(); g.arc(b.x + b.w / 2 + i * b.w * 0.2 + (f() - 0.5) * 8, depth - R * 0.55 + Math.abs(i) * R * 0.12, R, 0, TAU); g.fill();
     }
@@ -2203,7 +2205,7 @@ function blob(ctx, x, y, rx, ry, col, ol, rot) {
 
 /* ---------- where everything goes, from the pose ---------- */
 // pose: { legs: 'stand'|'walk'|'sit'|'dangle'|'kick'|'lie'|'straddle'|'bath', phase, armL, armR: [shoulder angle, elbow bend],
-//         lean, headTilt, bob, squash, face, held: { pic, hand: 'L'|'R' } }
+//         lean, headTilt, bob, squash, face, held: { pic, hand: 'L'|'R' }, handFront: the right hand in front of the head }
 function skeleton(B, pose) {
   const S = {};
   S.shoulderY = -B.th;
@@ -2293,9 +2295,9 @@ function drawPerson(ctx, look, pose) {
   ctx.save(); ctx.translate(0, bob * 0.4);
   drawTorso(ctx, look, B, S, top, bot, ol, pose);
   ctx.restore();
-  // arms, and whatever a hand holds; a hand up at the face goes in front of the head
+  // arms, and whatever a hand holds; a hand up at the face, or food held up by the chin, goes in front of the head
   const atFace = A => A[2][1] < S.shoulderY - B.head * 0.2 && Math.abs(A[2][0]) < B.head * 0.95;
-  const frontL = atFace(S.armL), frontR = atFace(S.armR);
+  const frontL = atFace(S.armL), frontR = atFace(S.armR) || !!pose.handFront;
   ctx.save(); ctx.translate(0, bob * 0.4);
   if (!frontL) drawArm(ctx, S.armL, B, skin, top, ol, pose, 'L');
   if (!frontR) drawArm(ctx, S.armR, B, skin, top, ol, pose, 'R');
@@ -3503,7 +3505,7 @@ class Person extends Thing {
     const room = this.room(), music = room ? room.music : 0;
     if (!this.seat) { this.seatRot = 0; this.scaleK = 0; this.seatDy = 0; }
     this.face = { mouth: 'smile', eyes: 'open', blink: this.blink, look: this.look2 };
-    this.armL = [0.14, 0.15]; this.armR = [0.14, 0.15]; this.kick = 0; this.over = null; this.bob = 0;
+    this.armL = [0.14, 0.15]; this.armR = [0.14, 0.15]; this.kick = 0; this.over = null; this.bob = 0; this.handFront = false;
     this.legs = 'stand'; this.lean *= Math.exp(-dt * 3);
     // eyes follow anything being carried about nearby
     this.lookT -= dt;
@@ -3593,7 +3595,7 @@ class Person extends Thing {
   /* ---------- drawing ---------- */
   pose() {
     const P = this._pose || (this._pose = {});
-    P.legs = this.legs; P.phase = this.t; P.kick = this.kick; P.armL = this.armL; P.armR = this.armR;
+    P.legs = this.legs; P.phase = this.t; P.kick = this.kick; P.armL = this.armL; P.armR = this.armR; P.handFront = this.handFront;
     P.face = this.face; P.bob = this.bob; P.lean = 0; P.headTilt = this.headTilt || 0; P.squash = this.squash; P.dirt = this.dirt;
     P.held = this.hand ? handDrawer(this, this.hand) : (this.actHeld || null);
     P.over = (ctx, rx, ry) => drawWorn(ctx, this, rx, ry);
@@ -3651,6 +3653,8 @@ Person.prototype.faceOver = function (ctx, rx, ry) {
     ctx.beginPath(); ctx.arc(-r * 0.35, ry * 0.5 - r * 0.15, r * 0.2, 0, TAU); ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fill(); ctx.restore();
   }
 };
+// how much smaller a prop is drawn in someone's hand
+function heldScale(p, item) { return Math.min(1, (p.B.head * 1.5) / Math.max(item.h, item.w)); }
 // a prop in someone's hand, drawn by the hand (things held up — balloons, umbrellas, kites — float above it)
 function handDrawer(p, item) {
   const d = item._hd || (item._hd = { hand: 'R', draw: null });
@@ -3665,7 +3669,7 @@ function handDrawer(p, item) {
       if (item.type === 'umbrella') item.drawAt(ctx, x + 4, y + item.h * 0.12, 1, 0);
       else item.drawAt(ctx, x + Math.sin(p.t * 1.5) * 8, top + 8, 1, Math.sin(p.t * 1.3) * 0.1);
     } else {
-      const k = Math.min(1, (p.B.head * 1.5) / Math.max(item.h, item.w));
+      const k = heldScale(p, item);
       item.drawAt(ctx, x + 6, y + item.h * k * 0.45, k, p.handTilt || 0);
     }
     ctx.restore();
@@ -3942,23 +3946,30 @@ function* eatScript(p, food) {
     return;
   }
   p.putInHand(food, true);
-  p.actProp = food; p.hand = null; p.actHeld = handDrawer(p, food);
+  // the food is held in front of the fingers with what is left of it centred on the hand; between bites
+  // it waits by the chin, in front of the face and clear of the mouth, so every bite shows
+  const s = heldScale(p, food), fw = food.w / (food.def.wk || 1) * s, fh = food.h * s;
+  p.actProp = food; p.hand = null;
+  p.actHeld = { hand: 'R', drawOver: (ctx, x, y) => food.drawAt(ctx, x + 6, y + fh * (1 - BITE_DEPTH[Math.min(3, food.bites || 0)]) / 2, s) };
+  const by = [p.B.head * 0.3 + fw / 2 - 6, p.mouthL[1] + p.B.head * 0.15], at = [6, p.mouthL[1] + 4];
+  const handTo = (a, b, e) => { p.armR = { to: [lerp(a[0], b[0], e), lerp(a[1], b[1], e)] }; p.handFront = true; };
   // something hot is blown on first
   if (fx.indexOf('hot') >= 0 || food.cooked === 'bake' || food.cooked === 'micro') {
-    yield* hold(1.1, t => { p.armR = { to: [18, p.mouthL[1] + 16] }; p.face = { mouth: 'blow', eyes: 'open', look: [0, 0.6] }; if (Rnd.f() < 0.3) { const [x, y] = p.mouthPos(); Parts.add('puff', x + 20, y + 10, { size: 10, life: 0.4, vx: 120, col: '#ffffff' }); } });
+    yield* hold(1.1, t => { handTo(by, by, 0); p.face = { mouth: 'blow', eyes: 'open', look: [0.6, 0.6] }; if (Rnd.f() < 0.3) { const [x, y] = p.mouthPos(); Parts.add('puff', x + 20, y + 10, { size: 10, life: 0.4, vx: 120, col: '#ffffff' }); } });
     SFX.play('blow', { dur: 0.4 });
   }
   const bites = p.age === 'baby' ? 4 : 3;
   for (let i = 0; i < bites; i++) {
     // up to the mouth, mouth wide, CHOMP
-    yield* hold(0.28, (t, dt, k) => { p.armR = { to: [12 - k * 6, p.mouthL[1] + 18 - k * 14] }; p.face = { mouth: 'O', eyes: 'open', look: [0, 0.7] }; });
+    yield* hold(0.28, (t, dt, k) => { handTo(by, at, Ease.inOut(k)); p.face = { mouth: 'O', eyes: 'open', look: [0, 0.7] }; });
     food.bites = Math.min(3, Math.ceil((i + 1) * 3 / bites));
     const snd = fx.map(e => CRUMBS[e]).find(Boolean) || 'munch';
     SFX.play(snd, { big: fx.indexOf('bigbite') >= 0 });
     const [mx, my] = p.mouthPos();
     Parts.burst('crumb', mx, my + 6, 5, { v0: 60, v1: 180, g: 900, life: 0.8, sizeR: [4, 8], col: f.rgb || '#d8a050', floor: p.seat ? p.hip()[1] + 60 : p.y, layer: 1 });
     if (fx.indexOf('juicy') >= 0) Parts.burst('drop', mx, my, 4, { v0: 80, v1: 200, g: 900, life: 0.8, size: 5, col: f.rgb || '#ffa040', floor: p.y, layer: 1 });
-    yield* hold(0.55, t => { p.armR = { to: [16, p.mouthL[1] + 22] }; p.face = { mouth: 'chew', chew: Math.abs(Math.sin(t * 14)), eyes: 'happy', blush: 0.9 }; p.bob = Math.sin(t * 14) * 2; });
+    // back down by the chin to chew, with the bite on show
+    yield* hold(0.7, t => { handTo(at, by, Ease.out(Math.min(1, t / 0.2))); p.face = { mouth: 'chew', chew: Math.abs(Math.sin(t * 14)), eyes: 'happy', blush: 0.9 }; p.bob = Math.sin(t * 14) * 2; });
   }
   // all gone
   p.actHeld = null; p.actProp = null; food._eaten = true; food.gone = true;
