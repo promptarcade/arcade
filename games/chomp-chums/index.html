@@ -23,7 +23,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#8fd3f4;overscroll-beh
 <canvas id="bgc"></canvas>
 <canvas id="cc"></canvas>
 <div id="safe"></div>
-<!-- built from src/ by build.js (4f6ce406b8) — edit the sources, not this file -->
+<!-- built from src/ by build.js (611403a526) — edit the sources, not this file -->
 <script>
 /* ---------- src/util.js ---------- */
 /* util.js — numbers, easing, seeded randomness, colours and path helpers shared by every module. */
@@ -975,6 +975,7 @@ function handTarget(A, s) {
   const right = s > 0;
   switch (pose) {
     case 'up': return [s * (B.w * 0.75 + 14) + Math.sin(t * 10 + s) * 6, g.bodyTop - 26];
+    case 'flail': { const r = (ARM_REACH[A.d.arms] || 60) * 0.95, a = -Math.PI / 2 + s * (0.75 + 0.55 * Math.sin(t * 18 + (right ? 0 : Math.PI))); return [sx + Math.cos(a) * r, sy + Math.sin(a) * r]; }   // both arms flapping up and down in a panic, in turn
     case 'belly': return right ? [B.belly[0] + 18 + Math.cos(t * 7) * 14, B.belly[1] - 4 + Math.sin(t * 7) * 9] : idle();
     case 'fan': return right ? [m.x + 42 + Math.sin(t * 26) * 14, m.y - 8] : idle();
     case 'cup': return right ? [m.x + 26, m.y + 6] : idle();
@@ -3691,6 +3692,52 @@ function* feedScript(m, S, st, opts = {}) {
   if (opts.done) opts.done(c.verdict);
 }
 
+/* ---------- way too much ---------- */
+// one food too many: whatever the monster was doing stops dead (it carries on afterwards) while it
+// jumps, clutches its cheeks, shakes its head and flaps its arms in a sweat, then pats a tummy as
+// round as a ball and puffs out a great phew
+function* tooMuch(m) {
+  const paused = m.tasks.list.splice(0), held = m.held;
+  const P0 = Object.assign({}, m.pose), F0 = Object.assign({}, m.face), arms = m.armPose, flap = m.flap, legs = m.legAmt, sweat = m.fx.sweat;
+  m.held = null;
+  // whoa!
+  setFace(m, 'wide', 'o', 0.8); m.face.brows = 'up'; m.face.cheeks = 0; m.armPose = 'cheeks';
+  SFX.play('whistle', { dur: 0.45 });
+  const [hx, hy] = m.headPos();
+  Parts.burst('drop', hx, hy, 8, { ang: -Math.PI / 2, spread: Math.PI * 1.4, v0: 160, v1: 340, g: 1300, sizeR: [3 * K(m), 6 * K(m)], lifeR: [0.7, 1.1], col: '#9fdcff' });
+  yield* tween(0.08, p => { m.pose.rot = P0.rot * (1 - p); m.pose.lift = P0.lift * (1 - p); m.pose.sy = 1 - 0.12 * p; m.pose.sx = 1 + 0.08 * p; });
+  yield* tween(0.34, p => { m.pose.lift = Math.sin(p * Math.PI) * 46; m.pose.sy = lerp(1.12, 1, p); m.pose.sx = lerp(0.92, 1, p); m.fx.sweat = Math.max(sweat, p); });
+  // no, no, no, no
+  setFace(m, 'spiral', 'wavy', 0); m.face.brows = null; m.face.cheeks = 0.7; m.armPose = 'flail'; m.flap = 22; m.legAmt = 1;
+  babble(m, 'ow', 6);
+  let drip = 0;
+  yield* during(1.2, e => {
+    m.pose.rot = Math.sin(e * 24) * 0.2; m.pose.lift = Math.abs(Math.sin(e * 12)) * 14; m.pose.shake = 2;
+    if (e < drip) return;
+    drip += 0.12;
+    const [x, y] = m.headPos(), s = Math.sin(e * 24) > 0 ? 1 : -1;
+    Parts.add('drop', x + s * 30 * K(m), y + 12 * K(m), { size: rand(4, 7) * K(m), vx: s * rand(160, 300), vy: -rand(220, 360), g: 1300, life: 1, col: '#9fdcff' });
+  });
+  // phew: full right up
+  m.pose.rot = 0; m.pose.lift = 0; m.pose.shake = 0; m.legAmt = 0; m.flap = flap;
+  setFace(m, 'shut', 'blow', 0.3); m.face.cheeks = 0.9; m.armPose = 'pat';
+  yield* tween(0.25, p => { m.pose.sx = 1 + 0.14 * p; m.pose.sy = 1 - 0.07 * p; }, Ease.out);
+  SFX.play('blow', { dur: 0.7 });
+  const [mx, my] = m.mouthPos();
+  Parts.burst('puff', mx, my, 5, { ang: -Math.PI / 2, spread: 1.4, v0: 50, v1: 130, sizeR: [6 * K(m), 10 * K(m)], grow: 2.2, lifeR: [0.6, 0.9], col: '#ffffff', alpha: 0.8 });
+  yield* during(0.6, e => { m.face.cheeks = 0.9 * (1 - e / 0.6); m.pose.rot = Math.sin(e * 6) * 0.05; });
+  // and back to what it was doing
+  m.face.eyes = F0.eyes; m.face.mouth = F0.mouth; m.face.brows = F0.brows; m.armPose = arms; m.legAmt = legs;
+  const P1 = Object.assign({}, m.pose), F1 = Object.assign({}, m.face), s1 = m.fx.sweat;
+  yield* tween(0.2, p => {
+    for (const k in P0) m.pose[k] = lerp(P1[k], P0[k], p);
+    ['open', 'cheeks', 'wide', 'blush'].forEach(k => { m.face[k] = lerp(F1[k], F0[k], p); });
+    m.fx.sweat = lerp(s1, sweat, p);
+  }, Ease.inOut);
+  m.held = held;
+  m.tasks.list.push(...paused);
+}
+
 /* ---------- little drawn sprites the reactions need ---------- */
 let _peel = null, _bone = null, _fishbone = null;
 function peelSprite() {
@@ -6037,7 +6084,7 @@ SCREENS.feed = {
     this.mon = new Monster(this.rec);
     this.pantry = this.pantry || new Pantry({});
     this.pantry.badge = id => { const v = this.rec.tried[id]; return v === 'love' || v === 'dislike' ? v : null; };
-    this.held = null; this.flying = []; this.queue = []; this.bubble = null; this.idle = 0; this.finger = null; this.eating = false;
+    this.held = null; this.flying = []; this.queue = []; this.bubble = null; this.idle = 0; this.finger = null; this.eating = false; this.flustered = false;
     this.stage = { floor: 0, left: 0, right: 0, top: 0, mid: 0, shake: 0 };
     this.dish = p.dish ? { S: p.dish, t: 0 } : null;
     if (this.dish) SFX.play('ding');
@@ -6083,12 +6130,14 @@ SCREENS.feed = {
     this.eating = true; this.idle = 0; this.bubble = null;
     m.lookAt = null;
     m.play(feedScript(m, S, this.stage, { done: v => {
-      this.eating = false;
+      this.eating = false; this.flustered = false;
       if (S.parts.length === 1 && S.kind === 'food' && !(S.cook || []).length) { this.rec.tried[S.parts[0]] = v; this.pantry.poke(S.parts[0]); }
       Store.save();
     } }));
   },
   mouth() { return this.mon.mouthPos(); },
+  // the plate holds three and the mouth one (taken while the monster is busy): all full, counting what is on its way?
+  full() { return this.flying.filter(F => !F.back).length + this.queue.length + (this.eating || this.mon.busy ? 1 : 0) >= 4; },
   // send a food flying from (x, y) to the monster's mouth
   fling(S, x, y) {
     const [mx, my] = this.mouth();
@@ -6118,6 +6167,12 @@ SCREENS.feed = {
       if (h.tab !== undefined) this.pantry.tapTab(h.tab);
       else if (h.arrow) this.pantry.turn(h.arrow);
       else if (h.food && !this.held) {
+        // one too many: it stays in the cupboard, and a monster with its mouth full gets in a flap (once a mouthful)
+        if (this.full()) {
+          this.pantry.poke(h.food); SFX.play('boing', { f: 160 });
+          if (this.eating && !this.flustered) { this.flustered = true; this.mon.play(tooMuch(this.mon)); }
+          return;
+        }
         const S = servingOf(h.food);
         this.held = { S, id: h.food, x: p.x, y: p.y, ptr: p.id, size: h.s, t0: G.t, x0: p.x, y0: p.y, tile: [h.x, h.y] };
         Say.say(FOODS[h.food].name);
