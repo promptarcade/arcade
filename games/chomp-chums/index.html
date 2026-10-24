@@ -23,7 +23,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#8fd3f4;overscroll-beh
 <canvas id="bgc"></canvas>
 <canvas id="cc"></canvas>
 <div id="safe"></div>
-<!-- built from src/ by build.js (88c1e14b0f) — edit the sources, not this file -->
+<!-- built from src/ by build.js (459173c45f) — edit the sources, not this file -->
 <script>
 /* ---------- src/util.js ---------- */
 /* util.js — numbers, easing, seeded randomness, colours and path helpers shared by every module. */
@@ -252,6 +252,9 @@ const PAL = {
              stops: ['#f2564c', '#ff9b3d', '#ffd84a', '#69c95c', '#4aa7f2', '#9a6be2'] },
 };
 const COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'white', 'rainbow'];
+// a rainbow monster's parts have fixed colours of their own; when its palette is being washed towards
+// another (pal.toward = { pal, t }: the hulk's green) they go along, each to the colour doing its job there
+const rbc = (pal, hex, role) => (pal.toward ? mix(hex, pal.toward.pal[role], pal.toward.t) : hex);
 
 /* ---------- body shapes ---------- */
 const BODIES = {
@@ -445,11 +448,11 @@ function drawPattern(ctx, A) {
   };
   switch (d.pattern) {
     case 'spots':
-      ctx.fillStyle = pal.stops ? 'rgba(255,255,255,0.75)' : d.color === 'white' ? '#cfc6e6' : d.color === 'yellow' ? '#f6a531' : rgba(pal.light, 0.85);
+      ctx.fillStyle = pal.stops ? rgba(rbc(pal, '#ffffff', 'light'), 0.75) : d.color === 'white' ? '#cfc6e6' : d.color === 'yellow' ? '#f6a531' : rgba(pal.light, 0.85);
       scatter(8, 8, 19, (x, y, r, k) => { ctx.beginPath(); ctx.ellipse(x, y, r, r * (0.8 + k * 0.3), k * 3, 0, TAU); ctx.fill(); });
       break;
     case 'stripes': {
-      ctx.fillStyle = rgba(pal.stops ? '#3a2466' : pal.dark, pal.stops ? 0.35 : 0.8);
+      ctx.fillStyle = rgba(pal.stops ? rbc(pal, '#3a2466', 'dark') : pal.dark, pal.stops ? 0.35 : 0.8);
       for (let i = 0; i < 6; i++) {
         const s = i % 2 ? 1 : -1, y = -B.h * 0.75 + (i / 5) * B.h * 1.6 + (f() - 0.5) * 10;
         const ex = s * (B.w + 10), len = B.w * (0.38 + f() * 0.2), th = 9 + f() * 5;
@@ -466,7 +469,7 @@ function drawPattern(ctx, A) {
       break;
     }
     case 'freckles': {
-      ctx.fillStyle = rgba(pal.stops ? '#3a2466' : pal.dark, 0.7);
+      ctx.fillStyle = rgba(pal.stops ? rbc(pal, '#3a2466', 'dark') : pal.dark, 0.7);
       const m = A.g.mouth;
       [-1, 1].forEach(s => { for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(m.x + s * (m.hw + 14 + (i % 2) * 9), m.y - 12 + Math.floor(i / 2) * 9 + (i % 2) * 3, 2.6, 0, TAU); ctx.fill(); } });
       scatter(10, 2, 3.5, (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); });
@@ -478,7 +481,7 @@ function drawPattern(ctx, A) {
       break;
     case 'zigzag': {
       const y0 = B.belly ? B.belly[1] - 6 : B.h * 0.35;
-      ctx.strokeStyle = pal.stops ? 'rgba(255,255,255,0.8)' : pal.mark; ctx.lineWidth = 11; ctx.lineJoin = 'miter';
+      ctx.strokeStyle = pal.stops ? rgba(rbc(pal, '#ffffff', 'mark'), 0.8) : pal.mark; ctx.lineWidth = 11; ctx.lineJoin = 'miter';
       ctx.beginPath();
       for (let x = -B.w - 20, i = 0; x <= B.w + 20; x += 20, i++) { const y = y0 + (i % 2 ? -10 : 10); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
       ctx.stroke(); ctx.lineJoin = 'round';
@@ -494,7 +497,7 @@ function drawPattern(ctx, A) {
 /* ---------- legs (drawn behind the body) ---------- */
 function drawLegs(ctx, A) {
   const d = A.d, pal = A.pal, gy = A.g.ground, L = pal.line;
-  const fill = pal.stops ? pal.stops[5] : pal.base, dark = pal.stops ? '#6a41b0' : pal.dark;
+  const fill = pal.stops ? pal.stops[5] : pal.base, dark = pal.stops ? rbc(pal, '#6a41b0', 'dark') : pal.dark;
   const lift = s => Math.max(0, Math.sin(A.legPhase + (s > 0 ? Math.PI : 0))) * A.legAmt * 16;
   const F = A.g.F;
   ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = L;
@@ -517,7 +520,7 @@ function drawLegs(ctx, A) {
         ctx.quadraticCurveTo(x + s * 34, fy - 8, x + s * 36, fy + 9); ctx.closePath();
         ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.lineWidth = 4; ctx.stroke();
         ctx.beginPath(); ctx.moveTo(x + s * 4 - s * 19, fy + 5); ctx.lineTo(x + s * 35, fy + 5); ctx.lineWidth = 5; ctx.strokeStyle = dark; ctx.stroke(); ctx.strokeStyle = L;
-        ctx.beginPath(); ctx.arc(x + s * 14, fy - 4, 3.2, 0, TAU); ctx.fillStyle = pal.stops ? '#f2564c' : pal.mark; ctx.fill();
+        ctx.beginPath(); ctx.arc(x + s * 14, fy - 4, 3.2, 0, TAU); ctx.fillStyle = pal.stops ? rbc(pal, '#f2564c', 'mark') : pal.mark; ctx.fill();
       });
       break;
     case 'many': {
@@ -572,7 +575,7 @@ function drawLegs(ctx, A) {
 /* ---------- things on top of the head (drawn behind the body) ---------- */
 function drawTop(ctx, A) {
   const d = A.d, pal = A.pal, L = pal.line, g = A.g;
-  const fill = pal.stops ? '#ff9b3d' : pal.base;
+  const fill = pal.stops ? rbc(pal, '#ff9b3d', 'base') : pal.base;
   ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = L;
   const pair = fn => g.tops.forEach(([x, y, a], i) => { ctx.save(); ctx.translate(x, y); ctx.rotate(a); fn(i ? 1 : -1); ctx.restore(); });
   switch (d.top) {
@@ -608,7 +611,7 @@ function drawTop(ctx, A) {
         const tip = A.springs[i];
         const ex = bx + s * 26 + tip.x, ey = by - 56 + tip.y;
         ctx.beginPath(); ctx.moveTo(bx, by); ctx.quadraticCurveTo(bx + s * 2, by - 34, ex, ey);
-        ctx.lineWidth = 9; ctx.stroke(); ctx.lineWidth = 4.5; ctx.strokeStyle = pal.stops ? '#9a6be2' : pal.dark; ctx.stroke(); ctx.strokeStyle = L;
+        ctx.lineWidth = 9; ctx.stroke(); ctx.lineWidth = 4.5; ctx.strokeStyle = pal.stops ? rbc(pal, '#9a6be2', 'dark') : pal.dark; ctx.stroke(); ctx.strokeStyle = L;
         const bc = d.color === 'yellow' || d.color === 'orange' ? '#ff5f8f' : '#ffd84a';
         const gr = ctx.createRadialGradient(ex - 3, ey - 4, 1, ex, ey, 11); gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.35, bc); gr.addColorStop(1, darken(bc, 0.2));
         ctx.beginPath(); ctx.arc(ex, ey, 10, 0, TAU); ctx.fillStyle = gr; ctx.fill(); ctx.lineWidth = 4; ctx.stroke();
@@ -638,7 +641,7 @@ function drawTop(ctx, A) {
     case 'tuft': {
       const [x, y] = g.topMid;
       ctx.save(); ctx.translate(x, y + 6);
-      const col = pal.stops ? '#9a6be2' : pal.dark;
+      const col = pal.stops ? rbc(pal, '#9a6be2', 'dark') : pal.dark;
       const strands = [[-4, -4, -34, -16, -30, -32], [0, -4, -6, -46, 12, -40], [4, -4, 30, -24, 30, -12]];
       strands.forEach(([a, b, c, e, f2, h]) => {
         ctx.beginPath(); ctx.moveTo(a, b); ctx.quadraticCurveTo(c, e, f2, h);
@@ -649,7 +652,7 @@ function drawTop(ctx, A) {
     }
     case 'spikes': {
       const xs = [-34, 0, 34], hs = [20, 27, 20];
-      const col = pal.stops ? '#9a6be2' : pal.mark;
+      const col = pal.stops ? rbc(pal, '#9a6be2', 'mark') : pal.mark;
       xs.forEach((x, i) => {
         const y = (g.F.topAt(x) || -g.B.h) + 8, a = Math.atan2((g.F.topAt(x + 3) || 0) - (g.F.topAt(x - 3) || 0), 6);
         ctx.save(); ctx.translate(x, y); ctx.rotate(a);
@@ -696,7 +699,7 @@ function drawEyes(ctx, A) {
       const e = g.eyes[i];
       ctx.beginPath(); ctx.moveTo(bx, by); ctx.quadraticCurveTo(bx + (e.x - bx) * 0.2, by - 30, e.x, e.y + e.r * 0.6);
       ctx.lineCap = 'round'; ctx.lineWidth = 15; ctx.strokeStyle = pal.line; ctx.stroke();
-      ctx.lineWidth = 9; ctx.strokeStyle = pal.stops ? '#ff9b3d' : pal.base; ctx.stroke();
+      ctx.lineWidth = 9; ctx.strokeStyle = pal.stops ? rbc(pal, '#ff9b3d', 'base') : pal.base; ctx.stroke();
     });
   }
   g.eyes.forEach(e => drawEye(ctx, A, e));
@@ -708,8 +711,11 @@ function drawEyes(ctx, A) {
       const s = e.side, y = e.y - e.r * 1.38, w = e.r * 0.75;
       let a = 0, lift = 0;
       if (b === 'angry') a = s * 0.38; else if (b === 'worried') a = -s * 0.36; else if (b === 'up') lift = -e.r * 0.25;
+      else if (b === 'fierce') { a = -s * 0.45; lift = e.r * 0.12; }    // low and slanting in to the middle: really cross
       ctx.save(); ctx.translate(e.x, y + lift); ctx.rotate(a);
-      ctx.beginPath(); ctx.moveTo(-w, 2); ctx.quadraticCurveTo(0, -5, w, 2); ctx.lineWidth = Math.max(4, e.r * 0.26); ctx.stroke();
+      ctx.beginPath();
+      if (b === 'fierce' && s === 0) { ctx.moveTo(-w * 1.1, -6); ctx.lineTo(0, 5); ctx.lineTo(w * 1.1, -6); } else { ctx.moveTo(-w, 2); ctx.quadraticCurveTo(0, -5, w, 2); }
+      ctx.lineWidth = Math.max(4, e.r * (b === 'fierce' ? 0.32 : 0.26)); ctx.stroke();
       ctx.restore();
     });
   }
@@ -771,7 +777,7 @@ function drawEye(ctx, A, e) {
     if (ex === 'cross') { lx = -s * 0.8; ly = 0.25; if (s === 0) { lx = 0; ly = 0.7; } }
     const px = x + lx * (rx - pr) * 0.9, py = y + ly * (ry - pr) * 0.9;
     if (v === 'cute') {
-      ctx.fillStyle = A.pal.stops ? '#6940b0' : mix(A.pal.dark, '#1e1633', 0.35);
+      ctx.fillStyle = A.pal.stops ? rbc(A.pal, '#6940b0', 'dark') : mix(A.pal.dark, '#1e1633', 0.35);
       ctx.beginPath(); ctx.arc(px, py, pr, 0, TAU); ctx.fill();
       ctx.fillStyle = '#1b1430'; ctx.beginPath(); ctx.arc(px, py, pr * 0.62, 0, TAU); ctx.fill();
     } else {
@@ -792,21 +798,35 @@ function drawEye(ctx, A, e) {
   if (ex === 'half') lid = Math.max(lid, 0.52);
   if (lid > 0.01) {
     const ly = y - ry + ry * 2.1 * lid;
-    ctx.fillStyle = A.pal.stops ? '#ffd84a' : A.pal.base;
+    ctx.fillStyle = A.pal.stops ? rbc(A.pal, '#ffd84a', 'base') : A.pal.base;
     ctx.fillRect(x - rx - 3, y - ry - 3, rx * 2 + 6, ly - (y - ry) + 3);
     ctx.strokeStyle = L; ctx.lineWidth = lw * 1.1; ctx.beginPath(); ctx.moveTo(x - rx, ly); ctx.lineTo(x + rx, ly); ctx.stroke();
   }
   if (ex === 'angry') {
-    ctx.fillStyle = A.pal.stops ? '#ffd84a' : A.pal.base;
+    ctx.fillStyle = A.pal.stops ? rbc(A.pal, '#ffd84a', 'base') : A.pal.base;
     ctx.beginPath();
     if (s === 0) { ctx.rect(x - rx - 2, y - ry - 2, rx * 2 + 4, ry * 0.75); }
     else { ctx.moveTo(x + s * rx * 1.1, y - ry * 1.1); ctx.lineTo(x - s * rx * 1.1, y - ry * 1.1); ctx.lineTo(x - s * rx * 1.1, y - ry * 0.85); ctx.lineTo(x + s * rx * 1.1, y - ry * 0.05); ctx.closePath(); }
+    ctx.fill();
+  }
+  // fierce: the lid comes down low on the side nearest the middle (a single eye dips in the middle)
+  if (ex === 'fierce') {
+    ctx.fillStyle = A.pal.stops ? rbc(A.pal, '#ffd84a', 'base') : A.pal.base;
+    ctx.beginPath();
+    if (s === 0) { ctx.moveTo(x - rx * 1.1, y - ry * 1.1); ctx.lineTo(x + rx * 1.1, y - ry * 1.1); ctx.lineTo(x + rx * 1.1, y - ry * 0.62); ctx.lineTo(x, y - ry * 0.12); ctx.lineTo(x - rx * 1.1, y - ry * 0.62); ctx.closePath(); }
+    else { ctx.moveTo(x - s * rx * 1.1, y - ry * 1.1); ctx.lineTo(x + s * rx * 1.1, y - ry * 1.1); ctx.lineTo(x + s * rx * 1.1, y - ry * 0.85); ctx.lineTo(x - s * rx * 1.1, y - ry * 0.02); ctx.closePath(); }
     ctx.fill();
   }
   ctx.restore();
   ctx.lineWidth = lw; ctx.strokeStyle = L;
   ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, TAU); ctx.stroke();
   if (ex === 'angry' && s !== 0) { ctx.beginPath(); ctx.moveTo(x + s * rx * 0.95, y - ry * 0.15); ctx.lineTo(x - s * rx * 0.9, y - ry * 0.8); ctx.lineWidth = lw * 1.2; ctx.stroke(); }
+  if (ex === 'fierce') {
+    ctx.beginPath();
+    if (s === 0) { ctx.moveTo(x - rx * 0.98, y - ry * 0.62); ctx.lineTo(x, y - ry * 0.12); ctx.lineTo(x + rx * 0.98, y - ry * 0.62); }
+    else { ctx.moveTo(x - s * rx * 0.95, y - ry * 0.12); ctx.lineTo(x + s * rx * 0.9, y - ry * 0.8); }
+    ctx.lineWidth = lw * 1.2; ctx.stroke();
+  }
 }
 
 /* ---------- mouth ---------- */
@@ -818,7 +838,7 @@ function drawMouth(ctx, A) {
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = L;
   // puffed cheeks under everything else
   if (F.cheeks > 0.02) {
-    const fill = A.pal.stops ? '#ffd84a' : A.pal.base;
+    const fill = A.pal.stops ? rbc(A.pal, '#ffd84a', 'base') : A.pal.base;
     [-1, 1].forEach(s => {
       ctx.beginPath(); ctx.arc(x + s * hw * 0.95, y - hw * 0.08, hw * (0.2 + 0.32 * F.cheeks), 0, TAU);
       ctx.fillStyle = fill; ctx.fill(); ctx.lineWidth = 3.5;
@@ -832,7 +852,7 @@ function drawMouth(ctx, A) {
   switch (shape) {
     case 'pucker': {
       const r = hw * 0.27 + Math.sin(A.t * 30) * 1;
-      ctx.beginPath(); ctx.arc(x, y, r * 1.5, 0, TAU); ctx.fillStyle = mix(A.pal.stops ? '#ff86b9' : A.pal.dark, '#ff6f98', 0.4); ctx.fill(); ctx.lineWidth = 3.5; ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, r * 1.5, 0, TAU); ctx.fillStyle = mix(A.pal.stops ? rbc(A.pal, '#ff86b9', 'dark') : A.pal.dark, '#ff6f98', 0.4); ctx.fill(); ctx.lineWidth = 3.5; ctx.stroke();
       ctx.beginPath(); ctx.arc(x, y, r * 0.55, 0, TAU); ctx.fillStyle = MOUTH_IN; ctx.fill();
       ctx.lineWidth = 2.2;
       for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r * 0.85, y + Math.sin(a) * r * 0.85); ctx.lineTo(x + Math.cos(a) * r * 1.4, y + Math.sin(a) * r * 1.4); ctx.stroke(); }
@@ -972,6 +992,12 @@ function handTarget(A, s) {
     case 'wave': return right ? [sx + 40 + Math.sin(t * 12) * 12, sy - 66] : idle();
     case 'flex': return [sx + s * 22, sy - 50];
     case 'shake': return [sx + s * 30 + Math.sin(t * 30) * 8, sy + 20];
+    case 'slam': return [s * B.w * 0.6, g.ground - 14];                          // fists down on the floor
+    case 'pound': return Math.sin(t * 16) * s > 0 ? [s * 8, B.armY - 6] : [sx + s * 26, sy - 30];   // beating the chest, a fist at a time
+    case 'wipe': return right ? [m.x + Math.sin(t * 26) * m.hw * 0.7, m.y + m.hw * 0.6] : idle();   // scrubbing the tongue
+    case 'pull': { const d = A.pullDir || s, u = (t * 2.4 + (right ? 0 : 0.5)) % 1; return [m.x + d * (14 + u * 64) + s * 6, m.y + 8 + u * 40]; }   // hand over hand, out of the mouth (towards pullDir)
+    case 'pat': return right ? [B.belly[0] + 16, B.belly[1] - 6 - Math.abs(Math.sin(t * 10)) * 16] : idle();
+    case 'tug': return [m.x + s * 18, m.y + 120];                                // both hands pulling something down, away from the mouth
     default: return idle();
   }
 }
@@ -987,7 +1013,7 @@ function armGeom(A) {
   });
 }
 function drawArm(ctx, A, a) {
-  const type = A.d.arms, pal = A.pal, L = pal.line, fill = pal.stops ? (a.s < 0 ? '#f2564c' : '#9a6be2') : pal.base;
+  const type = A.d.arms, pal = A.pal, L = pal.line, fill = pal.stops ? rbc(pal, a.s < 0 ? '#f2564c' : '#9a6be2', 'base') : pal.base;
   const { S, T, s } = a;
   const mus = A.fx.muscle || 0;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -1021,7 +1047,7 @@ function drawArm(ctx, A, a) {
       } else {
         const open = 0.3 + (A.clawOpen || 0) * 0.5 + Math.sin(A.t * 3) * 0.05;
         ctx.save(); ctx.translate(T[0], T[1]); ctx.rotate(ang);
-        const col = pal.stops ? '#f2564c' : mix(pal.dark, '#ff6a4a', 0.25);
+        const col = pal.stops ? rbc(pal, '#f2564c', 'dark') : mix(pal.dark, '#ff6a4a', 0.25);
         [-1, 1].forEach(k => {
           ctx.save(); ctx.rotate(k * open);
           ctx.beginPath(); ctx.moveTo(-4, 0); ctx.quadraticCurveTo(10, k * 18, 30, k * 4); ctx.quadraticCurveTo(14, k * 4, 2, k * 1); ctx.closePath();
@@ -1050,7 +1076,7 @@ function drawArm(ctx, A, a) {
 // wings sit behind the body near the shoulders and flap faster the happier the monster is
 function drawWings(ctx, A) {
   const pal = A.pal, L = pal.line, g = A.g;
-  const col = pal.stops ? '#9a6be2' : pal.dark;
+  const col = pal.stops ? rbc(pal, '#9a6be2', 'dark') : pal.dark;
   const flap = Math.sin(A.t * (A.flap || 3)) * (A.armPose === 'up' ? 0.5 : 0.22) - (A.armPose === 'up' ? 0.4 : 0);
   [-1, 1].forEach(s => {
     const y = g.B.armY - 30, x = s * ((s < 0 ? -g.F.leftAt(y) : g.F.rightAt(y)) || g.B.w) - s * 14;
@@ -1106,6 +1132,8 @@ class Monster {
     this.pose = POSE0(); this.face = FACE0(); this.fx = FX0();
     this.tint = { col: null, amt: 0, level: 1 };
     this.armPose = 'idle'; this.legAmt = 0; this.legPhase = 0; this.flap = 3; this.clawOpen = 0;
+    // a reaction's own drawings ({ layer: 'back' | 'body' | 'face' | 'front', draw(ctx, m) }), and the colours it may have changed
+    this.decor = []; this.pal = PAL[this.d.color]; this.cache = {};
   }
   get busy() { return this.tasks.busy; }
   play(script) { return this.tasks.add(script); }
@@ -1211,19 +1239,26 @@ class Monster {
     ctx.save();
     ctx.transform(this.mat[0], this.mat[1], this.mat[2], this.mat[3], this.mat[4], this.mat[5]);
     const arms = this.d.arms === 'wings' || this.d.arms === 'none' ? null : armGeom(this);
+    this.drawDecor(ctx, 'back');
     drawTop(ctx, this);
     if (this.d.arms === 'wings') drawWings(ctx, this);
     if (arms) arms.forEach(a => { if (!a.front) drawArm(ctx, this, a); });
     drawLegs(ctx, this);
     drawBody(ctx, this);
+    this.drawDecor(ctx, 'body');
     this.drawLump(ctx);
     drawEyes(ctx, this);
     drawMouth(ctx, this);
     this.drawFaceFx(ctx);
+    this.drawDecor(ctx, 'face');
     this.drawHeld(ctx);
     if (arms) arms.forEach(a => { if (a.front) drawArm(ctx, this, a); });
     this.drawOver(ctx);
+    this.drawDecor(ctx, 'front');
     ctx.restore();
+  }
+  drawDecor(ctx, layer) {
+    for (const d of this.decor) if (d.layer === layer) { ctx.save(); if (d.alpha !== undefined) ctx.globalAlpha = clamp(d.alpha, 0, 1); d.draw(ctx, this); ctx.restore(); }
   }
 
   // a swallowed mouthful sliding down to the tummy
@@ -1400,6 +1435,7 @@ class Particles {
       p.age += dt;
       if (p.age >= p.life) { if (p.onDie) p.onDie(p, this); L.splice(i, 1); continue; }
       if (p.type === 'fly') { this.flyStep(p, dt); continue; }
+      if (p.type === 'crawler') { this.crawlStep(p, dt); continue; }
       if (p.type === 'butterfly') { p.vx += Math.sin(p.age * 3) * 40 * dt; p.vy += (Math.sin(p.age * 7) * 120 - 30) * dt; }
       p.vy += p.g * dt;
       if (p.drag) { const k = Math.exp(-p.drag * dt); p.vx *= k; p.vy *= k; }
@@ -1416,6 +1452,16 @@ class Particles {
     const cx = p.cx + Math.sin(p.age * 1.3) * 10, cy = p.cy;
     p.x = cx + Math.cos(p.ang) * p.rx + Math.sin(p.age * 23) * 3;
     p.y = cy + Math.sin(p.ang * 1.7) * p.ry + Math.cos(p.age * 19) * 3;
+  }
+  // a little creature getting away: thrown first, then along the floor a hump at a time
+  crawlStep(p, dt) {
+    const fl = p.floor === null ? this.floor : p.floor;
+    if (p.landed === undefined) {
+      p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
+      if (p.y >= fl && p.vy > 0) { p.y = fl; p.landed = p.age; p.rot = 0; }
+      return;
+    }
+    p.x += p.dir * p.speed * Math.max(0, Math.sin((p.age - p.landed) * 7)) * dt;
   }
   draw(ctx, layer) {
     this.drawPuffs(ctx, layer);
@@ -1579,9 +1625,36 @@ class Particles {
         ctx.strokeStyle = darken(p.col, 0.25); ctx.lineWidth = 1; ctx.stroke();
         break;
       }
+      case 'crawler': {   // squashes and stretches as it inches along, facing the way it goes (its picture faces left)
+        if (!p.img) break;
+        const hump = p.landed === undefined ? 0 : Math.sin((p.age - p.landed) * 7);
+        ctx.translate(p.x, p.y - (p.landed === undefined ? 0 : s * 0.36)); ctx.rotate(p.rot);
+        ctx.scale((p.dir > 0 ? -1 : 1) * (1 - hump * 0.12), 1 + hump * 0.1);
+        ctx.drawImage(p.img, -s / 2, -s / 2, s, s);
+        break;
+      }
+      case 'crack': {     // the floor split by a mighty smash: jagged lines out from where it landed
+        ctx.translate(p.x, p.y); ctx.scale(1, 0.32);
+        ctx.strokeStyle = p.col; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        const f = seeded(p.seed), out = Math.min(1, p.age / 0.12);
+        for (let i = 0; i < 7; i++) {
+          let a = (i / 7) * TAU + f() * 0.5, x = 0, y = 0;
+          const len = s * (0.5 + f() * 0.6) * out;
+          ctx.lineWidth = Math.max(2, s * 0.08); ctx.beginPath(); ctx.moveTo(0, 0);
+          for (let k = 1; k <= 4; k++) { a += (f() - 0.5) * 0.9; x += Math.cos(a) * len / 4; y += Math.sin(a) * len / 4; ctx.lineTo(x, y); }
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'spine': {     // a cactus prickle, plucked out and flicked away
+        ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+        ctx.beginPath(); ctx.moveTo(-s, -s * 0.22); ctx.lineTo(s, 0); ctx.lineTo(-s, s * 0.22); ctx.closePath();
+        ctx.fillStyle = '#f2d24a'; ctx.fill(); ctx.lineWidth = Math.max(1, s * 0.12); ctx.strokeStyle = '#4a3a10'; ctx.stroke();
+        break;
+      }
       case 'butterfly': {
         ctx.translate(p.x, p.y); ctx.rotate(Math.atan2(p.vy, p.vx) * 0.2);
-        const flap = Math.abs(Math.sin(p.age * 14));
+        const flap = Math.abs(Math.sin(p.age * (p.flapRate || 14)));
         [-1, 1].forEach(k => {
           ctx.save(); ctx.scale(k * (0.25 + 0.75 * flap), 1);
           ctx.beginPath(); ctx.ellipse(s * 0.55, -s * 0.35, s * 0.6, s * 0.5, -0.4, 0, TAU); ctx.fillStyle = p.col; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = darken(p.col, 0.5); ctx.stroke();
@@ -1743,8 +1816,8 @@ const SOUNDS = {
     bp.type = 'bandpass'; bp.frequency.setValueAtTime(520, t); bp.frequency.linearRampToValueAtTime(380, t + d); bp.Q.value = 2.2;
     lp.type = 'lowpass'; lp.frequency.value = 1500;
     osc.connect(bp); bp.connect(lp); lp.connect(g); g.connect(SFX.out);
-    _env(g, t, 0.03, d * 0.6, d * 0.4, 1.3);
-    _flutter(c, g, t, d, 17, 0.5);
+    _env(g, t, 0.03, d * 0.6, d * 0.4, 1.3 * (o.vol || 1));
+    _flutter(c, g, t, d, 17, 0.5 * (o.vol || 1));
     osc.start(t); osc.stop(t + d + 0.1);
   },
   // farts: each its own shape. o.kind: long | squeak | tiny | rumble | rocket
@@ -1899,6 +1972,135 @@ const SOUNDS = {
     osc.start(t); l.start(t); osc.stop(t + d + 0.1); l.stop(t + d + 0.1);
   },
   gasp(c, t) { _noise(c, t, 0.25, 'bandpass', 900, 2200, 2, 0.4, null, 0.15); },
+  /* ---------- the hulk ---------- */
+  // ba-boom: a low thump with a knock on top, so a phone's little speaker plays it too
+  heartbeat(c, t) { [[0, 1], [0.19, 0.8]].forEach(([d, k]) => { _osc(c, 'sine', 95, t + d, 0.16, 0.85 * k, null, 50); _osc(c, 'triangle', 190, t + d, 0.1, 0.35 * k, null, 100); _noise(c, t + d, 0.06, 'lowpass', 900, 300, 1, 0.4 * k, null, 0.004); }); },
+  // swelling up: a buzz that climbs and opens out
+  grow(c, t, o) {
+    const d = o.dur || 1.1, a = c.createOscillator(), lp = c.createBiquadFilter(), g = _gain(c);
+    a.type = 'sawtooth'; a.frequency.setValueAtTime(55, t); a.frequency.exponentialRampToValueAtTime(190, t + d);
+    lp.type = 'lowpass'; lp.frequency.setValueAtTime(300, t); lp.frequency.exponentialRampToValueAtTime(2400, t + d); lp.Q.value = 6;
+    a.connect(lp); lp.connect(g); g.connect(SFX.out); _env(g, t, d * 0.2, d * 0.7, 0.15, 0.55);
+    _flutter(c, g, t, d, 11, 0.35);
+    a.start(t); a.stop(t + d + 0.2);
+  },
+  // a growl through an open "aah": rough, rising, then falling away
+  roar(c, t, o) {
+    const d = o.dur || 1.3, f = o.f || 92, a = c.createOscillator(), b = c.createOscillator(), f1 = c.createBiquadFilter(), f2 = c.createBiquadFilter(), g = _gain(c);
+    a.type = 'sawtooth'; b.type = 'square';
+    [[a, 1], [b, 0.5]].forEach(([x, k]) => { x.frequency.setValueAtTime(f * k * 0.8, t); x.frequency.linearRampToValueAtTime(f * k * 1.3, t + d * 0.3); x.frequency.linearRampToValueAtTime(f * k * 0.7, t + d); });
+    f1.type = 'bandpass'; f1.frequency.value = 650; f1.Q.value = 2.5; f2.type = 'bandpass'; f2.frequency.value = 1100; f2.Q.value = 3.5;
+    a.connect(f1); a.connect(f2); b.connect(f1); f1.connect(g); f2.connect(g); g.connect(SFX.out);
+    _env(g, t, 0.08, d * 0.55, d * 0.4, 1.7);
+    _flutter(c, g, t, d, 29, 0.7);
+    a.start(t); b.start(t); a.stop(t + d + 0.1); b.stop(t + d + 0.1);
+    _noise(c, t, d, 'bandpass', 600, 350, 1.2, 0.5, null, 0.1);
+  },
+  // a giant fist on the floor: a boom you feel, and a crack
+  stomp(c, t) { _osc(c, 'sine', 90, t, 0.5, 1.0, null, 32); _osc(c, 'triangle', 210, t, 0.2, 0.45, null, 80); _noise(c, t, 0.4, 'lowpass', 500, 90, 1, 0.9, null, 0.003); _noise(c, t, 0.15, 'bandpass', 500, 250, 1.2, 0.6, null, 0.002); _noise(c, t, 0.05, 'highpass', 1800, null, 1, 0.4, null, 0.001); },
+  // a balloon let go: a squeal falling away
+  deflate(c, t, o) {
+    const d = o.dur || 0.9, a = c.createOscillator(), bp = c.createBiquadFilter(), g = _gain(c);
+    a.type = 'sawtooth'; a.frequency.setValueAtTime(780, t); a.frequency.exponentialRampToValueAtTime(150, t + d);
+    bp.type = 'bandpass'; bp.frequency.setValueAtTime(1500, t); bp.frequency.exponentialRampToValueAtTime(500, t + d); bp.Q.value = 3;
+    a.connect(bp); bp.connect(g); g.connect(SFX.out); _env(g, t, 0.02, d * 0.75, d * 0.2, 0.75);
+    _flutter(c, g, t, d, 38, 0.5);
+    a.start(t); a.stop(t + d + 0.1);
+    _noise(c, t, d, 'bandpass', 2400, 900, 1.5, 0.2, null, 0.02);
+  },
+  /* ---------- the monster munchies ---------- */
+  // pbbbbt: lips flapping
+  raspberry(c, t, o) {
+    const d = o.dur || 0.7, a = c.createOscillator(), bp = c.createBiquadFilter(), g = _gain(c);
+    a.type = 'sawtooth'; a.frequency.setValueAtTime(120, t); a.frequency.linearRampToValueAtTime(100, t + d);
+    bp.type = 'bandpass'; bp.frequency.value = 750; bp.Q.value = 1.2;
+    a.connect(bp); bp.connect(g); g.connect(SFX.out); _env(g, t, 0.02, d * 0.7, d * 0.25, 1.4);
+    _flutter(c, g, t, d, 42, 0.9);
+    a.start(t); a.stop(t + d + 0.1);
+    _flutter(c, _noise(c, t, d, 'bandpass', 1800, 1400, 1, 0.45, null, 0.02), t, d, 42, 0.4);
+  },
+  // retching: hurk!
+  gag(c, t) {
+    const a = c.createOscillator(), bp = c.createBiquadFilter(), g = _gain(c);
+    a.type = 'sawtooth'; a.frequency.setValueAtTime(230, t); a.frequency.exponentialRampToValueAtTime(110, t + 0.2);
+    bp.type = 'bandpass'; bp.frequency.setValueAtTime(950, t); bp.frequency.linearRampToValueAtTime(600, t + 0.2); bp.Q.value = 3;
+    a.connect(bp); bp.connect(g); g.connect(SFX.out); _env(g, t, 0.01, 0.08, 0.14, 1.2);
+    a.start(t); a.stop(t + 0.3);
+    _noise(c, t, 0.12, 'bandpass', 1400, 700, 2, 0.4, null, 0.005);
+  },
+  // a squeaky rubber toy: up and back down
+  squeakToy(c, t, o) {
+    const f = o.f || 1300, a = c.createOscillator(), b = c.createOscillator(), g = _gain(c), gb = _gain(c, 0.12);
+    a.type = 'triangle'; b.type = 'square';
+    [a, b].forEach((x, i) => { const k = i ? 2 : 1; x.frequency.setValueAtTime(f * k, t); x.frequency.linearRampToValueAtTime(f * 1.7 * k, t + 0.07); x.frequency.linearRampToValueAtTime(f * 1.2 * k, t + 0.16); });
+    a.connect(g); b.connect(gb); gb.connect(g); g.connect(SFX.out); _env(g, t, 0.01, 0.1, 0.06, 0.45);
+    a.start(t); b.start(t); a.stop(t + 0.22); b.stop(t + 0.22);
+  },
+  // rubber (or slime) pulled long: a creak that climbs
+  stretch(c, t, o) {
+    const d = o.dur || 0.8, a = c.createOscillator(), bp = c.createBiquadFilter(), g = _gain(c);
+    a.type = 'sawtooth'; a.frequency.setValueAtTime(260, t); a.frequency.exponentialRampToValueAtTime(900, t + d);
+    bp.type = 'bandpass'; bp.frequency.setValueAtTime(800, t); bp.frequency.exponentialRampToValueAtTime(2200, t + d); bp.Q.value = 5;
+    a.connect(bp); bp.connect(g); g.connect(SFX.out); _env(g, t, 0.05, d * 0.7, d * 0.25, 1.0);
+    _flutter(c, g, t, d, 24, 0.9);
+    a.start(t); a.stop(t + d + 0.02);   // stopped with its envelope, so the flutter leaves no buzz behind
+  },
+  smack(c, t) { _noise(c, t, 0.09, 'highpass', 1500, 700, 0.8, 1.0, null, 0.001); _osc(c, 'sine', 200, t, 0.1, 0.6, null, 80); },
+  // teeth on stone: the whole monster rings like a tuning fork, boinnng
+  twang(c, t) {
+    const a = c.createOscillator(), g = _gain(c), l = c.createOscillator(), lg = _gain(c, 26);
+    a.type = 'triangle'; a.frequency.setValueAtTime(330, t); a.frequency.linearRampToValueAtTime(300, t + 1.2);
+    l.frequency.setValueAtTime(18, t); l.frequency.linearRampToValueAtTime(7, t + 1.2); l.connect(lg); lg.connect(a.frequency);
+    a.connect(g); g.connect(SFX.out); _env(g, t, 0.005, 0.15, 1.05, 0.55);
+    a.start(t); l.start(t); a.stop(t + 1.3); l.stop(t + 1.3);
+    _osc(c, 'sine', 330 * 2.76, t, 0.5, 0.15);
+  },
+  // a slide whistle: falling (a faint, a drop) or, with o.up, rising (a leap)
+  slide(c, t, o) {
+    const d = o.dur || 0.8, a = c.createOscillator(), g = _gain(c), l = c.createOscillator(), lg = _gain(c, 18);
+    a.type = 'sine'; a.frequency.setValueAtTime(o.up ? 380 : 1500, t); a.frequency.exponentialRampToValueAtTime(o.up ? 1600 : 280, t + d);
+    l.frequency.value = 6; l.connect(lg); lg.connect(a.frequency);
+    a.connect(g); g.connect(SFX.out); _env(g, t, 0.03, d * 0.85, 0.08, 0.32);
+    a.start(t); l.start(t); a.stop(t + d + 0.15); l.stop(t + d + 0.15);
+  },
+  // a dog's bark; o.far: from off the edge of the room, smaller and duller
+  woof(c, t, o) {
+    const k = o.far ? 0.45 : 1, a = c.createOscillator(), bp = c.createBiquadFilter(), g = _gain(c);
+    a.type = 'sawtooth'; a.frequency.setValueAtTime(o.far ? 520 : 420, t); a.frequency.exponentialRampToValueAtTime(o.far ? 330 : 230, t + 0.14);
+    bp.type = 'bandpass'; bp.frequency.setValueAtTime(1100, t); bp.frequency.linearRampToValueAtTime(700, t + 0.14); bp.Q.value = 2;
+    a.connect(bp); bp.connect(g); g.connect(SFX.out); _env(g, t, 0.008, 0.05, 0.12, 1.3 * k);
+    a.start(t); a.stop(t + 0.25);
+    _noise(c, t, 0.1, 'bandpass', 1600, 900, 1.5, 0.35 * k, null, 0.004);
+  },
+  pant(c, t, o) { const n = o.n || 4; for (let i = 0; i < n; i++) _noise(c, t + i * 0.16, 0.1, 'bandpass', 1300, 1000, 1.5, 1.2, null, 0.02); },
+  cough(c, t) {
+    _noise(c, t, 0.16, 'bandpass', 1100, 600, 1.2, 0.8, null, 0.004);
+    const a = c.createOscillator(), lp = c.createBiquadFilter(), g = _gain(c);
+    a.type = 'sawtooth'; a.frequency.setValueAtTime(180, t); a.frequency.exponentialRampToValueAtTime(120, t + 0.12);
+    lp.type = 'lowpass'; lp.frequency.value = 900; a.connect(lp); lp.connect(g); g.connect(SFX.out); _env(g, t, 0.005, 0.03, 0.1, 0.5);
+    a.start(t); a.stop(t + 0.2);
+  },
+  // water bubbling in a throat
+  gargle(c, t, o) {
+    const d = o.dur || 0.9;
+    _flutter(c, _noise(c, t, d, 'lowpass', 600, 400, 3, 0.5, null, 0.05), t, d, 19, 0.45);
+    for (let i = 0; i < 12; i++) _osc(c, 'sine', 180 + Math.random() * 220, t + Math.random() * d, 0.05, 0.18, null, 520);
+  },
+  // a tin can: clank! (o.f tunes it); rattling about in a tummy
+  clank(c, t, o) { const f = o.f || 1250; [[1, 0.35], [2.4, 0.2], [3.9, 0.12]].forEach(([k, a]) => _osc(c, 'triangle', f * k, t, 0.28 / Math.sqrt(k), a)); _noise(c, t, 0.03, 'bandpass', 4000, null, 2, 0.5, null, 0.001); },
+  rattle(c, t) { for (let i = 0; i < 6; i++) SOUNDS.clank(c, t + i * 0.05 + Math.random() * 0.03, { f: 1100 + Math.random() * 900 }); },
+  // slime: a wet, low bloop
+  glorp(c, t, o) { const f = o.f || 140; _osc(c, 'sine', f, t, 0.18, 0.55, null, f * 3); _noise(c, t, 0.14, 'lowpass', 800, 300, 4, 0.35, null, 0.01); },
+  inhale(c, t, o) { const d = o.dur || 0.8; _noise(c, t, d, 'bandpass', 900, 2600, 2.5, 1.1, null, d * 0.6); },
+  scrub(c, t) { for (let i = 0; i < 4; i++) _noise(c, t + i * 0.09, 0.07, 'bandpass', i % 2 ? 2600 : 1700, null, 2, 1.2, null, 0.005); },
+  // a fly going round and round
+  buzz(c, t, o) {
+    const d = o.dur || 1.2, a = c.createOscillator(), g = _gain(c), l = c.createOscillator(), lg = _gain(c, 30);
+    a.type = 'sawtooth'; a.frequency.value = 230; l.frequency.value = 3; l.connect(lg); lg.connect(a.frequency);
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 1.5;
+    a.connect(bp); bp.connect(g); g.connect(SFX.out); _env(g, t, 0.2, d * 0.6, d * 0.3, 0.35);
+    a.start(t); l.start(t); a.stop(t + d + 0.1); l.stop(t + d + 0.1);
+  },
   // loops
   hum(c, t, o) {
     const f = o.f || 110, a = c.createOscillator(), b = c.createOscillator(), lp = c.createBiquadFilter(), g = _gain(c);
@@ -2015,7 +2217,7 @@ const FOOD_DATA = {
   dragonfruit:  ['fruit', 'pink', '#ff3d8b', 'stain', 'fruit', 'dragon fruit', '#ffffff'],
   // veg
   carrot:       ['veg', 'orange', '#ff8a1e', 'crunchy', 'veg crunchy', 'carrot', '#ffa040'],
-  broccoli:     ['veg', 'green', '#3fae49', 'strong', 'veg', 'broccoli', '#a8d870'],
+  broccoli:     ['veg', 'green', '#3fae49', 'hulk', 'veg', 'broccoli', '#a8d870'],
   peas:         ['veg', 'green', '#6cc24a', 'marbles', 'veg small', 'peas', '#8ed860'],
   corn:         ['veg', 'yellow', '#ffd83a', 'typewriter', 'veg', 'corn', '#ffe070'],
   cucumber:     ['veg', 'green', '#5daa3c', 'crunchy', 'veg crunchy', 'cucumber', '#e0f4b0'],
@@ -2161,7 +2363,7 @@ const PIECE_DATA = {
   p_ham: ['pink', '#f5a0a0', '', 'meat', 'ham'], p_chilli: ['red', '#e3261b', 'spicy', 'veg spicy', 'chilli'],
   p_onion: ['purple', '#a050c0', 'tears', 'veg', 'onion'], p_tomato: ['red', '#f2412f', 'juicy', 'veg', 'tomato'],
   p_basil: ['green', '#3fa83a', '', 'veg', 'basil'], p_prawn: ['pink', '#ff8a6a', '', 'fish', 'prawns'],
-  p_sausage: ['brown', '#a5552e', '', 'meat', 'sausage'], p_broccoli: ['green', '#3fae49', 'strong', 'veg', 'broccoli'],
+  p_sausage: ['brown', '#a5552e', '', 'meat', 'sausage'], p_broccoli: ['green', '#3fae49', 'hulk', 'veg', 'broccoli'],
   p_chicken: ['orange', '#e8a040', '', 'meat', 'chicken'], p_spinach: ['green', '#2e8b3a', 'strong', 'veg', 'spinach'],
   d_cone: ['orange', '#e8a050', 'crunchy', 'sweet crunchy', 'cone'], d_glass: ['blue', '#bfe6ff', '', 'sweet', 'sundae glass'],
   d_cupcake: ['pink', '#ff9ac0', 'sugar', 'sweet soft', 'cupcake'], d_sponge: ['yellow', '#ffd070', 'sugar', 'sweet soft', 'cake'],
@@ -2465,14 +2667,16 @@ function prefOf(mon, id) {
 // the order effects play in; gassy always last, as the punchline
 const FX_ORDER = ['candles', 'pinch', 'prickly', 'rock', 'vanish', 'bigbite', 'peel', 'typewriter', 'noodles', 'suck', 'cheesy', 'squirt', 'juicy',
   'moustache', 'stain', 'crunchy', 'chewy', 'sticky', 'slimy', 'hot', 'cold', 'spicy', 'sour', 'bitter', 'salty', 'tears', 'fizzy', 'seeds', 'pit',
-  'bones', 'marbles', 'popcorn', 'bubblegum', 'ink', 'tickle', 'butterfly', 'sneeze', 'stinky', 'sugar', 'jiggly', 'strong', 'sleepy', 'gassy'];
+  'bones', 'marbles', 'popcorn', 'bubblegum', 'ink', 'tickle', 'butterfly', 'sneeze', 'stinky', 'sugar', 'jiggly', 'strong', 'hulk', 'sleepy', 'gassy'];
+// never left out of a dish with too much going on: broccoli's hulk and the beans' revenge
+const FX_KEEP = ['hulk', 'gassy'];
 
 /* A serving: one food, or a dish made in the kitchen.
    { parts: [food ids], cook: [cooking ways], kind: 'food' | 'burger' | 'pizza' | ..., fx: [extra effects] } */
 // ways of eating a thing whole, which make no sense once it is chopped, built into a dish or blended
 const WHOLE_ONLY = ['peel', 'typewriter', 'rock', 'bones', 'suck', 'vanish', 'pinch', 'candles', 'noodles', 'slimy'];
 // what still comes through in a smoothie or a soup
-const LIQUID_OK = ['sour', 'spicy', 'bitter', 'salty', 'tears', 'stinky', 'cold', 'hot', 'fizzy', 'gassy', 'sugar', 'strong', 'jiggly', 'sleepy', 'stain', 'moustache', 'juicy'];
+const LIQUID_OK = ['sour', 'spicy', 'bitter', 'salty', 'tears', 'stinky', 'cold', 'hot', 'fizzy', 'gassy', 'sugar', 'strong', 'hulk', 'jiggly', 'sleepy', 'stain', 'moustache', 'juicy'];
 function servingFx(s) {
   const all = [], liquid = s.kind === 'smoothie' || s.kind === 'soup', dish = s.kind && s.kind !== 'food';
   s.parts.forEach(id => (FOODS[id] ? FOODS[id].fx : []).forEach(x => {
@@ -2485,10 +2689,13 @@ function servingFx(s) {
   let set = all.filter((x, i) => all.indexOf(x) === i);
   if ((s.cook || []).indexOf('freeze') >= 0) set = set.filter(x => x !== 'hot');
   if ((s.cook || []).some(k => k !== 'freeze')) set = set.filter(x => x !== 'cold');
-  set.sort((a, b) => FX_ORDER.indexOf(a) - FX_ORDER.indexOf(b));
+  // the hulk has a flex in it already
+  if (set.indexOf('hulk') >= 0) set = set.filter(x => x !== 'strong');
+  const order = (a, b) => FX_ORDER.indexOf(a) - FX_ORDER.indexOf(b);
+  set.sort(order);
   const max = s.parts.length > 1 ? 4 : 3;
-  // keep gassy if it is there: drop from the middle instead
-  if (set.length > max) { const gas = set.indexOf('gassy') >= 0; set = set.filter(x => x !== 'gassy').slice(0, gas ? max - 1 : max); if (gas) set.push('gassy'); }
+  // keep the hulk and gassy if they are there: drop from the middle instead
+  if (set.length > max) { const keep = set.filter(x => FX_KEEP.indexOf(x) >= 0); set = set.filter(x => FX_KEEP.indexOf(x) < 0).slice(0, max - keep.length).concat(keep).sort(order); }
   return set;
 }
 
@@ -2918,7 +3125,7 @@ PRE.prickly = function* (c) {
 
 /* ---------- after it goes in ---------- */
 // which effects still happen if the monster spits it straight back out
-const ON_DISLIKE = ['sour', 'spicy', 'bitter', 'hot', 'cold', 'salty', 'tears', 'stinky', 'sneeze', 'ink', 'juicy', 'stain', 'squirt', 'tickle', 'fizzy', 'moustache'];
+const ON_DISLIKE = ['sour', 'spicy', 'bitter', 'hot', 'cold', 'salty', 'tears', 'stinky', 'sneeze', 'ink', 'juicy', 'stain', 'squirt', 'tickle', 'fizzy', 'moustache', 'hulk'];
 const AFTER = {};
 AFTER.sour = function* (c) {
   const m = c.m;
@@ -3467,18 +3674,21 @@ function* spitPart(c, id) {
 /* ---------- the whole mouthful ---------- */
 function* feedScript(m, S, st, opts = {}) {
   const fx = servingFx(S), V = servingVerdict(m.rec, S);
-  const c = { m, S, st, fx, verdict: V.verdict, fartKind: opts.fartKind };
+  const c = { m, S, st, fx, verdict: V.verdict, fartKind: opts.fartKind, yuck: yuckOf(S) };
   m.lookAt = null;
-  for (const k of fx) if (PRE[k]) yield* PRE[k](c);
-  yield* eatStyle(c)(c);
-  for (const k of fx) {
-    if (!AFTER[k] || k === 'gassy') continue;
-    if (c.verdict === 'dislike' && ON_DISLIKE.indexOf(k) < 0) continue;
-    yield* AFTER[k](c);
+  if (c.yuck) yield* yuckScript(c);   // a monster munchy on its own has a scene of its own (yuck.js)
+  else {
+    for (const k of fx) if (PRE[k]) yield* PRE[k](c);
+    yield* eatStyle(c)(c);
+    for (const k of fx) {
+      if (!AFTER[k] || k === 'gassy') continue;
+      if (c.verdict === 'dislike' && ON_DISLIKE.indexOf(k) < 0) continue;
+      yield* AFTER[k](c);
+    }
+    for (const id of V.spit) yield* spitPart(c, id);
+    yield* VERDICT[c.verdict](c);
+    if (fx.indexOf('gassy') >= 0) yield* AFTER.gassy(c);
   }
-  for (const id of V.spit) yield* spitPart(c, id);
-  yield* VERDICT[c.verdict](c);
-  if (fx.indexOf('gassy') >= 0) yield* AFTER.gassy(c);
   yield* relax(m, 0.35);
   if (opts.done) opts.done(c.verdict);
 }
@@ -3533,6 +3743,1539 @@ function unlitCake(src) {
   g.fillRect(0, 0, c.width, b.y + b.h * 0.1);
   return c;
 }
+
+/* ---------- src/hulk.js ---------- */
+/* hulk.js — broccoli makes a monster HULK OUT. A heartbeat or two, then it swells up huge and goes
+   green from the toes up, arms and shoulders bulging and an angry mark on its head; it roars,
+   smashes the floor with both fists (the floor cracks), beats its chest, and lets go like a
+   balloon, back to its own size and colour. A monster that won't eat broccoli does it in a rage,
+   spits the broccoli right across the room and ends in a huff. */
+
+const HULK_PAL = { base: '#55a838', light: '#97d86a', dark: '#2f7428', line: '#143a12', belly: '#c4ea98', mark: '#3e8a2c', say: 'Green' };
+
+// a palette part way from a monster's own colours to the hulk's. A rainbow keeps its stripes all the way,
+// each fading to a green shaded light at the top to dark at the bottom, and its parts go along (pal.toward)
+function hulkPal(own, t) {
+  if (t >= 1 && !own.stops) return HULK_PAL;
+  const p = {};
+  for (const k in HULK_PAL) p[k] = k === 'say' ? own.say : mix(own[k], HULK_PAL[k], t);
+  if (own.stops) { p.stops = own.stops.map((c, i, a) => mix(c, mix(HULK_PAL.light, HULK_PAL.dark, i / (a.length - 1)), t)); p.toward = { pal: HULK_PAL, t }; }
+  return p;
+}
+function setHulk(m, t) { m.pal = t > 0 ? hulkPal(PAL[m.d.color], t) : PAL[m.d.color]; m.cache.bodyFill = null; }
+
+// as big as the room allows: the head stays on the screen, the sides on the stage
+function hulkSize(m, st) {
+  const half = (m.g.B.w + 40) * m.scale, tall = ((m.y - st.top) / m.scale - 24) / m.g.height;
+  return clamp(Math.min(1.45, tall, (m.x - st.left) / half, (st.right - m.x) / half), 1.1, 1.45);
+}
+
+// shoulders bulging out behind the arms, and the cross-shaped anger mark throbbing on its head
+function hulkDecor(H) {
+  return [
+    { layer: 'back', draw(ctx, m) {
+      if (H.k < 0.02) return;
+      const pal = m.pal, r = 24 * H.k;
+      m.g.sockets.forEach(([x, y], i) => {
+        const s = i ? 1 : -1;
+        ctx.beginPath(); ctx.arc(x + s * 2, y - 14, r, 0, TAU);
+        ctx.fillStyle = pal.base; ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = pal.line; ctx.stroke();
+      });
+    } },
+    { layer: 'front', draw(ctx, m) {
+      if (H.k < 0.02) return;
+      const g = m.g, x = g.B.w * 0.42, y = (g.F.topAt(x) || g.bodyTop) + 22, r = 13 * H.k * (1 + Math.sin(m.t * 14) * 0.12);
+      ctx.translate(x, y); ctx.rotate(0.3); ctx.lineCap = 'round';
+      const mark = () => { ctx.beginPath(); for (let i = 0; i < 4; i++) { ctx.rotate(Math.PI / 2); ctx.moveTo(r * 0.25, -r); ctx.quadraticCurveTo(r * 0.25, -r * 0.25, r, -r * 0.25); } };
+      mark(); ctx.lineWidth = 7; ctx.strokeStyle = '#6a0f1a'; ctx.stroke();
+      mark(); ctx.lineWidth = 3.5; ctx.strokeStyle = '#ff3b3b'; ctx.stroke();
+    } },
+  ];
+}
+
+// where a fist lands: the floor cracks, dust and bits fly up
+function smashFx(c, i) {
+  const m = c.m, [bx, by] = m.bottomPos(), w = m.g.B.w * m.scale * m.pose.sx * 0.62;
+  [-1, 1].forEach(s => {
+    const x = bx + s * w;
+    Parts.add('crack', x, by + 2, { size: (42 + i * 16) * K(m), life: 2.4, col: '#5a3a20', layer: 0, fade: u => (u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3) });
+    for (let k = 0; k < 4; k++) Parts.add('puff', x, by - 4, { size: rand(12, 20) * K(m), grow: 2.4, vx: s * rand(80, 260), vy: -rand(30, 120), drag: 1.5, life: rand(0.8, 1.2), col: '#d9c49a', alpha: 0.75 });
+    Parts.burst('crumb', x, by - 4, 6, { ang: -Math.PI / 2, spread: 1.6, v0: 220, v1: 480, g: 1500, sizeR: [3 * K(m), 7 * K(m)], lifeR: [0.8, 1.3], cols: ['#8a6a3a', '#6aa04a', '#a88a5a'], bounce: 0.3, floor: c.st.floor, vr: 10 });
+  });
+}
+
+AFTER.hulk = function* (c) {
+  const m = c.m, st = c.st, big = hulkSize(m, st), H = { k: 0 };
+  // in a rage if it won't eat broccoli: the whole thing, or the broccoli it is about to pick out of a dish
+  const angry = c.verdict === 'dislike' || servingVerdict(m.rec, c.S).spit.some(id => FOODS[id].fx.indexOf('hulk') >= 0);
+  const deco = hulkDecor(H);
+  m.decor.push(...deco);
+  // something is happening...
+  setFace(m, 'wide', angry ? 'tongue' : 'flat', 0.2); m.face.brows = 'up';
+  for (let i = 0; i < 2; i++) {
+    SFX.play('heartbeat');
+    yield* tween(0.3, p => { const b = Math.sin(p * Math.PI); m.pose.sx = 1 + 0.06 * b; m.pose.sy = 1 + 0.05 * b; });
+  }
+  // it swells up in three surges and goes green from the toes up
+  setFace(m, 'fierce', 'teeth', 0); m.face.brows = 'fierce'; m.armPose = 'flex';
+  SFX.play('grow', { dur: 1.1 }); SFX.play('rumble', { dur: 1.1 });
+  m.tint.col = HULK_PAL.base; m.tint.level = 0;
+  yield* tween(1.1, p => {
+    const step = Math.min(2, Math.floor(p * 3)), k = (step + Ease.back(p * 3 - step)) / 3, s = lerp(1, big, k);
+    m.pose.sy = s; m.pose.sx = s * (1 + 0.05 * k);
+    m.tint.amt = 0.85 * (1 - clamp((p - 0.7) / 0.3, 0, 1)); m.tint.level = Math.min(1, p * 1.4);
+    setHulk(m, Math.min(1, p * 1.25));
+    m.fx.muscle = 1.8 * k; H.k = k;
+    m.pose.shake = 2 + 3 * p;
+    if (Math.random() < 0.25) { const [bx, by] = m.bottomPos(); Parts.add('puff', bx + rand(-1, 1) * m.g.B.w * m.scale, by - 4, { size: rand(10, 16) * K(m), grow: 2.2, vx: rand(-90, 90), vy: -rand(20, 60), life: 0.8, col: '#d9c49a', alpha: 0.6, layer: 0 }); }
+  });
+  m.tint.amt = 0; m.pose.shake = 0;
+  // ROAR
+  setFace(m, 'squeeze', 'frown', 1.3); m.face.wide = 1.35; m.armPose = 'up';
+  SFX.play('roar', { dur: 1.1 }); st.shake = 9;
+  yield* during(1.05, (e, dt) => {
+    m.pose.rot = Math.sin(e * 40) * 0.015;
+    if (Math.floor(e * 5) !== Math.floor((e - dt) * 5)) { const [x, y] = m.mouthPos(); Parts.add('ring', x, y, { size: 22 * K(m), grow: 6, life: 0.55, col: 'rgba(255,255,255,0.85)', width: 6 * K(m) }); }
+    // the broccoli it won't eat goes flying, right across the room
+    if (angry && m.held && e > 0.4) {
+      const Hd = m.held, [x, y] = m.toScreen(m.g.mouth.x + (Hd.dx || 0), m.g.mouth.y + (Hd.dy || 0)), d = m.x > st.mid ? -1 : 1;
+      Parts.add('sprite', x, y, { img: Hd.spr, size: Hd.size * K(m) * m.pose.sx, vx: d * 900, vy: -520, g: 1300, vr: d * 14, bounce: 0.4, life: 2.2, floor: st.floor + 8, fade: u => (u < 0.75 ? 1 : 1 - (u - 0.75) / 0.25) });
+      m.held = null; SFX.play('ptoo'); SFX.play('whoosh');
+    }
+  });
+  m.face.wide = 1; m.pose.rot = 0;
+  // SMASH, SMASH
+  for (let i = 0; i < 2; i++) {
+    m.armPose = 'up'; setFace(m, 'fierce', 'teeth', 0);
+    yield* tween(0.22, p => { m.pose.lift = 16 * p; m.pose.sy = big * (1 + 0.05 * p); });
+    m.armPose = 'slam';
+    yield* tween(0.07, p => { m.pose.lift = 16 * (1 - p); });
+    SFX.play('stomp'); st.shake = 10 + i * 5;
+    smashFx(c, i);
+    yield* tween(0.2, p => { const b = Math.sin(p * Math.PI); m.pose.sy = big * (1 - 0.08 * b); m.pose.sx = big * 1.05 * (1 + 0.06 * b); });
+    yield* wait(0.12);
+  }
+  // a fist at a time on its chest
+  setFace(m, 'fierce', angry ? 'teeth' : 'grin', angry ? 0 : 0.5); m.armPose = 'pound';
+  yield* during(0.65, (e, dt) => { if (Math.floor(e * 5.1) !== Math.floor((e - dt) * 5.1)) SFX.play('thud'); m.pose.sy = big * (1 + Math.abs(Math.sin(e * 16)) * 0.02); });
+  // and it lets go like a balloon
+  m.armPose = 'idle'; setFace(m, 'wide', 'o', 0.5); m.face.brows = null;
+  SFX.play('deflate', { dur: 0.8 });
+  yield* tween(0.8, p => {
+    const s = lerp(big, 1, Ease.out(p)) + Math.sin(p * 30) * 0.03 * (1 - p);
+    m.pose.sy = s; m.pose.sx = s * (1 + 0.05 * (1 - p)); m.pose.rot = Math.sin(p * 24) * 0.12 * (1 - p);
+    setHulk(m, 1 - p); m.fx.muscle = 1.8 * (1 - p); H.k = 1 - p;
+  });
+  setHulk(m, 0); m.pose.rot = 0; m.pose.sx = 1; m.pose.sy = 1; m.fx.muscle = 0;
+  m.decor = m.decor.filter(d => deco.indexOf(d) < 0);
+  if (angry) { setFace(m, 'fierce', 'frown', 0); m.face.brows = 'fierce'; m.armPose = 'hug'; babble(m, 'sad', 2); }
+  else { setFace(m, 'happy', 'smile', 0.3); m.face.blush = 1; m.armPose = 'cover'; babble(m, 'giggle', 4); }
+  yield* wait(0.4);
+  m.face.brows = null; m.face.blush = 0; m.armPose = 'idle';
+};
+
+/* ---------- src/yuck.js ---------- */
+/* yuck.js — the monster munchies eaten on their own (a sock, a boot, a worm, a caterpillar, a snail,
+   slime, a mud pie, a rock, a bone, a flower, a cactus, a leaf, a tin can) each have a big scene of
+   their own: one for a monster that loves yucky things, one for a monster that won't touch them.
+   One that loves it ends with hearts, a lick round its lips and a burp to be proud of; one that
+   won't goes green, gets the taste out of its mouth (a raspberry, a tongue scrub, a gargle, a gag
+   or a shake like a wet dog) and has a huff. A cooked one still comes through hot or cold.
+     YUCK[id] = { love(c), dislike(c), refuse: the ways it may get the taste out, or an ending of its own, burp: which burp } */
+
+const SICK = '#8fd14a';   // the green a monster goes when something is too horrible
+const YUCK = {};
+// a munchy served whole (cooked or not) has its own scene; in a dish it is just one of the foods
+function yuckOf(S) { return (S.kind === 'food' && S.parts.length === 1 && YUCK[S.parts[0]]) || null; }
+
+function* yuckScript(c) {
+  const m = c.m, Y = c.yuck, cook = cookedFx(c.S);
+  c.crunch = cook.indexOf('crunchy') >= 0;
+  yield* (c.verdict === 'dislike' ? Y.dislike(c) : Y.love(c));
+  for (const k of cook) if (k === 'hot' || k === 'cold') yield* AFTER[k](c);
+  if (c.verdict === 'dislike') yield* (typeof Y.refuse === 'function' ? Y.refuse(c) : yuckRefuse(c, Y.refuse || REFUSE_KINDS));
+  else if (c.verdict === 'love') yield* grossLove(c, Y.burp);
+  else yield* VERDICT.like(c);
+  // whatever it drew of its own fades away
+  if (m.decor.length) yield* tween(0.25, p => { m.decor.forEach(d => { d.alpha = 1 - p; }); });
+  m.decor = [];
+}
+// what cooking adds to a munchy: crunch from the toaster or a fryer, hot from the oven, cold from the freezer
+function cookedFx(S) {
+  const cook = S.cook || [];
+  let fx = [];
+  cook.forEach(k => (COOK[k] ? COOK[k].fx : []).forEach(x => { if (fx.indexOf(x) < 0) fx.push(x); }));
+  if (cook.indexOf('freeze') >= 0) fx = fx.filter(x => x !== 'hot');
+  if (cook.some(k => k !== 'freeze')) fx = fx.filter(x => x !== 'cold');
+  return fx;
+}
+
+/* ---------- small helpers ---------- */
+const dirOf = c => (c.m.x < c.st.mid ? 1 : -1);   // towards the middle of the room, where there is space
+function heldAt(m) { const H = m.held, M = m.g.mouth; return m.toScreen(M.x + (H.dx || 0), M.y + (H.dy || 0)); }
+function bite(c) { SFX.play(c.crunch ? 'crunch' : 'chomp', { big: c.crunch }); }
+// opens wide and snaps shut on what it holds
+function* snap(c, open = 1) {
+  const m = c.m;
+  yield* tween(0.14, p => { m.face.mouth = 'smile'; m.face.open = open * p; });
+  bite(c);
+  yield* tween(0.07, p => { m.face.open = open * (1 - p); });
+}
+// it lets go: what it held drops to the floor and lies there a while
+function dropHeld(c, vx = 0) {
+  const m = c.m, H = m.held;
+  if (!H) return null;
+  const [x, y] = heldAt(m);
+  m.held = null;
+  return Parts.add('sprite', x, y, { img: H.spr, size: H.size * (H.k || 1) * K(m), vx, vy: -140, g: 1500, vr: vx / 50, bounce: 0.3, life: 3.2, floor: c.st.floor + 6, fade: u => (u < 0.85 ? 1 : 1 - (u - 0.85) / 0.15) });
+}
+// thrown away hard, spinning
+function flingHeld(c, dir, o = {}) {
+  const m = c.m, H = m.held;
+  if (!H) return null;
+  const [x, y] = heldAt(m);
+  m.held = null; SFX.play('whoosh');
+  return Parts.add('sprite', x, y, Object.assign({ img: H.spr, size: H.size * (H.k || 1) * K(m), vx: dir * rand(420, 560), vy: -rand(480, 620), g: 1500, vr: dir * rand(8, 12), bounce: 0.45, life: 2.2, floor: c.st.floor + 8, fade: u => (u < 0.8 ? 1 : 1 - (u - 0.8) / 0.2) }, o));
+}
+// a spray out of its mouth: spit, water or mud
+function spray(c, col, n, o = {}) { const m = c.m, [x, y] = m.mouthPos(); drops(c, x, y, n, col, Object.assign({ spread: 2.2, v0: 160, v1: 380, sizeR: [2.5 * K(m), 5 * K(m)] }, o)); }
+// splats all over its face; they stay until it relaxes
+function splatFace(m, col, n, seed = 1) {
+  const g = m.g, M = g.mouth, f = seeded(seed * 7 + n), up = M.y - g.B.eyeY, out = [];
+  for (let i = 0; i < n; i++) {
+    const a = f() * TAU, r = 0.35 + f() * 0.75;
+    out.push({ x: M.x + Math.cos(a) * g.B.eyeSpan * r * 1.1, y: M.y - up * 0.35 + Math.sin(a) * up * 0.75 * r, r: 6 + f() * 8, col: i % 3 ? col : darken(col, 0.15), seed: seed * 13 + i });
+  }
+  return out;
+}
+// how far up a monster turned by rot has to sit to rest on the floor (falling over, rolling about)
+function restLift(m, rot) {
+  const g = m.g, cs = Math.cos(rot), sn = Math.sin(rot);
+  const pts = g._rest || (g._rest = g.F.pts.concat([[g.legX[0] - 22, g.ground], [g.legX[1] + 22, g.ground], [-g.B.w * 0.4, g.ground - g.height], [g.B.w * 0.4, g.ground - g.height]]));
+  let lo = -Infinity;
+  for (const [x, y] of pts) lo = Math.max(lo, sn * x + cs * y);
+  return (lo - g.ground) * m.pose.sy;
+}
+// green from the toes up: something tastes horrible
+function* goGreen(m, d = 0.45, amt = 0.6) {
+  if (m.tint.col === SICK && m.tint.amt > 0.3) return;
+  m.tint.col = SICK; m.tint.level = 0;
+  yield* tween(d, p => { m.tint.amt = amt; m.tint.level = p; });
+}
+function removeDecor(m, d) { m.decor = m.decor.filter(x => x !== d); }
+// where the tip of its poked-out tongue is (body space)
+const tongueTip = m => m.g.mouth.y + m.g.mouth.hw * (Math.max(m.face.open, 0.25) * 1.25 + 0.65);
+// the eye on the side nearest the middle of the room
+const nearEye = (m, dir) => m.g.eyes.reduce((a, e) => ((dir > 0 ? e.x > a.x : e.x < a.x) ? e : a));
+
+/* ---------- a monster that won't: it goes green, gets the taste out, has a huff ---------- */
+const REFUSE = {};
+const REFUSE_KINDS = ['bleh', 'wipe', 'gargle', 'hurk', 'dog'];
+function* yuckRefuse(c, kinds) {
+  const m = c.m;
+  if (m.held) { SFX.play('spit'); spitHeld(c); }
+  m.pose.shake = 0; m.armPose = 'idle';
+  setFace(m, 'squeeze', 'tongue', 0.4); SFX.play('yuck');
+  yield* goGreen(m);
+  yield* REFUSE[pick(kinds)](c);
+  // a huff: arms folded, a cross look, no no no
+  setFace(m, 'fierce', 'frown', 0); m.face.brows = 'fierce'; m.armPose = 'hug';
+  babble(m, 'sad', 2);
+  yield* shakeHead(m, 0.55, 0.16);
+  const a = m.tint.amt;
+  yield* tween(0.35, p => { m.tint.amt = a * (1 - p); });
+  m.face.brows = null; m.armPose = 'idle';
+}
+// a refusal that hurt rather than tasted bad ends with folded arms and a cross look, no going green
+function* ouchRefuse(c) {
+  const m = c.m;
+  if (m.held) spitHeld(c);
+  setFace(m, 'fierce', 'frown', 0); m.face.brows = 'fierce'; m.armPose = 'hug';
+  babble(m, 'sad', 2);
+  yield* shakeHead(m, 0.6, 0.16);
+  yield* wait(0.25);
+  m.face.brows = null; m.armPose = 'idle';
+}
+// pbbbbt: a raspberry, spit flying, and a shudder from top to toe
+REFUSE.bleh = function* (c) {
+  const m = c.m;
+  setFace(m, 'squeeze', 'tongue', 0.5); SFX.play('raspberry', { dur: 0.7 });
+  yield* during(0.75, (e, dt) => { m.face.mdx = Math.sin(e * 34) * 4; m.pose.shake = 2.5; if (Math.random() < dt * 22) spray(c, '#d8f2ff', 1, { v0: 200, v1: 420, spread: 1.6 }); });
+  m.face.mdx = 0; m.pose.shake = 0;
+  SFX.play('brr');
+  yield* during(0.4, e => { m.pose.skew = Math.sin(e * 40) * 0.08 * (1 - e / 0.4); });
+  m.pose.skew = 0;
+};
+// both hands scrubbing at its tongue, then flicking the yuck off them
+REFUSE.wipe = function* (c) {
+  const m = c.m;
+  setFace(m, 'squeeze', 'tongue', 0.6); m.armPose = 'wipe';
+  for (let i = 0; i < 3; i++) { SFX.play('scrub'); yield* during(0.3, e => { m.face.mdx = Math.sin(e * 26) * 3; }); }
+  m.face.mdx = 0; m.armPose = 'shake';
+  spray(c, SICK, 8, { spread: 2.8, v0: 150, v1: 300 });
+  yield* wait(0.35);
+  m.armPose = 'idle';
+};
+// a glass of water: gargled, then spat out in a fountain
+REFUSE.gargle = function* (c) {
+  const m = c.m;
+  yield* drinkWater(c, 2);
+  setFace(m, 'closed', 'o', 0.3); m.face.cheeks = 1;
+  SFX.play('gargle', { dur: 0.8 });
+  yield* during(0.8, (e, dt) => {
+    m.pose.rot = -0.12 + Math.sin(e * 30) * 0.02;
+    if (Math.random() < dt * 14) { const [x, y] = m.mouthPos(); Parts.add('bubble', x + rand(-10, 10) * K(m), y, { size: rand(3, 6) * K(m), vy: -rand(60, 120), life: 0.6, col: '#bfefff' }); }
+  });
+  m.face.cheeks = 0; m.pose.rot = 0;
+  setFace(m, 'squeeze', 'o', 0.8); SFX.play('splash', { vol: 0.8 });
+  for (let i = 0; i < 26; i++) { const [x, y] = m.mouthPos(); Parts.add('drop', x, y, { size: rand(4, 7) * K(m), col: '#9fdcff', vx: rand(-90, 90), vy: -rand(500, 760), g: 1300, life: 1.6, floor: c.st.floor }); }
+  yield* wait(0.5);
+};
+// hurk! hurk! HURK!: cheeks bulging, a hand over its mouth (nothing comes up)
+REFUSE.hurk = function* (c) {
+  const m = c.m;
+  m.armPose = 'cover';
+  for (let i = 0; i < 3; i++) {
+    setFace(m, 'wide', 'flat', 0); SFX.play('gag');
+    yield* tween(0.2 + i * 0.04, p => { const b = Math.sin(p * Math.PI); m.face.cheeks = (1 + i * 0.2) * b; m.pose.rot = 0.08 * b * (i % 2 ? 1 : -1); m.pose.sy = 1 + 0.06 * b; });
+    setFace(m, 'squeeze', 'wavy', 0);
+    yield* wait(0.16);
+  }
+  m.armPose = 'idle'; m.face.cheeks = 0; m.pose.rot = 0;
+  SFX.play('blow', { dur: 0.4 }); setFace(m, 'closed', 'blow', 0);
+  yield* wait(0.35);
+};
+// a shake like a wet dog, the yuck flying off it
+REFUSE.dog = function* (c) {
+  const m = c.m;
+  setFace(m, 'shut', 'wavy', 0); SFX.play('brr');
+  yield* during(0.9, (e, dt) => {
+    const k = 1 - e / 0.9; m.pose.rot = Math.sin(e * 38) * 0.22 * k; m.pose.skew = Math.sin(e * 38 + 1) * 0.1 * k;
+    if (Math.random() < dt * 30) { const [x, y] = m.centerPos(); Parts.add('drop', x + rand(-1, 1) * m.g.B.w * K(m), y + rand(-1, 1) * m.g.B.h * K(m), { size: rand(3, 6) * K(m), col: pick([SICK, '#b5e07a', '#d8f2ff']), vx: rand(-400, 400), vy: -rand(150, 400), g: 1300, life: 1.2, floor: c.st.floor }); }
+  });
+  m.pose.rot = 0; m.pose.skew = 0;
+};
+
+/* ---------- a monster that loves it: hearts, a lick round its lips, a burp ---------- */
+const BURPS = {};
+function* grossLove(c, burp) {
+  const m = c.m;
+  setFace(m, 'heart', 'grin', 0.8); m.face.blush = 1;
+  SFX.play('jingle'); babble(m, 'happy', 3);
+  const [x, y] = m.headPos();
+  Parts.burst('heart', x, y, 12, { ang: -Math.PI / 2, spread: 2.4, v0: 140, v1: 340, g: -60, drag: 1.5, sizeR: [9 * K(m), 16 * K(m)], lifeR: [1.2, 1.9], col: '#ef3361' });
+  m.armPose = 'belly';
+  yield* during(0.4, e => { m.pose.lift = Math.abs(Math.sin(e * 10)) * 12; });
+  m.pose.lift = 0;
+  // a lick right round its lips
+  setFace(m, 'heart', 'tongue', 0.35); SFX.play('slurp', { dur: 0.5 });
+  yield* tween(0.55, p => { const a = p * TAU; m.face.mdx = Math.sin(a) * m.g.mouth.hw * 0.35; m.face.mdy = (Math.cos(a) - 1) * 4; });
+  m.face.mdx = 0; m.face.mdy = 0;
+  yield* BURPS[burp || pick(['big', 'big', 'echo', 'tiny'])](c);
+  m.armPose = 'idle'; m.face.blush = 0;
+}
+function burpCloud(c, n, k = 1) {
+  const m = c.m, [x, y] = m.mouthPos();
+  for (let i = 0; i < n; i++) Parts.add('puff', x, y, { size: rand(12, 20) * K(m) * k, grow: 2.6, vx: rand(-90, 90), vy: -rand(60, 170), drag: 1.4, life: rand(1.2, 1.8), col: pick(['#b5cc5a', '#c9c26a', '#a3bd55']), alpha: 0.85 });
+  Parts.add('ring', x, y, { size: 22 * K(m) * k, grow: 5, life: 0.55, col: 'rgba(255,255,255,0.9)', width: 6 * K(m) });
+}
+function* giggleBehindHand(m, d = 0.4) { setFace(m, 'happy', 'grin', 0.5); m.armPose = 'cover'; babble(m, 'giggle', 5); yield* wait(d); }
+// the big one: cheeks fill, BUUURP, a green cloud with flies in it
+BURPS.big = function* (c) {
+  const m = c.m;
+  setFace(m, 'closed', 'flat', 0);
+  yield* tween(0.35, p => { m.face.cheeks = 1.3 * p; m.pose.sy = 1 + 0.06 * p; m.pose.sx = 1 + 0.04 * p; });
+  setFace(m, 'squeeze', 'o', 1.3); m.face.wide = 1.3; m.face.cheeks = 0;
+  SFX.play('burp', { dur: 1.2, f: 72 }); c.st.shake = 5;
+  burpCloud(c, 7);
+  const [x, y] = m.mouthPos();
+  for (let i = 0; i < 2; i++) Parts.add('fly', x, y, { size: 5 * K(m), cx: x, cy: y - 50 * K(m), rx: rand(40, 70) * K(m), ry: rand(20, 30) * K(m), ang: i * 3, spin: rand(4, 7), life: 2.2 });
+  yield* tween(0.9, p => { m.pose.sx = lerp(1.04, 1, p); m.pose.sy = lerp(1.06, 1, p); m.pose.rot = -0.12 * Math.sin(p * Math.PI); m.pose.x = -10 * Math.sin(p * Math.PI); });
+  m.face.wide = 1;
+  yield* giggleBehindHand(m);
+};
+// a burp, and the room burps back, and back again
+BURPS.echo = function* (c) {
+  const m = c.m;
+  setFace(m, 'squeeze', 'o', 1.0);
+  SFX.play('burp', { dur: 0.6, f: 90 }); burpCloud(c, 3, 0.8);
+  yield* tween(0.35, p => { m.pose.rot = -0.08 * Math.sin(p * Math.PI); });
+  setFace(m, 'wide', 'o', 0.3);
+  for (let i = 0; i < 2; i++) {
+    yield* wait(0.18);
+    SFX.play('burp', { dur: 0.5, f: 90, vol: i ? 0.22 : 0.45 });
+    m.lookAt = null; m.glance = [i ? -1 : 1, -0.2]; m.glanceIn = 1;
+    yield* wait(0.3);
+  }
+  yield* giggleBehindHand(m);
+};
+// it swells up for an enormous one... and out comes a tiny urp
+BURPS.tiny = function* (c) {
+  const m = c.m;
+  setFace(m, 'squeeze', 'flat', 0);
+  yield* tween(0.7, p => { m.face.cheeks = 1.5 * p; m.pose.sx = 1 + 0.12 * p; m.pose.sy = 1 + 0.08 * p; m.pose.shake = 2 * p; });
+  m.pose.shake = 0;
+  setFace(m, 'wide', 'o', 0.3); m.face.cheeks = 0;
+  SFX.play('burp', { dur: 0.16, f: 240, vol: 0.6 });
+  const [x, y] = m.mouthPos();
+  Parts.add('ring', x, y, { size: 6 * K(m), grow: 2.5, life: 0.35, col: 'rgba(255,255,255,0.9)', width: 3 * K(m) });
+  yield* tween(0.25, p => { m.pose.sx = lerp(1.12, 1, p); m.pose.sy = lerp(1.08, 1, p); });
+  yield* wait(0.35);
+  yield* giggleBehindHand(m);
+};
+// a tin can's burp: it rings like a bell, and so does the monster
+BURPS.clang = function* (c) {
+  const m = c.m;
+  setFace(m, 'closed', 'flat', 0);
+  yield* tween(0.3, p => { m.face.cheeks = 1.2 * p; });
+  setFace(m, 'squeeze', 'o', 1.2); m.face.cheeks = 0;
+  SFX.play('burp', { dur: 0.9, f: 84 }); SFX.play('clank', { f: 600 }); SFX.play('ding', { f: 990 });
+  burpCloud(c, 3, 0.8);
+  const [x, y] = m.mouthPos();
+  for (let i = 0; i < 3; i++) Parts.add('ring', x, y, { size: (16 + i * 8) * K(m), grow: 4 + i, life: 0.5 + i * 0.15, col: 'rgba(200,210,230,0.9)', width: 4 * K(m) });
+  yield* during(0.8, e => { m.pose.skew = Math.sin(e * 60) * 0.06 * (1 - e / 0.8); });
+  m.pose.skew = 0;
+  yield* giggleBehindHand(m, 0.45);
+};
+// the caterpillar's: one last butterfly comes out with it
+BURPS.butterfly = function* (c) {
+  const m = c.m;
+  setFace(m, 'closed', 'flat', 0);
+  yield* tween(0.3, p => { m.face.cheeks = 1.1 * p; });
+  setFace(m, 'wide', 'o', 0.9); m.face.cheeks = 0;
+  SFX.play('burp', { dur: 0.5, f: 110 }); SFX.play('flutterSound');
+  const [x, y] = m.mouthPos();
+  Parts.add('ring', x, y, { size: 14 * K(m), grow: 4, life: 0.45, col: 'rgba(255,255,255,0.9)', width: 4 * K(m) });
+  Parts.add('butterfly', x, y, { size: 28 * K(m), vx: rand(-60, 60), vy: -200, life: 2.6, col: '#ffb02e', col2: '#fff3a0' });
+  yield* during(0.8, e => { m.lookAt = { x: x + e * 40, y: y - e * 220 }; });
+  m.lookAt = null;
+  yield* giggleBehindHand(m, 0.4);
+};
+// the bone's: it comes out as a bark
+BURPS.woof = function* (c) {
+  const m = c.m;
+  setFace(m, 'closed', 'flat', 0);
+  yield* tween(0.35, p => { m.face.cheeks = 1.3 * p; m.pose.sy = 1 + 0.05 * p; });
+  setFace(m, 'squeeze', 'o', 1.0); m.face.cheeks = 0;
+  SFX.play('woof'); burpCloud(c, 2, 0.7);
+  yield* tween(0.25, p => { m.pose.sy = lerp(1.05, 1, p); m.pose.lift = Math.sin(p * Math.PI) * 10; });
+  setFace(m, 'wide', 'o', 0.4); m.face.brows = 'up';
+  yield* wait(0.4);
+  m.face.brows = null;
+  yield* giggleBehindHand(m, 0.4);
+};
+
+/* ---------- the sock ---------- */
+YUCK.sock = {
+  // held up to its face and sniffed like a rose: it floats up on the smell, eats it, and the flies come
+  *love(c) {
+    const m = c.m, M = m.g.mouth, s = heldSize(m), side = { dx: M.hw + s * 0.25, dy: -s * 0.1, rot: -0.35, k: 0.8 };
+    const H = hold(m, c.S.spr, side); m.armPose = 'cup';
+    setFace(m, 'closed', 'o', 0.25);
+    SFX.play('inhale', { dur: 0.9 });
+    yield* during(0.9, (e, dt) => {
+      const k = e / 0.9; m.pose.sy = 1 + 0.07 * k; m.pose.sx = 1 + 0.05 * k; m.pose.rot = 0.1 * k;
+      if (Math.random() < dt * 10) { const [hx, hy] = heldAt(m), [mx] = m.mouthPos(); Parts.add('stink', hx, hy - 12 * K(m), { size: 7 * K(m), col: '#8ab83a', vx: (mx - hx) * 1.3, vy: -30, life: 0.75 }); }
+    });
+    // ahhh: up it floats on the smell, eyes shut, swaying
+    setFace(m, 'closed', 'smile', 0); m.face.blush = 1;
+    SFX.play('mmm', { pitch: VOICE(m), dur: 1.0 });
+    yield* during(0.9, e => { m.pose.lift = Math.sin(Math.min(1, e / 0.45) * Math.PI / 2) * 36; m.pose.rot = 0.1 + Math.sin(e * 5) * 0.08; });
+    const r0 = m.pose.rot;
+    yield* tween(0.2, p => { m.pose.lift = 36 * (1 - p); m.pose.rot = r0 * (1 - p); m.pose.sx = lerp(1.05, 1, p); m.pose.sy = lerp(1.07, 1, p); });
+    SFX.play('thud'); m.face.blush = 0;
+    // in it goes
+    yield* tween(0.18, p => { H.dx = lerp(side.dx, 0, p); H.dy = lerp(side.dy, s * 0.42, p); H.rot = lerp(side.rot, 0, p); H.k = lerp(side.k, 1, p); });
+    yield* EAT.chomp(c, { bites: 2, crunch: c.crunch });
+    // the flies come to see what smells so good
+    const [hx, hy] = m.headPos();
+    for (let i = 0; i < 6; i++) Parts.add('fly', hx, hy, { size: 5 * K(m), cx: hx, cy: hy - 24 * K(m), rx: rand(70, 130) * K(m), ry: rand(25, 50) * K(m), ang: i * 1.05, spin: rand(4, 7) * (i % 2 ? 1 : -1), life: 3.4 });
+    for (let i = 0; i < 4; i++) Parts.add('stink', hx + (i - 1.5) * 34 * K(m), hy + 10 * K(m), { size: 8 * K(m), col: '#7cb342', vy: -45, life: 1.6 });
+    SFX.play('buzz', { dur: 1.3 });
+    setFace(m, 'happy', 'grin', 0.5); m.armPose = 'wave'; babble(m, 'giggle', 5);
+    yield* during(1.1, e => { m.lookAt = { x: hx + Math.cos(e * 5) * 110 * K(m), y: hy - 24 * K(m) }; m.pose.rot = Math.sin(e * 8) * 0.06; });
+    m.lookAt = null; m.pose.rot = 0; m.armPose = 'idle';
+  },
+  // one sniff and it faints clean away, flat on its back, legs kicking at the air
+  *dislike(c) {
+    const m = c.m, M = m.g.mouth, s = heldSize(m), dir = dirOf(c);
+    hold(m, c.S.spr, { dx: M.hw + s * 0.25, dy: -s * 0.1, rot: -0.35, k: 0.8 }); m.armPose = 'cup';
+    setFace(m, 'open', 'smile', 0);
+    for (let i = 0; i < 2; i++) { SFX.play('sniff'); yield* tween(0.22, p => { m.pose.sy = 1 + 0.04 * Math.sin(p * Math.PI); }); }
+    // the smell hits
+    const [hx, hy] = heldAt(m);
+    for (let i = 0; i < 5; i++) Parts.add('stink', hx + rand(-20, 20) * K(m), hy, { size: 8 * K(m), col: '#7cb342', vy: -50, life: 1.3 });
+    setFace(m, 'cross', 'wavy', 0); m.face.brows = 'up'; SFX.play('gasp');
+    m.tint.col = SICK; m.tint.level = 0;
+    yield* tween(0.5, p => { m.tint.amt = 0.7; m.tint.level = p; m.pose.shake = 3 * p; m.pose.sy = 1 + 0.05 * p; });
+    setFace(m, 'spiral', 'wavy', 0);
+    yield* wait(0.25);
+    // TIMBER
+    m.pose.shake = 0; m.face.brows = null;
+    dropHeld(c, -dir * 90);
+    setFace(m, 'x', 'tongue', 0.3); m.armPose = 'up';
+    SFX.play('slide', { dur: 0.55 });
+    const fall = dir * 1.45, slide = r => dir * m.g.ground * 0.6 * Math.sin(Math.abs(r));
+    yield* tween(0.55, p => { const r = fall * Ease.in(p); m.pose.rot = r; m.pose.lift = restLift(m, r); m.pose.x = slide(r); });
+    SFX.play('thud'); c.st.shake = 7;
+    const [bx] = m.bottomPos();
+    for (let i = 0; i < 5; i++) Parts.add('puff', bx + dir * rand(0, 160) * K(m), c.st.floor - 4, { size: rand(10, 16) * K(m), grow: 2.2, vx: rand(-60, 60), vy: -rand(20, 70), life: 0.9, col: '#d9c49a', alpha: 0.7 });
+    // out cold: stars, flies, legs kicking
+    m.fx.dizzy = 1; m.legAmt = 1;
+    const [cx, cy] = m.centerPos();
+    for (let i = 0; i < 3; i++) Parts.add('fly', cx, cy, { size: 5 * K(m), cx, cy: cy - 50 * K(m), rx: rand(60, 100) * K(m), ry: rand(15, 30) * K(m), ang: i * 2, spin: rand(4, 7), life: 2.2 });
+    yield* wait(1.0);
+    m.legAmt = 0;
+    // boing! back up
+    SFX.play('boing', { f: 260 }); setFace(m, 'spiral', 'o', 0.5);
+    yield* tween(0.4, p => { const r = fall * (1 - Ease.back(p)); m.pose.rot = r; m.pose.lift = restLift(m, r) + Math.sin(p * Math.PI) * 30; m.pose.x = slide(r); });
+    m.pose.rot = 0; m.pose.lift = 0; m.pose.x = 0; m.pose.sy = 1; m.fx.dizzy = 0;
+    yield* shakeHead(m, 0.4, 0.14);
+  },
+};
+
+/* ---------- the boot ---------- */
+YUCK.boot = {
+  // the whole boot in one go, mouth stretched enormous; chewed to rubbery squeaks with the lace
+  // hanging out, the lace slurped up last; and the boot squeaks in its tummy when it pats it
+  *love(c) {
+    const m = c.m, base = c.S.spr, s = heldSize(m);
+    const H = hold(m, base, { dy: s * 0.6, k: 1.15, rot: -0.12 }); m.armPose = 'hold';
+    setFace(m, 'wide', 'smile', 0); SFX.play('gasp');
+    yield* tween(0.45, p => { m.face.wide = lerp(1, 1.7, Ease.back(p)); m.face.open = lerp(0, 1.4, Ease.out(p)); m.pose.sy = 1 + 0.1 * p; });
+    SFX.play('squish'); bite(c);
+    yield* tween(0.14, p => { H.dy = lerp(s * 0.6, 0, p); H.k = lerp(1.15, 0.5, p); });
+    m.held = null; m.armPose = 'idle';
+    const lace = { len: 1, swing: 0 }, L = { layer: 'face', draw: (ctx, m) => drawLace(ctx, m, lace) };
+    m.decor.push(L);
+    yield* tween(0.12, p => { m.face.open = lerp(1.4, 0, p); m.face.wide = lerp(1.7, 1.15, p); m.face.cheeks = 1.4 * p; m.pose.sy = 1.1 - 0.1 * p; });
+    setFace(m, 'happy');
+    for (let i = 0; i < 6; i++) {
+      SFX.play('squeakToy', { f: 1100 + (i % 3) * 180 });
+      yield* tween(0.22, p => { const b = Math.sin(p * Math.PI); m.face.cheeks = 1.1 + b * 0.4; m.face.mdx = (i % 2 ? 1 : -1) * b * 8; m.pose.sy = 1 + b * 0.04; lace.swing = (i % 2 ? 1 : -1) * b; });
+    }
+    m.face.mdx = 0;
+    // the lace goes in last, like spaghetti
+    SFX.play('slurp', { dur: 0.5 });
+    yield* tween(0.5, p => { lace.len = 1 - p; lace.swing = Math.sin(p * 30) * 0.5; });
+    removeDecor(m, L); SFX.play('pop', { f: 900 });
+    m.face.wide = 1; m.face.cheeks = 0;
+    yield* gulp(m, true);
+    // it squeaks in there
+    const tum = { a: 0, k: 1 }, T = { layer: 'body', draw: (ctx, m) => drawInTummy(ctx, m, base, tum) };
+    m.decor.push(T);
+    m.armPose = 'pat'; setFace(m, 'happy', 'smile', 0);
+    yield* tween(0.2, p => { tum.a = p; });
+    for (let i = 0; i < 3; i++) {
+      yield* wait(0.12);
+      SFX.play('squeakToy', { f: 1500 + i * 120 });
+      const [bx, by] = m.toScreen(0, m.g.B.belly[1]);
+      Parts.add('note', bx + 30 * K(m), by, { size: 14 * K(m), vx: rand(20, 60), vy: -90, life: 0.9, col: '#7a4a1a' });
+      yield* tween(0.18, p => { const b = Math.sin(p * Math.PI); tum.k = 1 + b * 0.15; m.pose.sy = 1 - b * 0.08; m.pose.sx = 1 + b * 0.05; });
+    }
+    babble(m, 'giggle', 4);
+    yield* tween(0.3, p => { tum.a = 1 - p; });
+    removeDecor(m, T); m.armPose = 'idle';
+  },
+  // it bites: rubber. It pulls; the boot stretches... and snaps back up, SMACK, into its face
+  *dislike(c) {
+    const m = c.m, base = c.S.spr, s = heldSize(m), dir = dirOf(c);
+    const H = hold(m, base); m.armPose = 'hold';
+    yield* snap(c, 1);
+    setFace(m, 'squeeze', 'teeth', 0); m.armPose = 'tug';
+    SFX.play('stretch', { dur: 0.9 });
+    yield* tween(0.9, p => { const k = Ease.inOut(p); H.sy = 1 + 0.9 * k; H.sx = 1 - 0.18 * k; H.dy = s * 0.42 + s * 0.45 * k; m.pose.sy = 1 + 0.06 * k; m.pose.rot = Math.sin(p * 40) * 0.02 * k; });
+    SFX.play('smack'); SFX.play('boing', { f: 180 });
+    yield* tween(0.1, p => { H.sy = lerp(1.9, 0.75, p); H.sx = lerp(0.82, 1.15, p); H.dy = lerp(s * 0.87, -s * 0.22, p); });
+    m.armPose = 'cheeks'; setFace(m, 'x', 'o', 0.6); m.fx.dizzy = 1;
+    const [ex, ey] = m.toScreen(0, m.g.B.eyeY);
+    Parts.burst('star', ex, ey, 7, { v0: 140, v1: 280, sizeR: [6 * K(m), 11 * K(m)], lifeR: [0.4, 0.7], col: '#ffd23f', vr: 8 });
+    yield* tween(0.2, p => { const b = Math.sin(p * Math.PI); m.pose.rot = -dir * 0.2 * b; m.pose.sx = 1 + 0.08 * b; m.pose.sy = 1 - 0.08 * b; H.sy = lerp(0.75, 1, p); H.sx = lerp(1.15, 1, p); });
+    // it hangs on its face a moment, then slides off
+    yield* wait(0.35);
+    yield* tween(0.4, p => { H.dy = lerp(-s * 0.22, s * 0.55, Ease.in(p)); H.rot = 0.5 * p; });
+    dropHeld(c, dir * 80);
+    setFace(m, 'spiral', 'wavy', 0); m.armPose = 'idle';
+    yield* during(0.8, e => { m.pose.rot = Math.sin(e * 6) * 0.1; });
+    m.pose.rot = 0; m.fx.dizzy = 0;
+  },
+};
+
+/* ---------- the caterpillar ---------- */
+YUCK.caterpillar = {
+  // gobbled up: it wriggles round its tummy (the giggles! a roll on the floor) and comes back out
+  // as a cloud of butterflies, one of which comes back to sit on its head
+  *love(c) {
+    const m = c.m, s = heldSize(m), dir = dirOf(c);
+    const H = hold(m, c.S.spr); m.armPose = 'hold';
+    setFace(m, 'wide', 'tongue', 0.2);
+    yield* during(0.55, e => { H.rot = Math.sin(e * 14) * 0.25; H.sx = 1 + Math.sin(e * 14) * 0.08; });
+    H.rot = 0; H.sx = 1;
+    yield* tween(0.15, p => { m.face.mouth = 'smile'; m.face.open = 1.1 * p; H.dy = lerp(s * 0.42, s * 0.2, p); });
+    bite(c);
+    yield* tween(0.1, p => { H.dy = lerp(s * 0.2, 0, p); H.k = lerp(1, 0.3, p); m.face.open = 1.1 * (1 - p); });
+    m.held = null; m.armPose = 'idle';
+    yield* gulp(m);
+    // wriggling about in there
+    const W = { layer: 'body', draw: (ctx, m) => drawWriggler(ctx, m) };
+    m.decor.push(W);
+    setFace(m, 'happy', 'grin', 0.6); m.armPose = 'belly'; babble(m, 'giggle', 8);
+    yield* during(0.85, e => { m.pose.rot = Math.sin(e * 25) * 0.1; m.pose.sx = 1 + Math.sin(e * 25) * 0.04; m.pose.lift = Math.abs(Math.sin(e * 12)) * 8; });
+    m.pose.sx = 1;
+    // laughing so hard it rolls right over
+    SFX.play('whoosh', { dur: 0.7 }); babble(m, 'giggle', 6);
+    yield* tween(0.8, p => { const r = dir * TAU * Ease.inOut(p); m.pose.rot = r; m.pose.lift = restLift(m, r); m.pose.x = dir * Math.sin(p * Math.PI) * 50; });
+    m.pose.rot = 0; m.pose.lift = 0; m.pose.x = 0;
+    removeDecor(m, W);
+    // and out they come
+    setFace(m, 'wide', 'o', 1.0); SFX.play('rumble', { dur: 0.3 });
+    yield* wait(0.25);
+    SFX.play('flutterSound');
+    const [x, y] = m.mouthPos(), cols = ['#ff7ab0', '#ffb02e', '#7fd0ff', '#b28cff', '#8ce06a', '#ff6a5a'];
+    for (let i = 0; i < 6; i++) { Parts.add('butterfly', x, y, { size: rand(26, 36) * K(m), vx: rand(-170, 170), vy: -rand(120, 230), life: rand(2.6, 3.4), col: cols[i], col2: '#fff3a0' }); yield* wait(0.07); }
+    m.armPose = 'wave'; setFace(m, 'happy', 'grin', 0.5);
+    // one comes back and sits on its head
+    const B = Parts.add('butterfly', x, y, { size: 32 * K(m), life: 3, col: '#ff7ab0', col2: '#fff3a0' });
+    const perch = () => m.toScreen(m.g.topMid[0], m.g.bodyTop - 4);
+    yield* tween(0.6, p => { const [tx, ty] = perch(); B.x = lerp(x, tx, Ease.inOut(p)) + Math.sin(p * 9) * 24 * (1 - p) * K(m); B.y = lerp(y, ty, Ease.inOut(p)) - Math.sin(p * Math.PI) * 70 * K(m); B.vx = B.vy = 0; m.lookAt = { x: B.x, y: B.y }; });
+    B.flapRate = 4; setFace(m, 'happy', 'o', 0.3);
+    yield* during(0.65, () => { const [tx, ty] = perch(); B.x = tx; B.y = ty; B.vx = B.vy = 0; m.lookAt = { x: tx, y: ty }; });
+    B.flapRate = 14; B.vx = 60; B.vy = -220;
+    babble(m, 'happy', 2);
+    yield* wait(0.2);
+    m.lookAt = null; m.armPose = 'idle';
+  },
+  burp: 'butterfly',
+  // a lick to taste it... and it crawls up onto its tongue! BLEH: off it flies, lands, and inches
+  // away in a huff, with the monster watching it go
+  *dislike(c) {
+    const m = c.m, s = heldSize(m), M = m.g.mouth, dir = dirOf(c);
+    const H = hold(m, c.S.spr); m.armPose = 'hold';
+    yield* during(0.4, e => { H.rot = Math.sin(e * 14) * 0.25; });
+    H.rot = 0;
+    setFace(m, 'half', 'tongue', 0.3);
+    yield* tween(0.3, p => { H.dy = lerp(s * 0.42, tongueTip(m) - M.y + s * 0.22, p); H.k = lerp(1, 0.65, p); });
+    // up onto its tongue it crawls
+    setFace(m, 'cross', 'tongue', 0.3); m.face.brows = 'up'; m.armPose = 'idle';
+    SFX.play('squeak', { f: 2400 });
+    const y0 = H.dy, y1 = M.hw * 0.35 + s * 0.1;
+    yield* during(0.7, e => { H.dy = lerp(y0, y1, e / 0.7); H.sx = 1 + Math.sin(e * 16) * 0.12; m.face.mdx = Math.sin(e * 20) * 2; });
+    m.face.mdx = 0; m.face.brows = null; H.sx = 1;
+    // BLEH
+    setFace(m, 'squeeze', 'tongue', 0.5);
+    SFX.play('raspberry', { dur: 0.6 }); spray(c, '#d8f2ff', 10);
+    const [x, y] = heldAt(m);
+    m.held = null;
+    const bug = Parts.add('crawler', x, y, { img: c.S.spr, size: s * 0.65 * K(m), vx: dir * 300, vy: -380, g: 1400, vr: dir * 8, dir, speed: 90 * K(m), life: 4.5, floor: c.st.floor, fade: u => (u < 0.85 ? 1 : 1 - (u - 0.85) / 0.15) });
+    yield* during(0.6, e => { m.pose.shake = 3 * (1 - e / 0.6); m.face.mdx = Math.sin(e * 30) * 4; });
+    m.pose.shake = 0; m.face.mdx = 0;
+    // off it goes
+    setFace(m, 'half', 'flat', 0);
+    yield* during(1.1, () => { m.lookAt = { x: bug.x, y: bug.y }; });
+    m.lookAt = null;
+  },
+  refuse: ['wipe', 'gargle', 'hurk', 'dog'],
+};
+
+/* ---------- the worm ---------- */
+YUCK.worm = {
+  // slurped up like spaghetti, wriggling all the way; it pokes its head back out to look about,
+  // and gets slurped up again
+  *love(c) {
+    const m = c.m, s = heldSize(m);
+    const H = hold(m, c.S.spr, { dy: s * 0.55 }); m.armPose = 'hold';
+    setFace(m, 'happy', 'tongue', 0.3);
+    yield* during(0.4, e => { H.rot = Math.sin(e * 12) * 0.2; });
+    H.rot = 0;
+    setFace(m, 'open', 'o', 0.3);
+    const st = { len: 1 }, D = { layer: 'face', draw: (ctx, m) => drawWormStrand(ctx, m, st) };
+    m.decor.push(D);
+    SFX.play('slurp', { dur: 1.0 });
+    yield* tween(1.0, p => { st.len = 1 - p; H.k = lerp(1, 0.35, p); H.alpha = 1 - clamp((p - 0.7) / 0.3, 0, 1); m.face.open = 0.25 + Math.sin(p * 30) * 0.05; m.face.eyes = p > 0.5 ? 'closed' : 'open'; });
+    removeDecor(m, D); m.held = null; m.armPose = 'idle';
+    SFX.play('pop', { f: 700 });
+    // knock knock: its head pops back out
+    yield* wait(0.25);
+    const peek = { out: 0, look: 0, side: dirOf(c) }, P = { layer: 'face', draw: (ctx, m) => drawWormHead(ctx, m, peek) };
+    m.decor.push(P);
+    SFX.play('squeak', { f: 1900 }); setFace(m, 'cross', 'o', 0.35);
+    yield* tween(0.25, p => { peek.out = Ease.back(p); });
+    yield* during(0.9, e => { peek.look = Math.sin(e * 6); });
+    // shloop
+    SFX.play('slurp', { dur: 0.25 });
+    yield* tween(0.15, p => { peek.out = 1 - p; });
+    removeDecor(m, P); SFX.play('pop', { f: 900 });
+    setFace(m, 'happy', 'smile', 0);
+    yield* gulp(m);
+  },
+  // it starts to slurp... and stops. It pulls the worm back out of its mouth hand over hand, and it
+  // just keeps coming, piling up on the floor, until the end pops out and the whole long thing
+  // wriggles away
+  *dislike(c) {
+    const m = c.m, s = heldSize(m), dir = dirOf(c);
+    const H = hold(m, c.S.spr, { dy: s * 0.55 }); m.armPose = 'hold';
+    setFace(m, 'open', 'o', 0.3);
+    const st = { len: 1 }, D = { layer: 'face', draw: (ctx, m) => drawWormStrand(ctx, m, st) };
+    m.decor.push(D);
+    SFX.play('slurp', { dur: 0.45 });
+    yield* tween(0.45, p => { st.len = 1 - p * 0.6; H.k = lerp(1, 0.5, p); H.alpha = 1 - p; });
+    removeDecor(m, D); m.held = null;
+    // wait...
+    setFace(m, 'wide', 'o', 0.3); m.face.brows = 'up';
+    yield* goGreen(m, 0.4);
+    // out it comes, and out, and out
+    const W = { len: 30, dir, free: false, gone: 0 }, L = { layer: 'front', draw: (ctx, m) => drawLongWorm(ctx, m, W) };
+    m.decor.push(L);
+    m.armPose = 'pull'; m.pullDir = dir; setFace(m, 'squeeze', 'o', 0.35); m.face.brows = null;
+    for (let i = 0; i < 4; i++) {
+      SFX.play('stretch', { dur: 0.3 });
+      const L0 = W.len;
+      yield* tween(0.36, p => { W.len = L0 + 95 * Ease.out(p); m.pose.rot = dir * 0.05 * Math.sin(p * Math.PI); });
+    }
+    // the end pops out and it sits down hard
+    SFX.play('pop', { f: 500 }); SFX.play('thud');
+    W.free = true; m.armPose = 'idle'; m.pullDir = 0; setFace(m, 'x', 'o', 0.5);
+    yield* tween(0.22, p => { const b = Math.sin(p * Math.PI); m.pose.sy = 1 - 0.12 * b; m.pose.sx = 1 + 0.08 * b; });
+    // and off it wriggles
+    setFace(m, 'half', 'wavy', 0);
+    yield* tween(1.0, p => { W.gone = p; L.alpha = 1 - clamp((p - 0.6) / 0.4, 0, 1); });
+    removeDecor(m, L);
+  },
+};
+
+/* ---------- the snail ---------- */
+YUCK.snail = {
+  // sucked right out of its shell, slurrrp, POP; it peeps into the empty shell (nobody home),
+  // tosses it over its shoulder, and licks the slime off its chin
+  *love(c) {
+    const m = c.m, s = heldSize(m), M = m.g.mouth, dir = dirOf(c);
+    const H = hold(m, c.S.spr, { dy: s * 0.5 }); m.armPose = 'hold';
+    setFace(m, 'happy', 'tongue', 0.3);
+    yield* tween(0.35, p => { H.dy = lerp(s * 0.5, s * 0.85, p); H.dx = dir * s * 0.3 * p; });
+    setFace(m, 'open', 'pucker', 0);
+    const goo = { k: 0 }, D = { layer: 'face', draw: (ctx, m) => drawSnailGoo(ctx, m, goo) };
+    m.decor.push(D);
+    SFX.play('suck', { dur: 0.9 });
+    H.spr = shellSprite(c.S.spr);
+    yield* tween(0.9, p => { goo.k = p; m.pose.sx = 1 - Math.sin(p * Math.PI) * 0.06; m.face.eyes = p > 0.4 ? 'squeeze' : 'wide'; H.rot = Math.sin(p * 30) * 0.06; });
+    removeDecor(m, D); SFX.play('pop', { f: 420 }); H.rot = 0; m.pose.sx = 1;
+    yield* gulp(m);
+    // anybody home?
+    const e0 = nearEye(m, dir), x1 = e0.x + dir * (e0.r + s * 0.25), y1 = e0.y - M.y;
+    setFace(m, 'open', 'o', 0.2);
+    yield* tween(0.3, p => { H.dx = lerp(dir * s * 0.3, x1, p); H.dy = lerp(s * 0.85, y1, p); H.k = lerp(1, 0.7, p); H.rot = -dir * 0.6 * p; });
+    yield* during(0.5, e => { H.rot = -dir * 0.6 + Math.sin(e * 22) * 0.15; });
+    // over its shoulder
+    flingHeld(c, -dir, { vx: -dir * 300, vy: -700, life: 2.4, bounce: 0.35, layer: 0 });
+    m.armPose = 'idle';
+    yield* wait(0.2);
+    // slime down its chin, licked off
+    m.fx.sauce = [{ x: M.x - M.hw * 0.3, y: M.y + M.hw * 0.5, r: 7, col: '#d6e46a', seed: 3 }, { x: M.x + M.hw * 0.35, y: M.y + M.hw * 0.6, r: 6, col: '#d6e46a', seed: 6 }];
+    const [mx, my] = m.mouthPos();
+    drops(c, mx, my + 10 * K(m), 4, '#d6e46a', { ang: Math.PI / 2, spread: 0.5, v0: 20, v1: 70 });
+    setFace(m, 'happy', 'tongue', 0.4); SFX.play('slurp', { dur: 0.5 });
+    yield* tween(0.6, p => { m.face.mdx = Math.sin(p * 12) * M.hw * 0.4; m.fx.sauce.forEach(sp => { sp.a = 1 - p; }); });
+    m.fx.sauce = []; m.face.mdx = 0;
+    // a happy shiver
+    SFX.play('brr'); setFace(m, 'happy', 'grin', 0.4);
+    yield* during(0.5, e => { m.pose.shake = 3 * (1 - e / 0.5); });
+    m.pose.shake = 0;
+  },
+  // a lick: its tongue goes green and slimy, strings of slime hanging off it; the snail hides in
+  // its shell and gets thrown away, and the monster scrubs and scrubs at its tongue
+  *dislike(c) {
+    const m = c.m, s = heldSize(m), M = m.g.mouth, dir = dirOf(c);
+    const H = hold(m, c.S.spr); m.armPose = 'hold';
+    setFace(m, 'half', 'tongue', 0.3);
+    yield* tween(0.3, p => { H.dy = lerp(s * 0.42, tongueTip(m) - M.y + s * 0.28, p); });
+    SFX.play('glorp', { f: 170 });
+    yield* tween(0.2, p => { m.face.mdy = 4 * Math.sin(p * Math.PI); });
+    m.face.tongueCol = '#b9d84a';
+    const sl = { n: 0 }, D = { layer: 'face', draw: (ctx, m) => drawTongueSlime(ctx, m, sl) };
+    m.decor.push(D);
+    setFace(m, 'wide', 'tongue', 0.5); m.face.brows = 'up';
+    H.spr = shellSprite(c.S.spr); SFX.play('pop', { f: 300 });   // the snail hides
+    m.tint.col = SICK; m.tint.level = 0;
+    yield* tween(0.6, p => { sl.n = p; m.tint.amt = 0.6; m.tint.level = p; });
+    // away with the snail
+    flingHeld(c, dir);
+    m.face.brows = null;
+    // scrub, scrub, scrub
+    m.armPose = 'wipe'; setFace(m, 'squeeze', 'tongue', 0.5);
+    for (let i = 0; i < 3; i++) { SFX.play('scrub'); yield* during(0.3, e => { m.face.mdx = Math.sin(e * 26) * 3; sl.n = 1 - (i + e / 0.3) / 3; }); }
+    m.face.mdx = 0; m.armPose = 'shake';
+    spray(c, '#b9d84a', 8, { spread: 2.6, v0: 150, v1: 320 });
+    yield* wait(0.35);
+    removeDecor(m, D); m.face.tongueCol = null; m.armPose = 'idle';
+  },
+  refuse: ['bleh', 'gargle', 'hurk', 'dog'],
+};
+
+/* ---------- the slime ---------- */
+YUCK.slime = {
+  // slurped in one go and it turns to jelly, wobbling, bubbles going up inside it; then it blows a
+  // slime bubble that pops all over its face
+  *love(c) {
+    const m = c.m, s = heldSize(m);
+    const H = hold(m, c.S.spr); m.armPose = 'hold';
+    yield* during(0.35, e => { H.sx = 1 + Math.sin(e * 18) * 0.1; H.sy = 1 - Math.sin(e * 18) * 0.08; });
+    setFace(m, 'open', 'o', 0.6); SFX.play('slurp', { dur: 0.6 });
+    yield* tween(0.5, p => { H.dy = lerp(s * 0.42, 0, p * p); H.k = lerp(1, 0.2, p * p); H.sx = 1 - p * 0.5; H.sy = 1; m.face.open = 0.6 + p * 0.3; });
+    m.held = null; m.armPose = 'idle';
+    yield* gulp(m);
+    // jelly monster
+    setFace(m, 'happy', 'grin', 0.4); m.tint.col = '#7ae020'; m.tint.level = 1;
+    const B = { layer: 'body', draw: (ctx, m) => drawInsideBubbles(ctx, m) };
+    m.decor.push(B);
+    yield* during(1.3, (e, dt) => {
+      const k = Math.exp(-e * 1.2);
+      m.tint.amt = 0.35 * Math.min(1, e * 4);
+      m.pose.skew = Math.sin(e * 14) * 0.3 * k; m.pose.sx = 1 + Math.sin(e * 14 + 1) * 0.08 * k; m.pose.sy = 1 - Math.sin(e * 14 + 1) * 0.06 * k;
+      if (Math.floor(e * 4) !== Math.floor((e - dt) * 4)) SFX.play('glorp', { f: 110 + Math.random() * 90 });
+    });
+    m.pose.skew = 0; m.pose.sx = 1; m.pose.sy = 1;
+    // a slime bubble...
+    const bub = { r: 0 }, D = { layer: 'front', draw: (ctx, m) => drawSlimeBubble(ctx, m, bub) };
+    m.decor.push(D);
+    setFace(m, 'cross', 'pucker', 0); SFX.play('blow', { dur: 1.1 });
+    yield* tween(1.1, p => { bub.r = Ease.out(p) * 1.1 + Math.sin(p * 20) * 0.02; });
+    // ...POP
+    removeDecor(m, D); SFX.play('pop', { f: 260 }); SFX.play('splat');
+    m.fx.sauce = splatFace(m, '#8ae02a', 8, 2);
+    const [x, y] = m.mouthPos();
+    Parts.burst('drop', x, y, 12, { spread: TAU, v0: 160, v1: 360, g: 1200, sizeR: [3 * K(m), 6 * K(m)], lifeR: [0.6, 1.1], col: '#8ae02a', floor: c.st.floor });
+    setFace(m, 'closed', 'flat', 0);
+    yield* wait(0.5);
+    setFace(m, 'happy', 'grin', 0.5); babble(m, 'giggle', 5);
+    yield* tween(0.4, p => { m.tint.amt = 0.35 * (1 - p); });
+    removeDecor(m, B);
+  },
+  // a bite, and it sticks: a string of slime stretches from its mouth to the blob in its hand, longer
+  // and longer, until it snaps back SPLAT on its face; the blob won't come off its hand, and when it
+  // does it lands on the floor, SPLAT
+  *dislike(c) {
+    const m = c.m, s = heldSize(m), dir = dirOf(c);
+    const H = hold(m, c.S.spr); m.armPose = 'hold';
+    yield* snap(c, 0.9);
+    setFace(m, 'wide', 'o', 0.25); m.face.brows = 'up';
+    const goo = { thick: 1 }, D = { layer: 'face', draw: (ctx, m) => drawGooString(ctx, m, goo) };
+    m.decor.push(D);
+    SFX.play('stretch', { dur: 0.9 }); SFX.play('glorp');
+    m.armPose = 'tug';
+    yield* tween(0.9, p => { const k = Ease.inOut(p); H.dx = dir * s * 0.7 * k; H.dy = s * 0.42 + s * 0.45 * k; goo.thick = 1 - 0.7 * k; m.pose.rot = -dir * 0.06 * k; });
+    // snap!
+    removeDecor(m, D); SFX.play('splat');
+    m.fx.sauce = splatFace(m, '#8ae02a', 5, 3);
+    setFace(m, 'squeeze', 'tongue', 0.4); m.pose.rot = 0; m.face.brows = null;
+    yield* wait(0.25);
+    // it won't come off its hand
+    m.armPose = 'shake';
+    const x0 = H.dx, y0 = H.dy;
+    yield* during(0.6, e => { H.dx = x0 + Math.sin(e * 30) * 14; H.dy = y0 + Math.cos(e * 30) * 6; });
+    // SPLAT
+    const [x, y] = heldAt(m), up = 300, t = (up + Math.sqrt(up * up + 2 * 1500 * Math.max(10, c.st.floor - y))) / 1500;
+    m.held = null; m.armPose = 'idle'; SFX.play('whoosh');
+    Parts.add('sprite', x, y, { img: H.spr, size: H.size * K(m), vx: dir * 260, vy: -up, g: 1500, vr: dir * 6, life: t, onDie: p => { SFX.play('splat'); Parts.add('splat', p.x, c.st.floor - 2, { size: 34 * K(m), col: '#7ad020', flat: true, life: 2.4, layer: 0, fade: u => (u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3) }); } });
+    yield* wait(t + 0.15);
+  },
+  refuse: ['bleh', 'wipe', 'gargle', 'hurk'],
+};
+
+/* ---------- the mud pie ---------- */
+YUCK.mudpie = {
+  // a face-first bite, SPLAT: mud all over its face; it grins through it, then licks the lot off
+  // with a tongue that goes right round, splat by splat
+  *love(c) {
+    const m = c.m, s = heldSize(m), M = m.g.mouth;
+    const H = hold(m, c.S.spr); m.armPose = 'hold';
+    setFace(m, 'wide', 'smile', 0);
+    yield* tween(0.22, p => { m.face.open = 1.2 * p; H.dy = lerp(s * 0.42, s * 0.1, p); });
+    SFX.play('splat'); SFX.play('squish');
+    yield* tween(0.08, p => { H.dy = lerp(s * 0.1, -s * 0.05, p); H.k = 1 + 0.15 * p; m.face.open = 1.2 * (1 - p); });
+    m.held = null; m.armPose = 'idle';
+    m.fx.sauce = splatFace(m, '#7a4a2a', 8, 4);
+    m.fx.must = '#6a3e22'; m.fx.mustAmt = 1;
+    const [x, y] = m.mouthPos();
+    Parts.burst('drop', x, y, 14, { spread: TAU, v0: 150, v1: 380, g: 1300, sizeR: [3 * K(m), 6 * K(m)], lifeR: [0.6, 1.2], cols: ['#6a3e22', '#7a4a2a', '#5a3018'], floor: c.st.floor });
+    setFace(m, 'closed', 'flat', 0);
+    yield* wait(0.45);
+    m.blinkT = 0;
+    setFace(m, 'happy', 'grin', 0.4); babble(m, 'giggle', 3);
+    yield* chew(m, 0.5);
+    // lick it all off, splat by splat
+    setFace(m, 'happy', 'tongue', 0.4);
+    for (const sp of m.fx.sauce.slice().sort((a, b) => a.x - b.x)) {
+      const tx = clamp((sp.x - M.x) * 0.45, -M.hw * 0.7, M.hw * 0.7), ty = clamp((sp.y - M.y) * 0.3, -12, 10), x0 = m.face.mdx, y0 = m.face.mdy;
+      SFX.play('slurp', { dur: 0.14 });
+      yield* tween(0.14, p => { m.face.mdx = lerp(x0, tx, p); m.face.mdy = lerp(y0, ty, p); });
+      sp.a = 0;
+    }
+    SFX.play('slurp', { dur: 0.3 });
+    const x1 = m.face.mdx, y1 = m.face.mdy;
+    yield* tween(0.3, p => { m.face.mdx = x1 * (1 - p); m.face.mdy = y1 * (1 - p); m.fx.mustAmt = 1 - p; });
+    m.fx.sauce = []; m.fx.must = null; m.fx.mustAmt = 0;
+    // squeaky clean
+    SFX.play('ding', { f: 1760 }); SFX.play('sparkle');
+    const [hx, hy] = m.toScreen(0, m.g.B.eyeY);
+    Parts.burst('spark', hx, hy, 8, { v0: 80, v1: 200, sizeR: [6 * K(m), 10 * K(m)], lifeR: [0.4, 0.8], cols: ['#fff3a0', '#ffffff'] });
+    setFace(m, 'happy', 'grin', 0.5);
+    yield* wait(0.3);
+  },
+  // mud glues its mouth shut, mmph, mmph; it prises it open with both hands... POP, and up comes a
+  // fountain of mud
+  *dislike(c) {
+    const m = c.m;
+    hold(m, c.S.spr); m.armPose = 'hold';
+    yield* snap(c, 1);
+    dropHeld(c, 0);
+    setFace(m, 'wide', 'stuck', 0); m.face.stuckCol = '#6a3e22'; m.armPose = 'cheeks';
+    for (let i = 0; i < 3; i++) { SFX.play('mmm', { pitch: VOICE(m) * 0.75, dur: 0.3 }); yield* during(0.32, e => { m.pose.sx = 1 + Math.sin(e * 25) * 0.05; m.pose.rot = Math.sin(e * 12) * 0.07; }); }
+    // prise it open
+    setFace(m, 'squeeze', 'stuck', 0); m.pose.rot = 0;
+    yield* during(0.45, e => { m.pose.shake = 3; m.pose.sx = 1 + e * 0.3; m.pose.sy = 1 - e * 0.14; });
+    m.pose.shake = 0;
+    SFX.play('pop', { f: 350 }); SFX.play('splash', { vol: 0.9 });
+    setFace(m, 'wide', 'o', 1.2);
+    yield* during(0.7, () => {
+      m.pose.sx = lerp(m.pose.sx, 1, 0.2); m.pose.sy = lerp(m.pose.sy, 1, 0.2);
+      if (Math.random() < 0.85) { const [x, y] = m.mouthPos(); Parts.add('drop', x, y, { size: rand(4, 8) * K(m), col: pick(['#6a3e22', '#7a4a2a', '#5a3018']), vx: rand(-260, 260), vy: -rand(380, 640), g: 1300, life: 1.6, floor: c.st.floor }); }
+    });
+    m.pose.sx = 1; m.pose.sy = 1; m.armPose = 'idle';
+    const [bx] = m.bottomPos();
+    for (let i = 0; i < 3; i++) Parts.add('splat', bx + rand(-1, 1) * 120 * K(m), c.st.floor - 2, { size: rand(14, 24) * K(m), col: '#6a3e22', flat: true, life: 2.2, layer: 0, fade: u => (u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3) });
+  },
+};
+
+/* ---------- the rock ---------- */
+// teeth on stone: CLONK, and the whole monster rings like a tuning fork, boinnng
+function* clonk(c) {
+  const m = c.m, H = hold(m, c.S.spr); m.armPose = 'hold';
+  yield* tween(0.15, p => { m.face.mouth = 'smile'; m.face.open = p; });
+  SFX.play('clonk'); SFX.play('twang');
+  yield* tween(0.06, p => { m.face.open = 1 - p; H.dy *= 0.85; });
+  setFace(m, 'spiral', 'teeth', 0); m.face.chatter = true;
+  const [x, y] = m.mouthPos();
+  Parts.burst('star', x, y, 5, { v0: 120, v1: 240, sizeR: [6 * K(m), 10 * K(m)], lifeR: [0.4, 0.7], col: '#ffd23f', vr: 8 });
+  yield* during(1.0, (e, dt) => {
+    const k = Math.exp(-e * 2.5); m.pose.skew = Math.sin(e * 70) * 0.12 * k; m.pose.sx = 1 + Math.sin(e * 70 + 1) * 0.04 * k;
+    if (Math.random() < dt * 14 * k) { const [cx, cy] = m.centerPos(), sd = Math.random() < 0.5 ? -1 : 1; Parts.add('line', cx + sd * (m.g.B.w + 28) * K(m), cy + rand(-40, 40) * K(m), { size: 16 * K(m), vx: 0, vy: 150, life: 0.15, col: 'rgba(80,80,110,0.7)' }); }
+  });
+  m.pose.skew = 0; m.pose.sx = 1; m.face.chatter = false;
+}
+YUCK.rock = {
+  // CLONK, boinnng; a hard stare; then a mighty CRUNCH, and the rock sits so heavy in its tummy
+  // that it sags right down, THUD; it pats it: clonk, clonk
+  *love(c) {
+    yield* clonk(c);
+    const m = c.m;
+    setFace(m, 'fierce', 'flat', 0); m.face.brows = 'fierce';
+    babble(m, 'ow', 2, 0.8);
+    yield* during(0.5, () => { if (m.held) { const [x, y] = heldAt(m); m.lookAt = { x, y }; } });
+    m.lookAt = null;
+    yield* tween(0.2, p => { m.face.mouth = 'smile'; m.face.open = 1.3 * p; m.face.wide = 1 + 0.3 * p; });
+    SFX.play('crunch', { big: true }); SFX.play('crack');
+    yield* tween(0.07, p => { m.face.open = 1.3 * (1 - p); });
+    m.face.wide = 1; m.held = null; m.face.brows = null; m.armPose = 'idle';
+    crumbs(c, 16, true);
+    for (let i = 0; i < 3; i++) { SFX.play('crunch'); yield* chew(m, 0.25, true); }
+    // heavy
+    SFX.play('gulp');
+    yield* tween(0.22, p => { m.fx.lump = p; });
+    m.fx.lump = -1;
+    SFX.play('thud'); c.st.shake = 6;
+    setFace(m, 'wide', 'o', 0.4);
+    yield* tween(0.18, p => { m.pose.sy = 1 - 0.16 * Ease.out(p); m.pose.sx = 1 + 0.1 * Ease.out(p); });
+    m.armPose = 'pat';
+    for (let i = 0; i < 2; i++) { yield* wait(0.2); SFX.play('clonk'); }
+    setFace(m, 'happy', 'grin', 0.4);
+    yield* tween(0.35, p => { m.pose.sy = lerp(0.84, 1, Ease.elastic(p)); m.pose.sx = lerp(1.1, 1, Ease.elastic(p)); });
+    m.armPose = 'idle';
+  },
+  // CLONK, boinnng; it throws the rock away, straight up... and down it comes on its own head, BONK;
+  // a bump comes up, and it rubs it
+  *dislike(c) {
+    yield* clonk(c);
+    const m = c.m, H = m.held, s = heldSize(m), dir = dirOf(c);
+    setFace(m, 'fierce', 'frown', 0); m.face.brows = 'fierce'; babble(m, 'ow', 2);
+    m.armPose = 'up'; SFX.play('whoosh');
+    const [, my] = m.mouthPos(), high = -((my - c.st.top) / m.scale + 90), top = m.g.bodyTop - m.g.mouth.y - H.size * 0.4, y0 = H.dy;
+    yield* tween(0.45, p => { H.dy = lerp(y0, high, Ease.out(p)); H.rot = p * 2; });
+    setFace(m, 'half', 'smile', 0); m.face.brows = null; m.armPose = 'idle';   // pleased with itself
+    yield* wait(0.3);
+    setFace(m, 'wide', 'o', 0.3);   // uh oh
+    SFX.play('slide', { dur: 0.45 });
+    yield* tween(0.45, p => { H.dy = lerp(high, top, Ease.in(p)); H.rot = 2 + p * 2; const [x, y] = heldAt(m); m.lookAt = { x, y }; });
+    // BONK
+    SFX.play('clonk'); SFX.play('smack'); c.st.shake = 5;
+    const bump = { k: 0 }, D = { layer: 'front', draw: (ctx, m) => drawBump(ctx, m, bump) };
+    m.decor.push(D); m.fx.dizzy = 1; m.lookAt = null;
+    setFace(m, 'x', 'wavy', 0);
+    const [hx, hy] = m.headPos();
+    Parts.burst('star', hx, hy, 7, { v0: 140, v1: 280, sizeR: [6 * K(m), 11 * K(m)], lifeR: [0.4, 0.8], col: '#ffd23f', vr: 8 });
+    flingHeld(c, dir, { vx: dir * 260, vy: -380, bounce: 0.4, life: 2 });
+    yield* tween(0.22, p => { const b = Math.sin(p * Math.PI); m.pose.sy = 1 - 0.18 * b; m.pose.sx = 1 + 0.1 * b; bump.k = Ease.back(p); });
+    yield* during(0.7, e => { m.pose.rot = Math.sin(e * 6) * 0.08; });
+    m.pose.rot = 0;
+    // rub, rub
+    m.armPose = 'head'; setFace(m, 'squeeze', 'frown', 0); babble(m, 'sad', 2);
+    yield* tween(0.6, p => { bump.k = 1 - 0.4 * p; });
+    m.fx.dizzy = 0; m.armPose = 'idle';
+  },
+  refuse: ouchRefuse,
+};
+
+/* ---------- the bone ---------- */
+YUCK.bone = {
+  // it turns into a puppy: the bone in its teeth like a dog's, woof! woof!, a waggle and a spin after
+  // its own tail; three big crunches; then it pants and begs for more
+  *love(c) {
+    const m = c.m, s = heldSize(m);
+    const H = hold(m, c.S.spr); m.armPose = 'hold';
+    // up into its teeth, crossways
+    yield* tween(0.25, p => { H.dy = lerp(s * 0.42, 4, p); H.rot = 0.78 * p; H.k = lerp(1, 1.05, p); });
+    m.armPose = 'idle'; setFace(m, 'happy', 'smile', 0.1);
+    for (let i = 0; i < 2; i++) { SFX.play('woof'); yield* tween(0.2, p => { const b = Math.sin(p * Math.PI); m.pose.lift = b * 14; m.face.open = 0.25 * b; }); yield* wait(0.08); }
+    // a waggle, and round it goes after its own tail
+    yield* during(0.6, e => { m.pose.skew = Math.sin(e * 22) * 0.12; });
+    m.pose.skew = 0;
+    SFX.play('whoosh', { dur: 0.5 });
+    yield* tween(0.55, p => { const f = Math.cos(p * TAU * 2); m.pose.flip = (f < 0 ? -1 : 1) * Math.max(0.18, Math.abs(f)); m.pose.lift = Math.sin(p * Math.PI) * 10; });
+    m.pose.flip = 1; m.pose.lift = 0;
+    // crunch, crunch, CRUNCH
+    for (let i = 0; i < 3; i++) {
+      yield* tween(0.12, p => { m.face.open = 0.6 * p; });
+      SFX.play('crunch', { big: true }); crumbs(c, 8, true);
+      yield* tween(0.07, p => { m.face.open = 0.6 * (1 - p); });
+      H.k *= 0.68;
+      yield* chew(m, 0.22, true);
+    }
+    m.held = null;
+    yield* gulp(m);
+    // pant, pant, and beg
+    setFace(m, 'happy', 'pant', 0.6); m.armPose = 'cover';
+    SFX.play('pant', { n: 4 });
+    yield* during(0.7, e => { m.pose.lift = Math.abs(Math.sin(e * 9)) * 6; });
+    m.pose.lift = 0; m.armPose = 'idle';
+  },
+  burp: 'woof',
+  // a crack at it, a sniff, a face: it's no dog. Over its shoulder the bone goes, and from somewhere
+  // past the edge of the room a dog barks: woof! woof!
+  *dislike(c) {
+    const m = c.m, dir = dirOf(c);
+    hold(m, c.S.spr); m.armPose = 'hold';
+    yield* snap(c, 0.9); SFX.play('crack');
+    setFace(m, 'cross', 'tongue', 0.3);
+    yield* wait(0.3);
+    for (let i = 0; i < 2; i++) { SFX.play('sniff'); yield* wait(0.2); }
+    setFace(m, 'squeeze', 'tongue', 0.4);
+    yield* wait(0.25);
+    // over its shoulder
+    const B = flingHeld(c, -dir, { vx: -dir * 520, vy: -760, g: 1100, bounce: 0, life: 1.6 });
+    m.armPose = 'up'; setFace(m, 'open', 'smile', 0);
+    yield* during(0.75, () => { if (B) m.lookAt = { x: B.x, y: B.y }; });
+    m.armPose = 'idle';
+    SFX.play('woof', { far: true }); yield* wait(0.2); SFX.play('woof', { far: true });
+    setFace(m, 'wide', 'o', 0.4); m.face.brows = 'up';
+    yield* wait(0.5);
+    setFace(m, 'happy', 'smile', 0); m.face.brows = null; babble(m, 'giggle', 3);
+    yield* wait(0.3);
+    m.lookAt = null;
+  },
+  refuse: ['bleh'],
+};
+
+/* ---------- the flower ---------- */
+YUCK.sunflower = {
+  // a long sniff: lovely. Then the tickle: ah... ah... (nothing; phew)... AAAH-CHOOO! a sneeze so big
+  // it blows the monster back across the floor and every petal off the flower; it eats what is
+  // left, and a little flower pops up on top of its head
+  *love(c) {
+    const m = c.m, s = heldSize(m), M = m.g.mouth, dir = dirOf(c), side = { dx: M.hw + s * 0.2, dy: -s * 0.05, rot: -0.2, k: 0.85 };
+    const H = hold(m, c.S.spr, side); m.armPose = 'cup';
+    setFace(m, 'closed', 'smile', 0); m.face.blush = 1;
+    SFX.play('inhale', { dur: 0.5 });
+    yield* tween(0.5, p => { m.pose.rot = 0.08 * p; m.pose.sy = 1 + 0.04 * p; });
+    SFX.play('mmm', { pitch: VOICE(m), dur: 0.4 });
+    yield* wait(0.2);
+    m.face.blush = 0;
+    // ah... ah...
+    for (let i = 0; i < 2; i++) {
+      SFX.play('sneezeIn', { k: 1 + i * 0.3 }); setFace(m, 'half', 'o', 0.3);
+      const r0 = m.pose.rot, y0 = m.pose.sy;
+      yield* tween(0.4, p => { m.pose.rot = lerp(r0, -0.1 - i * 0.07, p); m.face.open = 0.3 + p * 0.4; m.pose.sy = lerp(y0, 1.05 + i * 0.03, p); });
+    }
+    // ...nothing. Phew.
+    setFace(m, 'open', 'smile', 0);
+    yield* tween(0.2, p => { m.pose.rot = lerp(-0.17, 0, p); m.pose.sy = lerp(1.08, 1, p); });
+    yield* wait(0.28);
+    // AAAH-CHOOO
+    setFace(m, 'shut', 'o', 1.3); SFX.play('sneezeOut'); SFX.play('whoosh', { dur: 0.5 });
+    c.st.shake = 6;
+    const [x, y] = m.mouthPos();
+    Parts.burst('petal', x, y, 26, { ang: dir > 0 ? -0.2 : Math.PI + 0.2, spread: 1.8, v0: 200, v1: 560, g: 220, drag: 1.2, sizeR: [5 * K(m), 9 * K(m)], lifeR: [1.3, 2.1], col: '#ffd020', vr: 5 });
+    Parts.burst('spark', x, y, 12, { ang: dir > 0 ? 0 : Math.PI, spread: 1.3, v0: 220, v1: 520, sizeR: [3 * K(m), 6 * K(m)], lifeR: [0.4, 0.8], col: '#fff3a0' });
+    H.spr = baldFlower(c.S.spr);
+    yield* tween(0.35, p => { m.pose.x = -dir * 70 * Ease.out(p); m.pose.rot = -dir * 0.2 * Math.sin(p * Math.PI); m.pose.sy = lerp(1.06, 0.94, p); });
+    yield* tween(0.4, p => { m.pose.x = -dir * 70 * (1 - Ease.inOut(p)); m.pose.sy = lerp(0.94, 1, p); });
+    m.pose.x = 0; m.pose.rot = 0;
+    // what is left gets eaten
+    setFace(m, 'happy', 'smile', 0);
+    yield* tween(0.18, p => { H.dx = lerp(side.dx, 0, p); H.dy = lerp(side.dy, s * 0.42, p); H.rot = lerp(side.rot, 0, p); H.k = lerp(side.k, 1, p); });
+    m.armPose = 'hold';
+    yield* snap(c, 1.2);
+    m.held = null; m.armPose = 'idle'; crumbs(c, 5);
+    yield* chew(m, 0.3);
+    yield* gulp(m);
+    // a flower pops up on its head
+    const F = { k: 0 }, D = { layer: 'front', draw: (ctx, m) => drawHeadFlower(ctx, m, F) };
+    m.decor.push(D);
+    SFX.play('pop', { f: 1200 }); SFX.play('sparkle');
+    yield* tween(0.35, p => { F.k = Ease.back(p); });
+    setFace(m, 'happy', 'grin', 0.4); babble(m, 'happy', 3);
+    const spot = flowerSpot(m);
+    yield* during(0.5, () => { const [tx, ty] = m.toScreen(spot.x, spot.y - 34); m.lookAt = { x: tx, y: ty }; });
+    m.lookAt = null;
+  },
+  // one sniff: choo! choo!! AAACHOOO!!! each sneeze bigger, blowing it further back; it ends up
+  // teary and sniffly and throws the flower away
+  *dislike(c) {
+    const m = c.m, s = heldSize(m), M = m.g.mouth, dir = dirOf(c);
+    hold(m, c.S.spr, { dx: M.hw + s * 0.2, dy: -s * 0.05, rot: -0.2, k: 0.85 }); m.armPose = 'cup';
+    setFace(m, 'half', 'o', 0.2); SFX.play('sniff');
+    yield* wait(0.35);
+    for (let i = 0; i < 3; i++) {
+      SFX.play('sneezeIn', { k: 1 + i * 0.25 }); setFace(m, 'half', 'o', 0.3);
+      const lean = dir * (0.06 + 0.05 * i), tall = 0.03 + 0.03 * i;
+      yield* tween(0.22 + 0.1 * i, p => { m.pose.rot = lean * p; m.pose.sy = 1 + tall * p; });
+      setFace(m, 'shut', 'o', 0.8 + 0.25 * i); SFX.play('sneezeOut');
+      if (i === 2) c.st.shake = 6;
+      const [x, y] = m.mouthPos(), back = -dir * (14 + 28 * i);
+      Parts.burst('petal', x, y, 5 + i * 9, { ang: dir > 0 ? -0.2 : Math.PI + 0.2, spread: 1.5, v0: 160, v1: 300 + i * 120, g: 220, drag: 1.2, sizeR: [5 * K(m), 8 * K(m)], lifeR: [1, 1.8], col: '#ffd020', vr: 5 });
+      yield* tween(0.25, p => { m.pose.x = back * Math.sin(p * Math.PI / 2); m.pose.rot = lean * (1 - p) - dir * 0.12 * Math.sin(p * Math.PI); m.pose.sy = lerp(1 + tall, 0.95, p); });
+      yield* tween(0.18, p => { m.pose.x = back * (1 - p); m.pose.sy = lerp(0.95, 1, p); });
+    }
+    m.pose.x = 0; m.pose.rot = 0;
+    // teary and sniffly, and away with it
+    setFace(m, 'teary', 'wavy', 0); SFX.play('sniff');
+    yield* wait(0.3);
+    flingHeld(c, dir);
+    m.armPose = 'cover'; SFX.play('sniff');
+    yield* wait(0.4);
+    m.armPose = 'idle';
+  },
+  // a last little tchoo, a sniff and a shake of the head
+  *refuse(c) {
+    const m = c.m;
+    if (m.held) spitHeld(c);
+    setFace(m, 'half', 'o', 0.3); SFX.play('sneezeIn', { k: 1.5 });
+    yield* wait(0.3);
+    setFace(m, 'shut', 'o', 0.4); SFX.play('puff'); SFX.play('squeak', { f: 1500 });
+    yield* tween(0.2, p => { m.pose.rot = -0.08 * Math.sin(p * Math.PI); });
+    SFX.play('sniff');
+    setFace(m, 'fierce', 'frown', 0); m.face.brows = 'fierce'; m.armPose = 'hug';
+    babble(m, 'sad', 2);
+    yield* shakeHead(m, 0.5, 0.14);
+    m.face.brows = null; m.armPose = 'idle';
+  },
+};
+
+/* ---------- the cactus ---------- */
+// a bite: OUCH, prickles stuck all round its mouth, and up it shoots
+function* prickled(c, high) {
+  const m = c.m;
+  hold(m, c.S.spr); m.armPose = 'hold';
+  yield* tween(0.15, p => { m.face.mouth = 'smile'; m.face.open = 0.9 * p; });
+  SFX.play('ouch'); SFX.play('squeak', { f: 2200 });
+  const P = { n: 5 };
+  m.decor.push({ layer: 'face', draw: (ctx, m) => drawPrickles(ctx, m, P) });
+  setFace(m, 'x', 'o', 0.9);
+  const [x, y] = m.mouthPos();
+  Parts.burst('star', x, y, 6, { v0: 120, v1: 260, sizeR: [6 * K(m), 10 * K(m)], lifeR: [0.4, 0.7], col: '#ffd23f', vr: 8 });
+  SFX.play('slide', { up: true, dur: 0.5 });
+  m.armPose = 'up';
+  yield* tween(0.55, p => { m.pose.lift = Math.sin(p * Math.PI) * high; m.pose.sy = 1.12; m.pose.sx = 0.92; });
+  m.pose.sy = 1; m.pose.sx = 1; SFX.play('thud'); c.st.shake = 4;
+  for (let i = 0; i < 2; i++) { babble(m, 'ow', 1); yield* hop(m, 22, 0.3); }
+  return P;
+}
+// pulled out one at a time: pop, wince, pop
+function* pluck(c, P) {
+  const m = c.m;
+  m.armPose = 'cover';
+  while (P.n > 0) {
+    setFace(m, 'squeeze', 'flat', 0);
+    yield* wait(0.1);
+    P.n--;
+    SFX.play('pop', { f: 1500 + Math.random() * 500 });
+    const [x, y] = m.mouthPos();
+    Parts.add('spine', x + rand(-30, 30) * K(m), y + rand(-20, 10) * K(m), { size: 7 * K(m), vx: rand(-200, 200), vy: -rand(200, 360), g: 1300, vr: rand(-15, 15), life: 0.9 });
+    setFace(m, 'open', 'flat', 0);
+    yield* wait(0.08);
+  }
+  m.armPose = 'idle';
+}
+YUCK.cactus = {
+  // OUCH: prickles all round its mouth; up it shoots, lands, hops about, ow, ow; it puts the cactus
+  // down, plucks the prickles out one by one, then picks it up and nibbles it very, very carefully
+  *love(c) {
+    const P = yield* prickled(c, 110), m = c.m, s = heldSize(m), M = m.g.mouth;
+    const put = dropHeld(c, 0);
+    yield* pluck(c, P);
+    // back up off the floor
+    if (put) put.life = put.age;
+    const H = hold(m, c.S.spr, { dy: m.g.ground - M.y - s * 0.3 }); m.armPose = 'hold';
+    yield* tween(0.3, p => { H.dy = lerp(m.g.ground - M.y - s * 0.3, s * 0.42, Ease.inOut(p)); });
+    setFace(m, 'squeeze', 'pucker', 0);
+    for (let i = 0; i < 4; i++) { SFX.play('nibble'); yield* tween(0.16, p => { m.face.cheeks = 0.3 * Math.sin(p * Math.PI); }); if (i % 2) H.spr = bitten(c.S.spr, (i + 1) / 2, 9); }
+    m.held = null; m.armPose = 'idle';
+    yield* gulp(m);
+    setFace(m, 'happy', 'grin', 0.4);
+    yield* wait(0.2);
+  },
+  // OUCH: up like a rocket, down with a bump; it throws the cactus away and dashes about fanning its
+  // mouth, then plucks the prickles out one by one
+  *dislike(c) {
+    const P = yield* prickled(c, 140), m = c.m, dir = dirOf(c);
+    flingHeld(c, dir);
+    m.armPose = 'fan'; setFace(m, 'squeeze', 'pant', 0.6); m.legAmt = 1;
+    babble(m, 'ow', 3);
+    yield* during(1.0, (e, dt) => {
+      m.pose.x = Math.sin(e * 7) * 60; m.pose.lift = Math.abs(Math.sin(e * 14)) * 10;
+      if (Math.random() < dt * 8) { const [bx, by] = m.bottomPos(); Parts.add('puff', bx, by - 4, { size: rand(8, 12) * K(m), grow: 2, vx: rand(-40, 40), vy: -rand(10, 40), life: 0.6, col: '#d9c49a', alpha: 0.6, layer: 0 }); }
+    });
+    m.legAmt = 0;
+    const x0 = m.pose.x, l0 = m.pose.lift;
+    yield* tween(0.2, p => { m.pose.x = x0 * (1 - p); m.pose.lift = l0 * (1 - p); });
+    yield* pluck(c, P);
+  },
+  refuse: ouchRefuse,
+};
+
+/* ---------- the leaf ---------- */
+YUCK.leaf = {
+  // CRUNCH, crunch, crunch, bits everywhere; then a flurry of leaves comes down and it catches every
+  // one in its mouth, snap, snap, snap
+  *love(c) {
+    const m = c.m;
+    yield* EAT.chomp(c, { crunch: true, bites: 2 });
+    crumbs(c, 14, true);
+    // more!
+    setFace(m, 'wide', 'o', 0.5); SFX.play('whoosh', { dur: 0.8, f0: 300, f1: 900 });
+    const spr = Art.sprite(FOODS.leaf.pic, 128), N = 4, gap = 0.4, fall = 0.95, leaves = [];
+    for (let i = 0; i < N; i++) leaves.push(Parts.add('sprite', 0, -100, { img: spr, size: rand(34, 46) * K(m), life: 30, alpha: 0, x0: m.x + rand(-1, 1) * 220 * K(m), t0: i * gap }));
+    yield* during(N * gap + fall + 0.15, e => {
+      const [mx, my] = m.mouthPos();
+      let next = null;
+      leaves.forEach((p, i) => {
+        const u = (e - p.t0) / fall;
+        if (p.eaten || u < 0) return;
+        const v = Math.min(1, u);
+        p.alpha = 1; p.vx = p.vy = 0;
+        p.x = lerp(p.x0, mx, Ease.inOut(v)) + Math.sin(u * 9 + i) * 30 * (1 - v) * K(m);
+        p.y = lerp(c.st.top - 40, my, v);
+        p.rot = Math.sin(u * 7 + i) * 0.6;
+        if (u >= 1) { p.eaten = true; p.life = p.age; SFX.play('crunch'); crumbs(c, 3); m.face.open = 0; }
+        else if (!next) next = p;
+      });
+      if (next) { const u = (e - next.t0) / fall; m.lookAt = { x: next.x, y: next.y }; m.face.mouth = 'smile'; m.face.open = clamp((u - 0.55) * 3, 0, 1.1); m.pose.x = lerp(m.pose.x, clamp((next.x - m.x) / m.scale * 0.25, -40, 40), 0.15); }
+    });
+    leaves.forEach(p => { p.life = p.age; });
+    m.lookAt = null;
+    const x0 = m.pose.x;
+    yield* tween(0.2, p => { m.pose.x = x0 * (1 - p); });
+    setFace(m, 'happy', 'grin', 0.4); babble(m, 'happy', 2);
+    yield* wait(0.2);
+  },
+  // a crunch... and it's dry as dust: a coughing fit, puffs of dust; ptoo, ptoo, ptoo; away it goes
+  *dislike(c) {
+    const m = c.m, dir = dirOf(c), H = hold(m, c.S.spr); m.armPose = 'hold';
+    yield* snap(c, 1); SFX.play('crunch', { big: true }); crumbs(c, 10, true);
+    H.spr = bitten(c.S.spr, 1, 4);
+    for (let i = 0; i < 3; i++) {
+      setFace(m, 'squeeze', 'o', 0.7); SFX.play('cough');
+      const [x, y] = m.mouthPos();
+      for (let k = 0; k < 3; k++) Parts.add('puff', x, y, { size: rand(8, 13) * K(m), grow: 2.4, vx: rand(-60, 60) + dir * 60, vy: -rand(30, 90), drag: 1.5, life: rand(0.7, 1.1), col: '#c8ae80', alpha: 0.7 });
+      yield* tween(0.28, p => { const b = Math.sin(p * Math.PI); m.pose.rot = 0.08 * b * (i % 2 ? 1 : -1); m.pose.sy = 1 - 0.06 * b; m.face.cheeks = 0.6 * b; });
+      setFace(m, 'half', 'flat', 0);
+      yield* wait(0.12);
+    }
+    m.face.cheeks = 0;
+    for (let i = 0; i < 3; i++) {
+      setFace(m, 'squeeze', 'o', 0.4); SFX.play('ptoo');
+      const [x, y] = m.mouthPos();
+      Parts.add('crumb', x, y, { size: rand(4, 7) * K(m), col: c.S.col, vx: dir * rand(300, 450), vy: -rand(150, 300), g: 1200, vr: 10, bounce: 0.3, life: 1.4, floor: c.st.floor });
+      yield* tween(0.12, p => { m.pose.x = -dir * 5 * Math.sin(p * Math.PI); });
+    }
+    m.pose.x = 0;
+    flingHeld(c, dir);
+  },
+  refuse: ['gargle', 'bleh', 'wipe'],
+};
+
+/* ---------- the tin can ---------- */
+YUCK.tincan = {
+  // CRUNCH-CLANK: it crushes the can flat in its teeth and chews the metal, clank, clank; every hop
+  // afterwards rattles in its tummy; and its burp rings like a bell
+  *love(c) {
+    const m = c.m, H = hold(m, c.S.spr); m.armPose = 'hold';
+    for (let i = 0; i < 2; i++) {
+      yield* tween(0.14, p => { m.face.mouth = 'smile'; m.face.open = p; });
+      SFX.play('clank'); SFX.play('crinkle');
+      const sy0 = H.sy || 1, sx0 = H.sx || 1;
+      yield* tween(0.08, p => { m.face.open = 1 - p; H.sy = lerp(sy0, i ? 0.32 : 0.6, p); H.sx = lerp(sx0, i ? 1.22 : 1.1, p); H.rot = (i ? -0.25 : 0.2) * p; });
+      crumbs(c, 4, true);
+      yield* chew(m, 0.25, true);
+    }
+    for (let i = 0; i < 3; i++) { SFX.play('clank', { f: 900 + i * 150 }); yield* chew(m, 0.18, true); }
+    m.held = null; m.armPose = 'idle';
+    yield* gulp(m, true);
+    setFace(m, 'happy', 'grin', 0.4);
+    for (let i = 0; i < 3; i++) { yield* hop(m, 26, 0.32); SFX.play('rattle'); }
+    babble(m, 'giggle', 5);
+    yield* wait(0.2);
+  },
+  burp: 'clang',
+  // it peers inside like a telescope (hello-o-o: its voice rings in the can), turns it over and
+  // shakes it (nothing), tries a bite, CLANK, bleh; then wears it for a hat and shakes it off
+  *dislike(c) {
+    const m = c.m, s = heldSize(m), M = m.g.mouth, dir = dirOf(c), e0 = nearEye(m, dir);
+    const H = hold(m, c.S.spr); m.armPose = 'hold';
+    const ex = e0.x + dir * (e0.r + s * 0.3), ey = e0.y - M.y;
+    yield* tween(0.3, p => { H.dx = lerp(0, ex, p); H.dy = lerp(s * 0.42, ey, p); H.rot = -dir * 1.45 * p; H.k = lerp(1, 0.75, p); });
+    setFace(m, 'wide', 'o', 0.3);
+    for (let i = 0; i < 3; i++) { babble(m, 'ask', 2, 1.4 / (i * 1.8 + 1)); yield* wait(0.32); }
+    // upside down and a shake: nothing in it
+    yield* tween(0.25, p => { H.dx = lerp(ex, 0, p); H.dy = lerp(ey, s * 0.5, p); H.rot = lerp(-dir * 1.45, Math.PI, p); H.k = lerp(0.75, 1, p); });
+    yield* during(0.5, (e, dt) => { H.rot = Math.PI + Math.sin(e * 30) * 0.2; if (Math.floor(e * 6) !== Math.floor((e - dt) * 6)) SFX.play('clank', { f: 1500 }); });
+    setFace(m, 'half', 'flat', 0);
+    yield* wait(0.2);
+    // a bite: CLANK, and it tastes of tin
+    H.rot = 0;
+    yield* tween(0.14, p => { m.face.mouth = 'smile'; m.face.open = p; H.dy = lerp(s * 0.5, s * 0.42, p); });
+    SFX.play('clank', { f: 700 }); m.pose.shake = 4;
+    setFace(m, 'x', 'teeth', 0); m.face.chatter = true;
+    yield* wait(0.4);
+    m.pose.shake = 0; m.face.chatter = false;
+    setFace(m, 'squeeze', 'tongue', 0.4);
+    yield* goGreen(m, 0.35, 0.5);
+    // a hat
+    const hatY = m.g.bodyTop - M.y - s * 0.32;
+    setFace(m, 'open', 'smile', 0);
+    yield* tween(0.3, p => { H.dy = lerp(s * 0.42, hatY, Ease.inOut(p)) - Math.sin(p * Math.PI) * 40; H.rot = Math.PI * p; });
+    SFX.play('clank', { f: 1000 }); m.armPose = 'idle';
+    yield* during(0.6, () => { const [x, y] = heldAt(m); m.lookAt = { x, y }; });
+    m.lookAt = null;
+    // off it comes
+    flingHeld(c, dir, { vy: -720 });
+    yield* shakeHead(m, 0.45, 0.2);
+  },
+  refuse: ['bleh', 'wipe', 'gargle', 'hurk'],
+};
+
+/* ---------- drawings the munchies need (body space, inside the monster's own drawing) ---------- */
+// a boot lace hanging out of the corner of its mouth, swinging as it chews
+function drawLace(ctx, m, lace) {
+  const M = m.g.mouth, x0 = M.x + (m.face.mdx || 0) + M.hw * 0.35, y0 = M.y + 6, L = 74 * lace.len;
+  if (L < 2) return;
+  const pts = [];
+  for (let i = 0; i <= 14; i++) { const u = i / 14; pts.push([x0 + Math.sin(u * 5 + m.t * 6) * 5 * u + lace.swing * u * u * 18, y0 + u * L]); }
+  const path = () => { ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); };
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  path(); ctx.lineWidth = 11; ctx.strokeStyle = '#5a3a10'; ctx.stroke();
+  path(); ctx.lineWidth = 6.5; ctx.strokeStyle = '#f2c94c'; ctx.stroke();
+  const [ex, ey] = pts[14], [px, py] = pts[13];
+  ctx.translate(ex, ey); ctx.rotate(Math.atan2(ey - py, ex - px));
+  ctx.beginPath(); rrect(ctx, -2, -4, 14, 8, 3); ctx.fillStyle = '#e8e2d0'; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = '#5a3a10'; ctx.stroke();
+}
+// a picture seen inside its tummy, in the space below its mouth
+function drawInTummy(ctx, m, spr, tum) {
+  if (tum.a < 0.01) return;
+  const g = m.g, M = g.mouth, top = M.y + M.hw * 0.4, bot = (g.F.bottomAt(0) || g.B.h) - 6, sz = clamp((bot - top) * 1.25, 34, g.B.w * 0.9) * tum.k;
+  ctx.clip(g.P); ctx.globalAlpha *= 0.45 * tum.a;
+  ctx.drawImage(spr, -sz / 2, (top + bot) / 2 - sz / 2, sz, sz);
+}
+// something wriggling round inside its tummy: a lump that runs about, a little tail behind it
+function drawWriggler(ctx, m) {
+  const g = m.g, B = g.B;
+  ctx.clip(g.P);
+  for (let i = 3; i >= 0; i--) {
+    const t = m.t - i * 0.05, x = B.belly[0] + Math.cos(t * 7) * B.belly[2] * 0.5, y = B.belly[1] - B.belly[3] * 0.2 + Math.sin(t * 11) * B.belly[3] * 0.45, r = 11 - i * 1.5;
+    ctx.fillStyle = rgba(m.pal.line, 0.18); ctx.beginPath(); ctx.arc(x, y + 3, r, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.45, 0, TAU); ctx.fill();
+  }
+}
+// a worm, pink and ringed, along a list of points; a face on the end if it has a head
+function strokeWorm(ctx, pts, w, head) {
+  const path = () => { ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); };
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  path(); ctx.lineWidth = w + 5; ctx.strokeStyle = '#6a2433'; ctx.stroke();
+  path(); ctx.lineWidth = w; ctx.strokeStyle = '#ff9aae'; ctx.stroke();
+  ctx.strokeStyle = 'rgba(200,70,100,0.6)'; ctx.lineWidth = 2;
+  for (let i = 2; i < pts.length - 1; i += 2) {
+    const [x, y] = pts[i], [ax, ay] = pts[i - 1], [bx, by] = pts[i + 1], l = Math.hypot(bx - ax, by - ay) || 1, nx = -(by - ay) / l * w * 0.45, ny = (bx - ax) / l * w * 0.45;
+    ctx.beginPath(); ctx.moveTo(x - nx, y - ny); ctx.lineTo(x + nx, y + ny); ctx.stroke();
+  }
+  if (!head) return;
+  const [x, y] = pts[pts.length - 1], r = w * 0.78, look = head.look || 0;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fillStyle = '#ff9aae'; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = '#6a2433'; ctx.stroke();
+  [-1, 1].forEach(s => {
+    ctx.beginPath(); ctx.arc(x + s * r * 0.4 + look * r * 0.12, y - r * 0.2, r * 0.26, 0, TAU); ctx.fillStyle = '#ffffff'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x + s * r * 0.4 + look * r * 0.22, y - r * 0.17, r * 0.14, 0, TAU); ctx.fillStyle = '#1e1633'; ctx.fill();
+  });
+  ctx.beginPath(); ctx.arc(x + look * r * 0.12, y + r * 0.18, r * 0.3, 0.25, Math.PI - 0.25); ctx.lineWidth = 2; ctx.strokeStyle = '#6a2433'; ctx.stroke();
+}
+// the worm being slurped: from the one in its hand up into its mouth, wriggling
+function drawWormStrand(ctx, m, st) {
+  const H = m.held, M = m.g.mouth;
+  if (!H || st.len < 0.02) return;
+  const x0 = M.x + (m.face.mdx || 0), y0 = M.y + 4, x1 = M.x + (H.dx || 0), y1 = M.y + (H.dy || 0) - H.size * (H.k || 1) * 0.2, pts = [];
+  for (let i = 0; i <= 18; i++) { const u = (i / 18) * st.len; pts.push([lerp(x0, x1, u) + Math.sin(u * 10 + m.t * 16) * 9 * u, lerp(y0, y1, u)]); }
+  strokeWorm(ctx, pts, 9);
+}
+// its head poking back out of the corner of the mouth, having a look round
+function drawWormHead(ctx, m, peek) {
+  const M = m.g.mouth, out = peek.out;
+  if (out < 0.02) return;
+  const x0 = M.x + (m.face.mdx || 0) + peek.side * M.hw * 0.2, y0 = M.y + 4, pts = [];
+  for (let i = 0; i <= 7; i++) { const u = i / 7; pts.push([x0 + peek.side * 34 * out * u + Math.sin(u * 3 + m.t * 5) * 2, y0 + 10 * out * u - 26 * out * u * u]); }
+  strokeWorm(ctx, pts, 11, peek);
+}
+// a long, long worm pulled out of its mouth: down to the floor and piled up in loops there; once it
+// is all out it lies along the floor and wriggles off, its head first
+function drawLongWorm(ctx, m, W) {
+  const g = m.g, M = g.mouth, d = W.dir, fy = g.ground - 7;
+  const A = [M.x + d * 4, M.y + 6], C = [M.x + d * (M.hw + 80), M.y], F = [M.x + d * (M.hw + 46), fy], pts = [];
+  if (!W.free) {
+    let left = W.len;
+    pts.push(A);
+    for (let i = 1; i <= 12 && left > 0; i++) {
+      const u = i / 12, a = (1 - u) * (1 - u), b = 2 * u * (1 - u), cc = u * u, p = [a * A[0] + b * C[0] + cc * F[0], a * A[1] + b * C[1] + cc * F[1]];
+      left -= dist(p[0], p[1], pts[pts.length - 1][0], pts[pts.length - 1][1]);
+      pts.push(p);
+    }
+    for (let q = 6; q <= left; q += 6) pts.push([F[0] + d * (0.25 * q + 12 * Math.sin(q / 12)), fy - 8 * (1 - Math.cos(q / 12))]);
+  } else {
+    const x0 = F[0] + d * W.gone * 320;
+    for (let q = 0; q <= W.len; q += 7) pts.push([x0 + d * q * 0.55, fy - 3 + Math.sin(q / 14 - m.t * 9) * 6]);
+  }
+  if (pts.length > 1) strokeWorm(ctx, pts, 9, W.free ? { look: d } : null);
+}
+// the snail being sucked out of its shell: a yellow stretch from the shell to its lips, thinner at
+// the mouth, its far end coming in as it goes
+function drawSnailGoo(ctx, m, goo) {
+  const H = m.held, M = m.g.mouth;
+  if (!H) return;
+  const sz = H.size * (H.k || 1), sx = M.x + (H.dx || 0) - sz * 0.05, sy = M.y + (H.dy || 0) + sz * 0.13, ex = M.x + (m.face.mdx || 0), ey = M.y + 2;
+  const u = Math.pow(goo.k, 1.6), x0 = lerp(sx, ex, u), y0 = lerp(sy, ey, u), w0 = 17 * (1 - u * 0.6), w1 = 5;
+  const mx = (x0 + ex) / 2 + Math.sin(m.t * 20) * 3, my = (y0 + ey) / 2 + 8;
+  ctx.beginPath(); ctx.moveTo(x0 - w0, y0); ctx.quadraticCurveTo(mx - (w0 + w1) / 2, my, ex - w1, ey); ctx.lineTo(ex + w1, ey); ctx.quadraticCurveTo(mx + (w0 + w1) / 2, my, x0 + w0, y0); ctx.closePath();
+  ctx.fillStyle = '#f7cf5e'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#7a4a10'; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x0, y0, w0, 0, TAU); ctx.fill(); ctx.stroke();
+}
+// a slimy tongue: strings of slime hanging off it, getting longer
+function drawTongueSlime(ctx, m, sl) {
+  if (sl.n < 0.02) return;
+  const M = m.g.mouth, x = M.x + (m.face.mdx || 0), y = tongueTip(m) - 4;
+  ctx.lineCap = 'round';
+  [-0.45, 0.05, 0.5].forEach((u, i) => {
+    const sx = x + u * M.hw * 0.5, len = (14 + i * 8) * sl.n, sw = Math.sin(m.t * 4 + i) * 3 * sl.n;
+    ctx.beginPath(); ctx.moveTo(sx, y - 6 + Math.abs(u) * 6); ctx.quadraticCurveTo(sx + sw, y + len * 0.5, sx + sw * 1.5, y + len);
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(160,200,60,0.85)'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(sx + sw * 1.5, y + len, 3.5 + 1.5 * sl.n, 0, TAU); ctx.fillStyle = 'rgba(170,215,70,0.9)'; ctx.fill();
+  });
+}
+// a string of slime from its mouth to the blob in its hand, thinning as it stretches
+function drawGooString(ctx, m, goo) {
+  const H = m.held, M = m.g.mouth;
+  if (!H) return;
+  const ex = M.x + (H.dx || 0), ey = M.y + (H.dy || 0) - H.size * 0.22, w = 9 * goo.thick + 2;
+  ctx.lineCap = 'round';
+  [-1, 1].forEach(s => {
+    const x0 = M.x + s * M.hw * 0.25, y0 = M.y + 4, x1 = ex + s * 8, my = Math.max(y0, ey) + 24 * (1 - goo.thick) + 10;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo((x0 + x1) / 2, my, x1, ey);
+    ctx.lineWidth = w + 3; ctx.strokeStyle = '#3f7a10'; ctx.stroke();
+    ctx.lineWidth = w; ctx.strokeStyle = '#8ae02a'; ctx.stroke();
+  });
+}
+// a slime bubble blown from its lips, a drip hanging off the bottom
+function drawSlimeBubble(ctx, m, bub) {
+  if (bub.r < 0.02) return;
+  const M = m.g.mouth, r = bub.r * 64, x = M.x + 4, y = M.y + 4 - r * 0.15;
+  const gr = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.05, x, y, r);
+  gr.addColorStop(0, 'rgba(230,255,200,0.92)'); gr.addColorStop(0.6, 'rgba(150,230,60,0.75)'); gr.addColorStop(1, 'rgba(100,190,30,0.88)');
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fillStyle = gr; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#3f8a10'; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.beginPath(); ctx.ellipse(x - r * 0.38, y - r * 0.42, r * 0.18, r * 0.1, -0.7, 0, TAU); ctx.fill();
+  ctx.fillStyle = 'rgba(120,205,40,0.9)'; ctx.beginPath(); ctx.ellipse(x + r * 0.2, y + r * 0.98, 4, 7 + 4 * Math.sin(m.t * 3), 0, 0, TAU); ctx.fill();
+}
+// bubbles going up inside a jelly monster
+function drawInsideBubbles(ctx, m) {
+  const g = m.g, B = g.B, f = seeded(5);
+  ctx.clip(g.P);
+  for (let i = 0; i < 8; i++) {
+    const x = (f() * 2 - 1) * B.w * 0.75, sp = 30 + f() * 40, ph = f() * 400, r = 4 + f() * 6, y = B.h - ((m.t * sp + ph) % (B.h * 2 + 20));
+    ctx.beginPath(); ctx.arc(x + Math.sin(m.t * 3 + i) * 4, y, r, 0, TAU); ctx.fillStyle = 'rgba(220,255,190,0.35)'; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.stroke();
+  }
+}
+// cactus prickles stuck all round its mouth (n of them left)
+function drawPrickles(ctx, m, P) {
+  const M = m.g.mouth, x = M.x + (m.face.mdx || 0), y = M.y + 6;
+  for (let i = 0; i < P.n; i++) {
+    const a = (i / 5) * TAU + 0.3, px = x + Math.cos(a) * M.hw * 1.15, py = y + Math.sin(a) * M.hw * 0.72;
+    ctx.save(); ctx.translate(px, py); ctx.rotate(a);
+    ctx.beginPath(); ctx.moveTo(0, -3.6); ctx.lineTo(19, 0); ctx.lineTo(0, 3.6); ctx.closePath();
+    ctx.fillStyle = '#f2d24a'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#4a3a10'; ctx.stroke();
+    ctx.restore();
+  }
+}
+// where a flower grows out of its head: the first place along the top that is clear of its eyes and of
+// a horn, a crown, a tuft, a sprout, spikes or a curl in the middle (body space; the flower's head is 34 above)
+function flowerSpot(m) {
+  const g = m.g, B = g.B, busy = ['unicorn', 'crown', 'tuft', 'sprout', 'spikes'].indexOf(m.d.top) >= 0 || B.curl;
+  const at = x => ({ x, y: (g.F.topAt(x) || g.bodyTop) + 6 });
+  for (const x of busy ? [-0.4, 0.4, -0.72, 0.72] : [0, -0.4, 0.4, -0.72, 0.72]) {
+    const p = at(x * B.w);
+    if (g.eyes.every(e => dist(p.x, p.y - 34, e.x, e.y) > e.r + 22)) return p;
+  }
+  return at(-0.72 * B.w);
+}
+// a flower growing out of the top of its head
+function drawHeadFlower(ctx, m, F) {
+  if (F.k < 0.02) return;
+  const { x, y } = flowerSpot(m), k = F.k, tx = x + Math.sin(m.t * 2.5) * 5 * k, ty = y - 34 * k;
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x, y + 8); ctx.quadraticCurveTo(x - 2, y - 16 * k, tx, ty);
+  ctx.lineWidth = 8; ctx.strokeStyle = '#1f5a2a'; ctx.stroke(); ctx.lineWidth = 4; ctx.strokeStyle = '#4fb05a'; ctx.stroke();
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * TAU + m.t * 0.3;
+    ctx.save(); ctx.translate(tx + Math.cos(a) * 10 * k, ty + Math.sin(a) * 10 * k); ctx.rotate(a);
+    ctx.beginPath(); ctx.ellipse(0, 0, 8 * k, 4.5 * k, 0, 0, TAU); ctx.fillStyle = '#ffd020'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#7a5208'; ctx.stroke();
+    ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(tx, ty, 7 * k, 0, TAU); ctx.fillStyle = '#7a4a1a'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#3a2008'; ctx.stroke();
+}
+// a bump coming up on top of its head
+function drawBump(ctx, m, b) {
+  if (b.k < 0.02) return;
+  const y = m.g.bodyTop + 3, r = 15 * b.k;
+  ctx.beginPath(); ctx.arc(0, y - r * 0.55, r, Math.PI * 0.95, Math.PI * 2.05); ctx.closePath();
+  ctx.fillStyle = mix(m.pal.base, '#ff8a9a', 0.35); ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = m.pal.line; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.ellipse(-r * 0.3, y - r * 0.95, r * 0.25, r * 0.14, -0.4, 0, TAU); ctx.fill();
+}
+
+/* ---------- pictures made from the painted ones ---------- */
+// a round part cut out of a painted picture, its edge drawn back on (cx, cy, r in the picture's own pixels)
+function cutCircle(src, pic, cx, cy, r, edge) {
+  const box = ART[pic];
+  if (!box) return src;
+  const W = src.width, k = (W * 0.96) / Math.max(box[3], box[4]), X = W / 2 + (cx - box[3] / 2) * k, Y = W / 2 + (cy - box[4] / 2) * k, R = r * k;
+  const c = makeCanvas(W, W), g = c.getContext('2d');
+  g.save(); g.beginPath(); g.arc(X, Y, R, 0, TAU); g.clip(); g.drawImage(src, 0, 0); g.restore();
+  g.beginPath(); g.arc(X, Y, R, 0, TAU); g.lineWidth = Math.max(3, W * 0.022); g.strokeStyle = edge; g.stroke();
+  return c;
+}
+// the snail's shell with nobody in it, and the sunflower with every petal sneezed off
+function shellSprite(src) { return cutCircle(src, 'snail', 248, 132, 112, '#3a1a0a'); }
+function baldFlower(src) { return cutCircle(src, 'sunflower', 189, 192, 92, '#3a1a0a'); }
 
 /* ---------- src/ui.js ---------- */
 /* ui.js — the toddler-sized interface: round buttons with pictures, the pantry (tabs, food tiles,
