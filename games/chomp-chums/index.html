@@ -23,7 +23,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#8fd3f4;overscroll-beh
 <canvas id="bgc"></canvas>
 <canvas id="cc"></canvas>
 <div id="safe"></div>
-<!-- built from src/ by build.js (6579db465b) — edit the sources, not this file -->
+<!-- built from src/ by build.js (88c1e14b0f) — edit the sources, not this file -->
 <script>
 /* ---------- src/util.js ---------- */
 /* util.js — numbers, easing, seeded randomness, colours and path helpers shared by every module. */
@@ -3867,12 +3867,13 @@ function enterScreen(name, params) {
 /* ---------- src/screen_home.js ---------- */
 /* screen_home.js — Monster Town: the monsters a child has made stand in a row on the grass and
    watch the finger. Tap one to feed it. Tap the egg to hatch a new one. Hold a monster still for a
-   moment to show a bin for it. Swipe to see more when there are many. */
+   moment to show a bin for it; the bin asks a grown-up for the answer to a sum before the monster
+   goes. Swipe to see more when there are many. */
 
 SCREENS.home = {
   enter() {
     this.mons = Store.data.monsters.map(rec => new Monster(rec));
-    this.scroll = 0; this.vel = 0; this.drag = null; this.deleting = null; this.eggShake = 0; this.hatching = 0; this.leaving = null;
+    this.scroll = 0; this.vel = 0; this.drag = null; this.deleting = null; this.binBtn = null; this.gate = null; this.eggShake = 0; this.hatching = 0; this.leaving = null;
   },
   layout() {
     const { W, H, safe } = G, land = W > H;
@@ -3883,6 +3884,7 @@ SCREENS.home = {
     this.scale = clamp(Math.min(this.slot / 270, room / 340), 0.35, 1.05);
     this.mons.forEach(m => { m.scale = this.scale; });
     this.place();
+    if (this.gate) this.layoutGate();
   },
   count() { return this.mons.length + 1; },
   span() { return this.count() * this.slot; },
@@ -3910,12 +3912,56 @@ SCREENS.home = {
     this.eggShake = Math.max(0, this.eggShake - dt);
     if (!this.eggShake && Math.random() < dt * 0.35) { this.eggShake = 0.6; }
     if (this.hatching) { this.hatching += dt; if (this.hatching > 0.75) { this.hatching = 0; go('builder', { fresh: true }); } }
-    if (this.deleting) { const m = this.mons.find(x => x.rec.id === this.deleting); if (m) { m.pose.rot = Math.sin(G.t * 30) * 0.05; const b = this.buttons[0]; if (b) { b.x = m.x; b.y = m.y - m.g.height * m.scale - b.r * 0.6; } } }
+    if (this.deleting) { const m = this.mons.find(x => x.rec.id === this.deleting); if (m) { m.pose.rot = Math.sin(G.t * 30) * 0.05; const b = this.binBtn; if (b) { b.x = m.x; b.y = m.y - m.g.height * m.scale - b.r * 0.6; } } }
+    if (this.gate && this.gate.wrong) { this.gate.wrong -= dt; if (this.gate.wrong <= 0) this.cancelBin(); }
   },
   showBin(m) {
     this.deleting = m.rec.id; this.drag = null;
     SFX.play('boing', { f: 180 });
-    this.buttons = [button({ r: 34, icon: 'i_bin', col: '#ffffff', onTap: () => this.removeMon(m) })];
+    this.binBtn = button({ r: 34, icon: 'i_bin', col: '#ffffff', onTap: () => this.openGate(m) });
+    this.buttons = [this.binBtn];
+  },
+  /* The grown-up check: the answer to a sum, typed on number keys. The answer has two different
+     digits that are not next to each other on the keys, so a double tap or a mash of neighbouring
+     keys doesn't open it, and a wrong digit shuts it: a toddler tapping at random gets through
+     about one time in a hundred, after first holding a monster still and finding the bin. */
+  openGate(m) {
+    let a, b, ans;
+    do { a = randi(12, 89); b = randi(2, 9); ans = String(a + b); } while (ans[0] === ans[1] || this.keysTouch(+ans[0], +ans[1]));
+    this.gate = { m, a, b, ans, typed: '', wrong: 0 };
+    this.binBtn = null;
+    SFX.play('pop', { f: 500 });
+    this.layoutGate();
+  },
+  // are two digits' keys side by side (or corner to corner)? 1 2 3 / 4 5 6 / 7 8 9 / 0 under the 8
+  keysTouch(p, q) {
+    const at = d => (d ? [(d - 1) % 3, Math.floor((d - 1) / 3)] : [1, 3]), P = at(p), Q = at(q);
+    return Math.abs(P[0] - Q[0]) <= 1 && Math.abs(P[1] - Q[1]) <= 1;
+  },
+  layoutGate() {
+    const Q = this.gate, { W, H, safe } = G, land = W > H * 1.2;
+    const w = Math.min(W - safe.l - safe.r - 32, land ? 720 : 460), h = Math.min(H - safe.t - safe.b - 32, land ? 420 : 620);
+    const B = Q.box = { x: safe.l + (W - safe.l - safe.r - w) / 2, y: safe.t + (H - safe.t - safe.b - h) / 2, w, h };
+    Q.font = clamp(Math.min(w * (land ? 0.5 : 1), h) * 0.13, 24, 64);
+    // the words and the sum on the left (landscape) or at the top; the keys on the right or below
+    const kx = land ? B.x + w * 0.5 : B.x, kw = land ? w * 0.5 : w, ky = land ? B.y : B.y + h * 0.4, kh = land ? h : h * 0.6;
+    Q.textX = land ? B.x + w * 0.25 : B.x + w / 2;
+    Q.nameY = B.y + h * (land ? 0.2 : 0.08); Q.sumY = B.y + h * (land ? 0.47 : 0.2); Q.ansY = B.y + h * (land ? 0.74 : 0.31);
+    const r = Math.max(22, Math.min(kw / 3, kh / 4) * 0.38);
+    this.buttons = [];
+    for (let d = 0; d <= 9; d++) {
+      const i = d ? d - 1 : 10, x = kx + kw * ((i % 3) + 0.5) / 3, y = ky + kh * (Math.floor(i / 3) + 0.5) / 4;
+      this.buttons.push(button({ x, y, r, col: '#fff1d6', onTap: () => this.typeDigit(d), draw: (ctx, rr) => drawText(ctx, String(d), 0, rr * 0.05, rr * 1.15, UI_LINE, '#fff1d6') }));
+    }
+    const cr = Math.max(22, r * 0.75);
+    this.buttons.push(button({ x: B.x + cr + 12, y: B.y + cr + 12, r: cr, icon: 'i_back', col: '#ffcf4a', onTap: () => this.cancelBin() }));
+  },
+  typeDigit(d) {
+    const Q = this.gate;
+    if (!Q || Q.wrong) return;
+    Q.typed += d;
+    if (Q.ans.indexOf(Q.typed) !== 0) { Q.wrong = 0.6; SFX.play('boing', { f: 160 }); return; }   // wrong: it shakes and shuts
+    if (Q.typed === Q.ans) this.removeMon(Q.m);
   },
   removeMon(m) {
     const [x, y] = m.centerPos();
@@ -3926,7 +3972,7 @@ SCREENS.home = {
     this.mons = this.mons.filter(x => x !== m);
     this.cancelBin();
   },
-  cancelBin() { const m = this.mons.find(x => x.rec.id === this.deleting); if (m) m.pose.rot = 0; this.deleting = null; this.buttons = []; },
+  cancelBin() { const m = this.mons.find(x => x.rec.id === this.deleting); if (m) m.pose.rot = 0; this.deleting = null; this.binBtn = null; this.gate = null; this.buttons = []; },
   hitItem(x, y) {
     if (dist(x, y, this.itemX(0), this.ground - this.slot * 0.32) < this.slot * 0.36) return { egg: true };
     for (const m of this.mons) if (m.hit(x, y, 30)) return { mon: m };
@@ -3934,6 +3980,7 @@ SCREENS.home = {
   },
   down(p) {
     this.finger = { x: p.x, y: p.y };
+    if (this.gate) { const B = this.gate.box; if (p.x < B.x || p.x > B.x + B.w || p.y < B.y || p.y > B.y + B.h) this.cancelBin(); return; }
     if (this.deleting) { this.cancelBin(); return; }
     const h = this.hitItem(p.x, p.y);
     this.drag = { x0: p.x, last: p.x, t0: G.t, moved: false, mon: h && h.mon, egg: h && h.egg, lt: G.t };
@@ -3980,6 +4027,30 @@ SCREENS.home = {
       drawText(ctx, m.rec.name, m.x, this.ground + Math.min(30, (H - this.ground) * 0.45), clamp(this.slot * 0.13, 16, 28), '#ffffff');
     });
     Parts.draw(ctx, 1);
+    if (this.gate) this.drawGate(ctx);
+  },
+  // the grown-up check's card: the bin and the monster's name, the sum, the answer so far (the keys
+  // are buttons, drawn over it)
+  drawGate(ctx) {
+    const Q = this.gate, B = Q.box, f = Q.font, shake = Q.wrong ? Math.sin(G.t * 50) * f * 0.15 : 0;
+    ctx.save();
+    ctx.fillStyle = 'rgba(40,20,60,0.45)'; ctx.fillRect(0, 0, G.W, G.H);
+    ctx.fillStyle = 'rgba(40,20,60,0.25)'; ctx.beginPath(); rrect(ctx, B.x + 4, B.y + 8, B.w, B.h, 26); ctx.fill();
+    ctx.beginPath(); rrect(ctx, B.x, B.y, B.w, B.h, 26);
+    const g = ctx.createLinearGradient(0, B.y, 0, B.y + B.h); g.addColorStop(0, '#fff8ec'); g.addColorStop(1, '#f6e6cc');
+    ctx.fillStyle = g; ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = UI_LINE; ctx.stroke();
+    ctx.font = 'bold ' + Math.round(f * 0.55) + 'px ' + FONT;
+    const name = Q.m.rec.name, nw = ctx.measureText(name).width + f * 0.95;
+    Art.blit(ctx, 'i_bin', Q.textX - nw / 2 + f * 0.35, Q.nameY, f * 0.75);
+    drawText(ctx, name, Q.textX + f * 0.45, Q.nameY, f * 0.55, '#ffffff');
+    drawText(ctx, Q.a + ' + ' + Q.b + ' =', Q.textX + shake, Q.sumY, f, '#ffd84a');
+    for (let i = 0; i < 2; i++) {
+      const s = f * 1.15, x = Q.textX + shake + (i - 0.5) * s * 1.2;
+      ctx.beginPath(); rrect(ctx, x - s / 2, Q.ansY - s / 2, s, s, s * 0.2);
+      ctx.fillStyle = Q.wrong ? '#ffd0d0' : '#ffffff'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = UI_LINE; ctx.stroke();
+      if (Q.typed[i]) drawText(ctx, Q.typed[i], x, Q.ansY + s * 0.04, f * 0.9, Q.wrong ? '#e8352e' : UI_LINE, '#ffffff');
+    }
+    ctx.restore();
   },
   drawTitle(ctx) {
     const text = 'Chomp Chums', size = clamp(Math.min(G.W / 9, G.H / 7), 34, 88), cols = ['#ff5f8f', '#ffd84a', '#69c95c', '#4aa7f2', '#ff9b3d', '#9a6be2'];
@@ -4959,6 +5030,11 @@ function sendDish(st, S) { SFX.play('sparkle'); go('feed', { id: st.rec.id, dish
 function dishSprite(draw, px = 256) { const c = makeCanvas(px, px); draw(c.getContext('2d'), px); return c; }
 
 /* =================== the chopping board: swipe to slice =================== */
+// A piece of food is the part of its picture inside a convex polygon, in the picture's own units (a
+// 256 square). A swipe across a piece's food cuts that piece along the swipe: the two halves slide
+// apart and tip a little, each showing the inside of the food and an outline along its cut, so they
+// lie on the board as separate pieces. A piece's pivot P (its middle) is drawn at (ox, oy).
+const CHOP_U = 256;
 SCREENS.chop = {
   enter(p) {
     this.rec = Store.get(p.id) || Store.data.monsters[0];
@@ -4966,50 +5042,76 @@ SCREENS.chop = {
     this.pieces = []; this.foods = []; this.held = null; this.knife = null; this.ready = false;
   },
   layout() {
-    const w = prepLayout(this, { bin: true });
+    const w = prepLayout(this, { bin: true }), old = this.board, oldSize = this.size;
     const bw = Math.min(w.w * 0.92, w.h * 1.35), bh = Math.min(w.h * 0.86, bw * 0.72);
-    this.board = { x: w.cx - bw / 2, y: w.cy - bh / 2 + 10, w: bw, h: bh };
+    const b = this.board = { x: w.cx - bw / 2, y: w.cy - bh / 2 + 10, w: bw, h: bh };
     this.size = Math.min(bw, bh) * 0.62;
+    // the screen turned: the pieces keep their places on the board, drawn afresh at their new size
+    if (old && this.pieces.length) {
+      const f = this.size / oldSize;
+      this.pieces.forEach(pc => { pc.ox = b.x + b.w / 2 + (pc.ox - old.x - old.w / 2) * f; pc.oy = b.y + b.h / 2 + (pc.oy - old.y - old.h / 2) * f; pc.k *= f; pieceImage(pc); });
+    }
   },
   clear() { this.pieces = []; this.foods = []; setReady(this, false); SFX.play('swish'); },
-  // put a whole food on the board: one piece, a square polygon over its picture
-  add(id, x, y) {
+  // put a whole food on the board: one piece, the whole square of its picture
+  add(id) {
     if (this.foods.length >= 3) { this.pieces = this.pieces.filter(pc => pc.id !== this.foods[0]); this.foods.shift(); }
-    const spr = Art.sprite(FOODS[id].pic, 256), b = this.board, n = this.foods.length;
-    const s = this.size * (n ? 0.8 : 1);
+    const b = this.board, n = this.foods.length, s = this.size * (n ? 0.8 : 1);
     const px = n === 0 ? b.x + b.w / 2 : b.x + b.w * (n === 1 ? 0.27 : 0.73), py = b.y + b.h * 0.5;
     this.foods.push(id);
-    const k = s / 256;
-    this.pieces.push({ id, spr, k, x: px - s / 2, y: py - s / 2, poly: [[0, 0], [256, 0], [256, 256], [0, 256]], cuts: [], drop: 1 });
+    const pc = chopPiece(id, [[0, 0], [CHOP_U, 0], [CHOP_U, CHOP_U], [0, CHOP_U]], [], px, py, s / CHOP_U, 0);
+    pc.drop = 1;
+    this.pieces.push(pc);
     SFX.play('plop'); Say.say(FOODS[id].name);
   },
-  // the piece under a screen point, in its picture's own coordinates
-  local(pc, x, y) { return [(x - pc.x) / pc.k, (y - pc.y) / pc.k]; },
-  cutAll(ax, ay, bx, by) {
-    let cut = false;
-    const next = [];
-    this.pieces.forEach(pc => {
-      const A = this.local(pc, ax, ay), B = this.local(pc, bx, by);
-      const halves = splitPoly(pc.poly, A, B);
-      if (!halves || this.pieces.length > 40 || polyArea(halves[0]) < 300 || polyArea(halves[1]) < 300 || !polyHasPaint(pc, halves[0]) || !polyHasPaint(pc, halves[1])) { next.push(pc); return; }
-      cut = true;
-      const nx = -(B[1] - A[1]), ny = B[0] - A[0], nl = Math.hypot(nx, ny) || 1;
-      halves.forEach((poly, i) => {
-        const s = i ? 1 : -1;
-        next.push({ id: pc.id, spr: pc.spr, k: pc.k, x: pc.x, y: pc.y, poly, cuts: pc.cuts.concat([[A, B]]), push: { x: (s * nx / nl) * 16, y: (s * ny / nl) * 16, t: 0 } });
-      });
-      const F = FOODS[pc.id], mx = (ax + bx) / 2, my = (ay + by) / 2;
-      Parts.burst('drop', mx, my, 4, { v0: 60, v1: 160, g: 900, sizeR: [3, 5], lifeR: [0.4, 0.7], col: F.inside, floor: this.board.y + this.board.h });
+  // the blade is at (x, y): note, in each piece's own picture, the first and the last food it has
+  // touched; once it leaves the piece, cut from the one to the other (gaps in a bunch of grapes, or
+  // round a banana's curve, are all one cut)
+  stroke(x, y) {
+    this.pieces.slice().forEach(pc => {
+      if (this.pieces.indexOf(pc) < 0) return;
+      const [u, v] = pieceLocal(pc, x, y), on = pieceHit(pc, u, v);
+      if (on === 2) { const p = [u, v, x, y]; if (!pc.inA) pc.inA = p; pc.inB = p; }
+      else if (on === 0 && pc.inA) this.endCut(pc);
     });
-    if (cut) { this.pieces = next; SFX.play('chop'); setReady(this, true); }
+  },
+  // the blade left a piece (or the finger lifted on it): cut along the way it went, if far enough
+  endCut(pc) {
+    const A = pc.inA, B = pc.inB;
+    pc.inA = pc.inB = null;
+    if (A && Math.hypot(B[0] - A[0], B[1] - A[1]) * pc.k >= Math.max(20, this.size * 0.1)) this.cut(pc, A, B);
+  },
+  // cut one piece along the line through A and B ([u, v] in its picture, then [x, y] on screen), if
+  // both halves have food in them
+  cut(pc, a, b) {
+    const A = [a[0], a[1]], B = [b[0], b[1]];
+    const halves = this.pieces.length < 40 && splitPoly(pc.poly, A, B);
+    if (!halves || halves.some(h => polyArea(h) < 300 || !polyHasPaint(pc.id, h))) return;
+    const c = Math.cos(pc.rot), s = Math.sin(pc.rot), nx = A[1] - B[1], ny = B[0] - A[0], nl = Math.hypot(nx, ny) || 1;
+    const push = this.size * (0.03 + 0.05 * Math.sqrt(polyArea(pc.poly)) / CHOP_U);
+    const kids = halves.map(poly => {
+      const P = polyCentroid(poly), du = P[0] - pc.P[0], dv = P[1] - pc.P[1];
+      const kid = chopPiece(pc.id, poly, pc.cuts.concat([[A, B]]), pc.ox + (du * c - dv * s) * pc.k, pc.oy + (du * s + dv * c) * pc.k, pc.k, pc.rot);
+      // each half slides away from the cut on its own side, and tips a little
+      const away = (nx * (P[0] - A[0]) + ny * (P[1] - A[1]) > 0 ? push : -push) / nl;
+      kid.slide = { x: (nx * c - ny * s) * away, y: (nx * s + ny * c) * away, r: rand(-0.12, 0.12), t: 0 };
+      kid.drop = pc.drop;   // a food cut as it lands carries on landing
+      return kid;
+    });
+    this.pieces.splice(this.pieces.indexOf(pc), 1, kids[0], kids[1]);
+    const F = FOODS[pc.id], mx = (a[2] + b[2]) / 2, my = (a[3] + b[3]) / 2;
+    Parts.burst('drop', mx, my, 4, { v0: 60, v1: 160, g: 900, sizeR: [3, 5], lifeR: [0.4, 0.7], col: F.inside, floor: this.board.y + this.board.h });
+    SFX.play('chop'); setReady(this, true);
   },
   serve() {
     if (!this.pieces.length) return;
-    const ids = this.foods.slice(), b = this.board;
+    const ids = this.foods.slice();
     // the chopped pieces, arranged as they lie on the board
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    this.pieces.forEach(pc => { const r = Math.sqrt(polyArea(pc.poly)) * pc.k * 0.6; x0 = Math.min(x0, pc.ox - r); x1 = Math.max(x1, pc.ox + r); y0 = Math.min(y0, pc.oy - r); y1 = Math.max(y1, pc.oy + r); });
     const spr = dishSprite((g, px) => {
-      const k = px / Math.max(b.w, b.h) * 1.15;
-      g.translate(px / 2, px / 2); g.scale(k, k); g.translate(-(b.x + b.w / 2), -(b.y + b.h / 2));
+      const k = px * 0.96 / Math.max(x1 - x0, y1 - y0);
+      g.translate(px / 2, px / 2); g.scale(k, k); g.translate(-(x0 + x1) / 2, -(y0 + y1) / 2);
       this.pieces.forEach(pc => drawPiece(g, pc));
     });
     const S = servingOfParts(ids, 'chopped', spr);
@@ -5018,33 +5120,40 @@ SCREENS.chop = {
   down(p) {
     if (pickerDown(this, p)) return;
     const b = this.board;
-    if (p.x > b.x && p.x < b.x + b.w && p.y > b.y && p.y < b.y + b.h) { this.knife = { ptr: p.id, x: p.x, y: p.y, last: [p.x, p.y], inside: {} }; SFX.play('knife'); }
+    if (p.x > b.x && p.x < b.x + b.w && p.y > b.y && p.y < b.y + b.h) {
+      this.knife = { ptr: p.id, x: p.x, y: p.y, last: [p.x, p.y] };
+      this.pieces.forEach(pc => { pc.inA = pc.inB = null; });
+      this.stroke(p.x, p.y);
+      SFX.play('knife');
+    }
   },
   move(p) {
     if (pickerMove(this, p)) return;
     const K = this.knife;
     if (!K || K.ptr !== p.id) return;
-    const [lx, ly] = K.last;
+    const [lx, ly] = K.last, d = dist(lx, ly, p.x, p.y);
     K.dx = p.x - lx; K.dy = p.y - ly; K.x = p.x; K.y = p.y;
-    if (dist(lx, ly, p.x, p.y) > 3) {
-      // cut where the stroke has passed right through: track each piece's entry and exit
-      this.pieces.slice().forEach(pc => {
-        const key = this.pieces.indexOf(pc), [u, v] = this.local(pc, p.x, p.y), inside = pointInPoly(pc.poly, u, v);
-        if (inside && !pc.entered) pc.entered = [lx, ly];
-        if (!inside && pc.entered) { const e = pc.entered; pc.entered = null; if (dist(e[0], e[1], p.x, p.y) > 30) this.cutAll(e[0], e[1], p.x, p.y); }
-      });
+    if (d > 3) {
+      // follow the blade in small steps, so a quick swipe cannot jump over a thin piece
+      const n = Math.ceil(d / 8);
+      for (let i = 1; i <= n; i++) this.stroke(lx + (p.x - lx) * i / n, ly + (p.y - ly) * i / n);
       K.last = [p.x, p.y];
     }
   },
   up(p) {
     const H = this.held;
     if (H && H.ptr === p.id) { this.held = null; this.add(H.id); return; }
-    if (this.knife && this.knife.ptr === p.id) { this.pieces.forEach(pc => { pc.entered = null; }); this.knife = null; }
+    if (this.knife && this.knife.ptr === p.id) { this.pieces.slice().forEach(pc => this.endCut(pc)); this.knife = null; }
   },
   update(dt) {
     this.pantry.update(dt);
+    const b = this.board, m = this.size * 0.12;
     this.pieces.forEach(pc => {
-      if (pc.push && pc.push.t < 1) { const d = dt / 0.18; pc.push.t += d; pc.x += pc.push.x * d; pc.y += pc.push.y * d; }
+      const S = pc.slide;
+      if (S && S.t < 1) {
+        const was = Ease.out(S.t); S.t = Math.min(1, S.t + dt / 0.25); const d = Ease.out(S.t) - was;
+        pc.ox = clamp(pc.ox + S.x * d, b.x + m, b.x + b.w - m); pc.oy = clamp(pc.oy + S.y * d, b.y + m, b.y + b.h - m); pc.rot += S.r * d;
+      }
       if (pc.drop > 0) pc.drop = Math.max(0, pc.drop - dt * 4);
     });
   },
@@ -5080,19 +5189,72 @@ SCREENS.chop = {
     }
   },
 };
+// a piece of food: poly (picture units) of food id's picture, with these cuts, its middle at (ox, oy)
+function chopPiece(id, poly, cuts, ox, oy, k, rot) {
+  const pc = { id, poly, cuts, P: polyCentroid(poly), ox, oy, k, rot, drop: 0, slide: null, inA: null, inB: null };
+  pieceImage(pc);
+  return pc;
+}
+// a piece's picture, made once at the size it shows: the food inside its polygon, the inside of the
+// food along each cut with a dark edge like the painted outline, and a soft shadow underneath. The
+// cut marks are painted only over the food, never over the empty corners of the picture.
+function pieceImage(pc) {
+  let x0 = CHOP_U, y0 = CHOP_U, x1 = 0, y1 = 0;
+  pc.poly.forEach(([u, v]) => { x0 = Math.min(x0, u); y0 = Math.min(y0, v); x1 = Math.max(x1, u); y1 = Math.max(y1, v); });
+  x0 -= 8; y0 -= 8; x1 += 8; y1 += 8;
+  const s = Math.min(pc.k * G.dpr, 640 / Math.max(x1 - x0, y1 - y0)), W = Math.ceil((x1 - x0) * s), H = Math.ceil((y1 - y0) * s);
+  // the food is painted on one scratch canvas, kept for the next piece; only the finished picture stays
+  const food = _pieceScratch || (_pieceScratch = makeCanvas(1, 1));
+  food.width = W; food.height = H;
+  const g = food.getContext('2d');
+  g.setTransform(s, 0, 0, s, -x0 * s, -y0 * s);
+  g.beginPath(); pc.poly.forEach(([u, v], i) => (i ? g.lineTo(u, v) : g.moveTo(u, v))); g.closePath(); g.clip();
+  g.imageSmoothingQuality = 'high';
+  Art.draw(g, FOODS[pc.id].pic, CHOP_U / 2, CHOP_U / 2, CHOP_U * 0.96);   // laid out as in Art.sprite, straight from the sheet
+  g.globalCompositeOperation = 'source-atop';
+  const along = ([A, B], width, col) => {
+    const dx = B[0] - A[0], dy = B[1] - A[1], l = Math.hypot(dx, dy) || 1;
+    g.beginPath(); g.moveTo(A[0] - dx / l * 400, A[1] - dy / l * 400); g.lineTo(B[0] + dx / l * 400, B[1] + dy / l * 400);
+    g.lineWidth = width; g.strokeStyle = col; g.stroke();
+  };
+  pc.cuts.forEach(cut => along(cut, 20, FOODS[pc.id].inside));
+  pc.cuts.forEach(cut => along(cut, 8, '#3a2416'));
+  const img = makeCanvas(W, H), o = img.getContext('2d');
+  o.drawImage(food, 2 * s, 5 * s);
+  o.globalCompositeOperation = 'source-in'; o.fillStyle = 'rgba(70,35,15,0.3)'; o.fillRect(0, 0, W, H);
+  o.globalCompositeOperation = 'source-over'; o.drawImage(food, 0, 0);
+  pc.img = img; pc.box = [x0, y0, x1 - x0, y1 - y0];
+}
+let _pieceScratch = null;
 function drawPiece(ctx, pc) {
-  const s = 256 * pc.k;
+  const [x0, y0, w, h] = pc.box;
   ctx.save();
-  ctx.translate(pc.x, pc.y - (pc.drop || 0) * 60);
-  ctx.save();
-  ctx.beginPath(); pc.poly.forEach(([u, v], i) => (i ? ctx.lineTo(u * pc.k, v * pc.k) : ctx.moveTo(u * pc.k, v * pc.k))); ctx.closePath(); ctx.clip();
-  ctx.drawImage(pc.spr, 0, 0, s, s);
-  // the cut faces show the inside
-  const col = FOODS[pc.id].inside;
-  ctx.lineWidth = Math.max(5, s * 0.035); ctx.strokeStyle = col; ctx.lineCap = 'round';
-  pc.cuts.forEach(([A, B]) => { const dx = B[0] - A[0], dy = B[1] - A[1], l = Math.hypot(dx, dy) || 1; ctx.beginPath(); ctx.moveTo((A[0] - dx / l * 400) * pc.k, (A[1] - dy / l * 400) * pc.k); ctx.lineTo((B[0] + dx / l * 400) * pc.k, (B[1] + dy / l * 400) * pc.k); ctx.stroke(); });
+  ctx.translate(pc.ox, pc.oy - pc.drop * 60); if (pc.rot) ctx.rotate(pc.rot); ctx.scale(pc.k, pc.k);
+  ctx.drawImage(pc.img, x0 - pc.P[0], y0 - pc.P[1], w, h);
   ctx.restore();
-  ctx.restore();
+}
+// a screen point in a piece's picture units
+function pieceLocal(pc, x, y) {
+  const dx = (x - pc.ox) / pc.k, dy = (y - pc.oy + pc.drop * 60) / pc.k, c = Math.cos(pc.rot), s = Math.sin(pc.rot);
+  return [pc.P[0] + dx * c + dy * s, pc.P[1] - dx * s + dy * c];
+}
+// where a point (in a piece's picture units) is: 0 off the piece, 1 on it but not on its food, 2 on its food
+function pieceHit(pc, u, v) {
+  if (u < 0 || v < 0 || u >= CHOP_U || v >= CHOP_U || !pointInPoly(pc.poly, u, v)) return 0;
+  const a = foodAlpha(pc.id);
+  return !a || a[((v | 0) * CHOP_U + (u | 0)) * 4 + 3] > 60 ? 2 : 1;
+}
+// how see-through a food's picture is, at 256 pixels: where a knife meets food, and whether a finger
+// is on a topping or on the see-through corner of its picture. The last few foods' are kept. Where
+// the pictures can't be read back (served from another address), null: the whole picture counts.
+const _foodAlpha = new Map();
+function foodAlpha(id) {
+  if (_foodAlpha.has(id)) return _foodAlpha.get(id);
+  let a = null;
+  try { a = Art.sprite(FOODS[id].pic, CHOP_U).getContext('2d').getImageData(0, 0, CHOP_U, CHOP_U).data; } catch (e) {}
+  _foodAlpha.set(id, a);
+  if (_foodAlpha.size > 24) _foodAlpha.delete(_foodAlpha.keys().next().value);
+  return a;
 }
 // split a convex polygon by the line through a and b; null if the line misses it
 function splitPoly(poly, a, b) {
@@ -5110,14 +5272,29 @@ function pointInPoly(poly, x, y) {
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) if ((poly[i][1] > y) !== (poly[j][1] > y) && x < ((poly[j][0] - poly[i][0]) * (y - poly[i][1])) / (poly[j][1] - poly[i][1]) + poly[i][0]) c = !c;
   return c;
 }
-// does this part of the picture have any of the food in it (not just empty margin)?
-function polyHasPaint(pc, poly) {
-  if (!pc.spr._alpha) { const g = pc.spr.getContext('2d'); pc.spr._alpha = g.getImageData(0, 0, 256, 256).data; }
-  const d = pc.spr._alpha;
+// does this part of a food's picture have any of the food in it (not just empty margin)?
+function polyHasPaint(id, poly) {
+  const d = foodAlpha(id);
+  if (!d) return true;
   let n = 0;
-  let x0 = 256, y0 = 256, x1 = 0, y1 = 0; poly.forEach(([u, v]) => { x0 = Math.min(x0, u); y0 = Math.min(y0, v); x1 = Math.max(x1, u); y1 = Math.max(y1, v); });
-  for (let y = Math.max(0, y0 | 0); y < Math.min(256, y1); y += 6) for (let x = Math.max(0, x0 | 0); x < Math.min(256, x1); x += 6) if (pointInPoly(poly, x, y) && d[((y | 0) * 256 + (x | 0)) * 4 + 3] > 60 && ++n > 6) return true;
+  let x0 = CHOP_U, y0 = CHOP_U, x1 = 0, y1 = 0; poly.forEach(([u, v]) => { x0 = Math.min(x0, u); y0 = Math.min(y0, v); x1 = Math.max(x1, u); y1 = Math.max(y1, v); });
+  for (let y = Math.max(0, y0 | 0); y < Math.min(CHOP_U, y1); y += 6) for (let x = Math.max(0, x0 | 0); x < Math.min(CHOP_U, x1); x += 6) if (pointInPoly(poly, x, y) && d[((y | 0) * CHOP_U + (x | 0)) * 4 + 3] > 60 && ++n > 6) return true;
   return false;
+}
+function polyCentroid(poly) {
+  let a = 0, x = 0, y = 0;
+  for (let i = 0; i < poly.length; i++) { const p = poly[i], q = poly[(i + 1) % poly.length], c = p[0] * q[1] - q[0] * p[1]; a += c; x += (p[0] + q[0]) * c; y += (p[1] + q[1]) * c; }
+  return Math.abs(a) < 1e-6 ? poly[0].slice() : [x / (3 * a), y / (3 * a)];
+}
+// the point of a polygon's outline nearest to (x, y)
+function nearestOnPoly(poly, x, y) {
+  let best = null, bd = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length], dx = q[0] - p[0], dy = q[1] - p[1];
+    const t = clamp(((x - p[0]) * dx + (y - p[1]) * dy) / (dx * dx + dy * dy || 1), 0, 1), px = p[0] + dx * t, py = p[1] + dy * t, d = dist(x, y, px, py);
+    if (d < bd) { bd = d; best = [px, py]; }
+  }
+  return best;
 }
 // a serving made of several foods
 function servingOfParts(ids, kind, spr, extra = {}) {
@@ -5373,8 +5550,9 @@ function drawSoupBowl(g, cx, cy, r, col, ids) {
 
 /* ---------- src/stations_build.js ---------- */
 /* stations_build.js — building food: the burger bar (layers dropped onto a wobbly stack), the
-   pizza (sauce, cheese, toppings, into the oven, then the cutter) and the dessert bar (a cone, a
-   sundae glass, a cupcake or a cake, piled with scoops and toppings). */
+   pizza (sauce, then cheese and toppings in any order, into the oven, then the cutter) and the
+   dessert bar (a cone, a sundae glass, a cupcake or a cake, piled with scoops and toppings that a
+   finger can move about). */
 
 /* =================== burger bar =================== */
 const BURGER_LAYERS = ['b_patty', 'b_cheese', 'b_lettuce', 'b_tomato', 'b_onion', 'b_pickles', 'b_bacon', 'b_egg', 'b_ketchup', 'b_mustard', 'b_jalapeno', 'b_pineapple', 'b_avocado', 'b_chicken', 'b_buntop'];
@@ -5488,7 +5666,8 @@ SCREENS.pizza = {
   enter(p) {
     this.rec = Store.get(p.id) || Store.data.monsters[0];
     this.pantry = this.pantry || new Pantry({ lists: [{ icon: 'pizza', ids: PIZZA_PICKS }] });
-    this.sauce = 0; this.sauceOn = false; this.cheese = []; this.tops = []; this.baked = false; this.bake = 0; this.cuts = []; this.cutAnim = null; this.ready = false; this.held = null;
+    // tops: cheese shreds and toppings together, in the order they went on, so the last lies on top
+    this.sauce = 0; this.sauceOn = false; this.tops = []; this.baked = false; this.bake = 0; this.cuts = []; this.cutAnim = null; this.ready = false; this.held = null;
   },
   layout() {
     const w = prepLayout(this, { bin: true });
@@ -5498,7 +5677,8 @@ SCREENS.pizza = {
     this.oven = { x: w.x1 - ov * 0.52, y: w.cy, s: ov };
     this.ovenBtn = { x: this.oven.x, y: this.oven.y, r: ov * 0.5 };
   },
-  clear() { this.sauce = 0; this.sauceOn = false; this.cheese = []; this.tops = []; this.baked = false; this.bake = 0; this.cuts = []; this.cutAnim = null; setReady(this, false); SFX.play('swish'); },
+  clear() { this.sauce = 0; this.sauceOn = false; this.tops = []; this.baked = false; this.bake = 0; this.cuts = []; this.cutAnim = null; setReady(this, false); SFX.play('swish'); },
+  hasCheese() { return this.tops.some(t => t.cheese); },
   add(id, x, y) {
     if (this.bake) return;
     if (this.baked) { this.clear(); }
@@ -5506,7 +5686,7 @@ SCREENS.pizza = {
     const R = this.R;
     if (id === 'p_sauce') { if (!this.sauceOn) { this.sauceOn = true; SFX.play('squish'); } return; }
     if (id === 'p_cheese') {
-      for (let i = 0; i < 40; i++) { const a = rand(TAU), r = Math.sqrt(Math.random()) * R * 0.78; this.cheese.push({ x: Math.cos(a) * r, y: Math.sin(a) * r, rot: rand(TAU), l: rand(8, 16), d: rand(0, 0.4), t: 0 }); }
+      for (let i = 0; i < 40; i++) { const a = rand(TAU), r = Math.sqrt(Math.random()) * R * 0.78; this.tops.push({ cheese: true, x: Math.cos(a) * r, y: Math.sin(a) * r, rot: rand(TAU), l: rand(8, 16), d: rand(0, 0.4), t: 0 }); }
       SFX.play('crinkle');
       return;
     }
@@ -5522,7 +5702,7 @@ SCREENS.pizza = {
     setReady(this, false);
   },
   startBake() {
-    if (this.bake || this.baked || (!this.sauceOn && !this.cheese.length && !this.tops.length)) { if (!this.bake && !this.baked) SFX.play('boing', { f: 200 }); return; }
+    if (this.bake || this.baked || (!this.sauceOn && !this.tops.length)) { if (!this.bake && !this.baked) SFX.play('boing', { f: 200 }); return; }
     this.bake = 0.001; SFX.play('whoosh'); SFX.play('fire', { dur: 2.4 }); Say.say('into the oven');
   },
   cut() {
@@ -5531,9 +5711,9 @@ SCREENS.pizza = {
     SFX.play('knife');
   },
   serve() {
-    const ids = ['p_crust'].concat(this.sauceOn ? ['p_sauce'] : [], this.cheese.length ? ['p_cheese'] : [], this.tops.map(t => t.id).filter((id, i, a) => a.indexOf(id) === i));
+    const cheese = this.hasCheese(), ids = ['p_crust'].concat(this.sauceOn ? ['p_sauce'] : [], cheese ? ['p_cheese'] : [], this.tops.filter(t => !t.cheese).map(t => t.id).filter((id, i, a) => a.indexOf(id) === i));
     const spr = dishSprite((g, px) => { g.translate(px / 2, px / 2); const k = px * 0.47 / this.R; g.scale(k, k); this.drawPizza(g, 0, 0, 1); });
-    const S = servingOfParts(ids, 'pizza', spr, { cook: this.baked ? ['bake'] : [], fx: this.cheese.length ? ['cheesy'] : [], name: 'pizza' });
+    const S = servingOfParts(ids, 'pizza', spr, { cook: this.baked ? ['bake'] : [], fx: cheese ? ['cheesy'] : [], name: 'pizza' });
     sendDish(this, S);
   },
   down(p) {
@@ -5551,7 +5731,6 @@ SCREENS.pizza = {
   update(dt) {
     this.pantry.update(dt);
     if (this.sauceOn && this.sauce < 1) this.sauce = Math.min(1, this.sauce + dt * 1.6);
-    this.cheese.forEach(c => { c.t += dt; });
     this.tops.forEach(t => { t.t += dt; });
     if (this.bake) {
       this.bake += dt;
@@ -5576,19 +5755,21 @@ SCREENS.pizza = {
       ctx.beginPath(); blobPath(ctx, 0, 0, R * 0.84 * Ease.out(this.sauce), R * 0.84 * Ease.out(this.sauce), 14, 0.06, 5);
       ctx.fillStyle = b ? '#c02a14' : '#e0381e'; ctx.fill();
     }
-    // cheese: shreds that melt in the oven
-    if (this.cheese.length) {
-      if (b) {
-        ctx.beginPath(); blobPath(ctx, 0, 0, R * 0.8, R * 0.8, 16, 0.08, 9); ctx.fillStyle = '#ffd24a'; ctx.fill();
-        ctx.fillStyle = 'rgba(200,110,30,0.45)'; const f = seeded(4); for (let i = 0; i < 16; i++) { ctx.beginPath(); ctx.ellipse((f() - 0.5) * R * 1.3, (f() - 0.5) * R * 1.3, 5 + f() * 6, 4 + f() * 4, f(), 0, TAU); ctx.fill(); }
-      } else this.cheese.forEach(c => { const u = clamp((c.t - c.d) / 0.3, 0, 1); if (!u) return; ctx.save(); ctx.translate(c.x, c.y - (1 - u) * 60); ctx.rotate(c.rot); ctx.fillStyle = '#ffe06a'; ctx.strokeStyle = '#d8a018'; ctx.lineWidth = 1.5; ctx.beginPath(); rrect(ctx, -c.l / 2, -3, c.l, 6, 3); ctx.fill(); ctx.stroke(); ctx.restore(); });
-    }
-    this.tops.forEach(t => {
-      const u = clamp((t.t - t.d) / 0.35, 0, 1); if (!u) return;
+    // cheese and toppings in the order they went on: cheese shreds lie over whatever came before them,
+    // and in the oven each run of shreds melts together into one layer over what is under it
+    const tops = this.tops;
+    for (let i = 0; i < tops.length; i++) {
+      const t = tops[i];
+      if (t.cheese) {
+        if (b) { let from = i; while (from > 0 && !tops[from - 1].cheese) from--; drawMeltedCheese(ctx, R, i, tops.slice(from, i)); while (i + 1 < tops.length && tops[i + 1].cheese) i++; }
+        else { const u = clamp((t.t - t.d) / 0.3, 0, 1); if (!u) continue; ctx.save(); ctx.translate(t.x, t.y - (1 - u) * 60); ctx.rotate(t.rot); ctx.fillStyle = '#ffe06a'; ctx.strokeStyle = '#d8a018'; ctx.lineWidth = 1.5; ctx.beginPath(); rrect(ctx, -t.l / 2, -3, t.l, 6, 3); ctx.fill(); ctx.stroke(); ctx.restore(); }
+        continue;
+      }
+      const u = clamp((t.t - t.d) / 0.35, 0, 1); if (!u) continue;
       const drop = (1 - Ease.bounce(u)) * 90;
       Art.draw(ctx, t.id, t.x, t.y - drop, t.s, t.rot);
       if (b) { ctx.fillStyle = 'rgba(120,60,10,0.18)'; ctx.beginPath(); ctx.arc(t.x, t.y, t.s * 0.42, 0, TAU); ctx.fill(); }
-    });
+    }
     // slices
     const cuts = this.cuts.slice(); if (this.cutAnim) cuts.push(this.cutAnim.a);
     cuts.forEach((a, i) => {
@@ -5625,95 +5806,278 @@ SCREENS.pizza = {
   drawOver(ctx) { drawPicked(this, ctx); },
 };
 
+// cheese shreds melted in the oven: one gooey layer with browned spots; the toppings right under it
+// show faintly through (any under an earlier layer of cheese as well stay hidden)
+function drawMeltedCheese(ctx, R, seed, under) {
+  ctx.beginPath(); blobPath(ctx, 0, 0, R * 0.8, R * 0.8, 16, 0.08, 9 + seed); ctx.fillStyle = '#ffd24a'; ctx.fill();
+  if (under.length) { ctx.save(); ctx.clip(); ctx.globalAlpha = 0.3; under.forEach(t => Art.draw(ctx, t.id, t.x, t.y, t.s, t.rot)); ctx.restore(); }
+  ctx.fillStyle = 'rgba(200,110,30,0.45)'; const f = seeded(4 + seed);
+  for (let i = 0; i < 16; i++) { ctx.beginPath(); ctx.ellipse((f() - 0.5) * R * 1.3, (f() - 0.5) * R * 1.3, 5 + f() * 6, 4 + f() * 4, f(), 0, TAU); ctx.fill(); }
+}
+
 /* =================== dessert bar =================== */
+// The base stands on the counter, scoops pile up on it and toppings stick where they are put. A
+// finger picks up anything on it: a topping goes wherever it is let go; a scoop goes back into the
+// pile at the height it is let go, leaning the way it was moved, and takes its toppings with it
+// (each topping is fixed to the scoop or base it sits on).
 const DESSERT_BASES = ['d_cone', 'd_glass', 'd_cupcake', 'd_sponge'];
 const DESSERT_SCOOPS = ['d_strawberry', 'd_chocolate', 'd_vanilla', 'd_mint', 'd_blueberry', 'd_mango', 'd_cream'];
 const DESSERT_TOPS = ['d_sauce', 'd_cherry', 'd_wafer', 'd_flake', 'd_sprinkles'];
+// a topping's width (of the dessert's width), and how far below the top of the pile a tapped one's bottom lands
+const TOPPING = { d_sauce: [0.78, 0.3], d_sprinkles: [0.55, 0.18], d_cherry: [0.3, 0.08], d_wafer: [0.3, 0.15], d_flake: [0.3, 0.15] };
+// each base's outline: fractions of its width across, and of its height up from the counter
+const BASE_SHAPE = {
+  d_cone: [[-0.48, 1], [0.48, 1], [0.05, 0.03], [-0.05, 0.03]],
+  d_glass: [[-0.47, 1], [0.47, 1], [0.3, 0.5], [0.07, 0.4], [0.07, 0.1], [0.3, 0.03], [-0.3, 0.03], [-0.07, 0.1], [-0.07, 0.4], [-0.3, 0.5]],
+  d_cupcake: [[-0.48, 0.98], [0.48, 0.98], [0.4, 0.03], [-0.4, 0.03]],
+  d_sponge: [[-0.48, 0.95], [0.48, 0.95], [0.48, 0.04], [-0.48, 0.04]],
+};
 SCREENS.dessert = {
   enter(p) {
     this.rec = Store.get(p.id) || Store.data.monsters[0];
     this.pantry = this.pantry || new Pantry({ lists: [{ icon: 'd_cone', ids: DESSERT_BASES }, { icon: 'd_strawberry', ids: DESSERT_SCOOPS }, { icon: 'd_cherry', ids: DESSERT_TOPS }] });
     this.pantry.tab = 0;
-    this.base = null; this.scoops = []; this.tops = []; this.fall = null; this.ready = false; this.held = null; this.squash = 0;
+    // scoops: { id, dx: its lean on the one below (of the width), x, y: its bottom middle as it glides }
+    // tops: { id, on: the scoop it sits on (null: the base), ox, oy: from that one's top middle, rot }
+    this.base = null; this.scoops = []; this.tops = []; this.fall = null; this.moving = null; this.ready = false; this.held = null; this.squash = 0;
   },
   layout() {
     const w = prepLayout(this, { bin: true });
     this.dw = Math.min(w.w * 0.42, w.h * 0.34, 230);
     this.floor = w.y1 - w.h * 0.06; this.cx = w.cx;
   },
-  clear() { this.base = null; this.scoops = []; this.tops = []; setReady(this, false); SFX.play('swish'); this.pantry.tab = 0; },
-  baseH() { return this.base ? (this.dw * (this.base === 'd_cone' ? 0.72 : 1)) / Art.aspect(this.base) : 0; },
+  clear() { this.base = null; this.scoops = []; this.tops = []; this.fall = null; this.moving = null; setReady(this, false); SFX.play('swish'); this.pantry.tab = 0; },
+  baseW() { return this.dw * (this.base === 'd_cone' ? 0.72 : 1); },
+  baseH() { return this.base ? this.baseW() / Art.aspect(this.base) : 0; },
+  // how far up the base the first scoop sits
+  seat() { const h = this.baseH(), b = this.base; return b === 'd_cone' ? h * 0.86 : b === 'd_glass' ? h * 0.72 : b === 'd_cupcake' ? h * 0.75 : h * 0.85; },
   // where the next scoop's bottom sits (upwards from the floor)
-  rim() {
-    const h = this.baseH(), b = this.base;
-    const start = b === 'd_cone' ? h * 0.86 : b === 'd_glass' ? h * 0.72 : b === 'd_cupcake' ? h * 0.75 : h * 0.85;
-    return start + this.scoops.reduce((a, id) => a + this.scoopH(id) * 0.6, 0);
-  },
+  rim() { return this.seat() + this.scoops.reduce((a, s) => a + this.scoopH(s.id) * 0.6, 0); },
   scoopH(id) { return (this.dw * 0.82) / Art.aspect(id); },
+  topW(id) { return this.dw * TOPPING[id][0]; },
+  // the middle of the top of the pile
+  topX() { return this.cx + this.scoops.reduce((a, s) => a + s.dx, 0) * this.dw; },
+  // where each scoop belongs: its bottom middle, leaning with the ones below it
+  slots() {
+    let h = this.seat(), lean = 0;
+    return this.scoops.map(s => {
+      const sh = this.scoopH(s.id); lean += s.dx;
+      const at = [this.cx + lean * this.dw, this.floor - h + sh * 0.12];
+      h += sh * 0.6;
+      return at;
+    });
+  },
+  // a scoop as drawn: in the pile it sways a little and squashes for a moment when something lands
+  scoopAt(s) {
+    const i = this.scoops.indexOf(s);
+    return i < 0 ? [s.x, s.y] : [s.x + Math.sin(G.t * 2 + i) * i * 0.8, this.floor - (this.floor - s.y) * (1 - this.squash * 0.06)];
+  },
+  // the top middle of the scoop (or base) a topping sits on
+  anchor(on) {
+    if (!on) return [this.cx, this.floor - this.baseH()];
+    const [x, y] = this.scoopAt(on);
+    return [x, y - this.scoopH(on.id)];
+  },
+  topPos(t) { const [x, y] = this.anchor(t.on); return [x + t.ox * this.dw, y + t.oy * this.dw]; },
+  // the outlines of the dessert's parts, the top one first: each scoop an oval, then the base
+  shapes() {
+    const out = [];
+    for (let i = this.scoops.length - 1; i >= 0; i--) {
+      const s = this.scoops[i], [x, y] = this.scoopAt(s), sh = this.scoopH(s.id), poly = [];
+      for (let k = 0; k < 16; k++) { const a = (k / 16) * TAU; poly.push([x + Math.cos(a) * this.dw * 0.38, y - sh * 0.5 + Math.sin(a) * sh * 0.46]); }
+      out.push({ on: s, poly });
+    }
+    if (this.base) { const w = this.baseW(), h = this.baseH(); out.push({ on: null, poly: BASE_SHAPE[this.base].map(([u, v]) => [this.cx + u * w, this.floor - v * h]) }); }
+    return out;
+  },
+  // fix a topping, its middle at (x, y), to the part of the dessert under it, or to the nearest edge
+  stick(t, x, y) {
+    const S = this.shapes();
+    let hit = S.find(sh => pointInPoly(sh.poly, x, y)), px = x, py = y;
+    if (!hit) {
+      let best = Infinity;
+      S.forEach(sh => { const q = nearestOnPoly(sh.poly, x, y), d = dist(x, y, q[0], q[1]); if (d < best) { best = d; hit = sh; px = q[0]; py = q[1]; } });
+    }
+    const [ax, ay] = this.anchor(hit.on);
+    t.on = hit.on; t.ox = (px - ax) / this.dw; t.oy = (py - ay) / this.dw;
+  },
+  // toppings sitting on top of the pile (their tops above it) ride up onto a scoop put on top
+  rideUp(was, s) {
+    this.tops.forEach(t => { if (t.on === was && t.oy - this.topW(t.id) / Art.aspect(t.id) / this.dw / 2 < 0.02) t.on = s; });
+  },
+  landSound(id) {
+    SFX.play(id === 'd_sauce' ? 'squish' : id === 'd_cherry' ? 'boing' : 'plop', DESSERT_SCOOPS.indexOf(id) >= 0 ? {} : { f: 500 });
+    if (id === 'd_cherry') SFX.play('jingle');
+  },
+  sprinkle(x, y) {
+    Parts.burst('confetti', x, y, 30, { ang: Math.PI / 2, spread: 0.9, v0: 40, v1: 160, g: 500, sizeR: [5, 8], lifeR: [0.6, 1], cols: ['#ff5f8f', '#ffd84a', '#4aa7f2', '#69c95c', '#9a6be2', '#ffffff'] });
+    SFX.play('crinkle');
+  },
+  // a tap in the cupboard: a base swaps in, a scoop or topping drops onto the top of the pile
   add(id) {
     if (this.fall) return;
     Say.say(FOODS[id].name);
-    if (DESSERT_BASES.indexOf(id) >= 0) { this.base = id; this.scoops = []; this.tops = []; SFX.play('thud'); setReady(this, true); this.pantry.tab = 1; return; }
+    if (DESSERT_BASES.indexOf(id) >= 0) { this.base = id; this.scoops = []; this.tops = []; this.moving = null; SFX.play('thud'); setReady(this, true); this.pantry.tab = 1; return; }
     if (!this.base) { this.base = 'd_cone'; setReady(this, true); }
-    if (id === 'd_sprinkles') {
-      const top = this.rim();
-      Parts.burst('confetti', this.cx, this.floor - top - 120, 30, { ang: Math.PI / 2, spread: 0.9, v0: 40, v1: 160, g: 500, sizeR: [5, 8], lifeR: [0.6, 1], cols: ['#ff5f8f', '#ffd84a', '#4aa7f2', '#69c95c', '#9a6be2', '#ffffff'] });
-      SFX.play('crinkle');
+    if (id === 'd_sprinkles') this.sprinkle(this.topX(), this.floor - this.rim() - 120);
+    this.fall = { id, y: -G.H * 0.6, vy: 0, dx: DESSERT_SCOOPS.indexOf(id) < 0 && id !== 'd_sauce' ? rand(-0.12, 0.12) : 0 };
+  },
+  // a topping dragged out of the cupboard goes where it is let go
+  put(id, x, y) {
+    if (!this.base) { this.base = 'd_cone'; setReady(this, true); }
+    const t = { id, rot: id === 'd_wafer' || id === 'd_flake' ? rand(-0.5, 0.5) : 0, pop: 1 };
+    this.stick(t, x, y); this.tops.push(t);
+    if (id === 'd_sprinkles') { const [tx, ty] = this.topPos(t); this.sprinkle(tx, ty - 80); }
+    this.landSound(id);
+  },
+  // is a finger at (px, py) on topping t? On its paint, not a see-through part of its picture (a
+  // cherry showing through the sauce's empty corner is the cherry's); or, loosely, near its middle
+  touches(t, px, py, loose) {
+    const [x, y] = this.topPos(t), c = Math.cos(t.rot), s = Math.sin(t.rot), lx = (px - x) * c + (py - y) * s, ly = (py - y) * c - (px - x) * s;
+    if (loose) return Math.hypot(lx, ly) < 26;
+    const w = this.topW(t.id), r = ART[t.id], k = (CHOP_U * 0.96 / Math.max(r[3], r[4])) * r[3] / w, a = foodAlpha(t.id);
+    if (!a) return Math.abs(lx) < w / 2 && Math.abs(ly) < w / Art.aspect(t.id) / 2;
+    return [[0, 0], [8, 0], [-8, 0], [0, 8], [0, -8]].some(([dx, dy]) => {
+      const u = Math.round(CHOP_U / 2 + (lx + dx) * k), v = Math.round(CHOP_U / 2 + (ly + dy) * k);
+      return u >= 0 && v >= 0 && u < CHOP_U && v < CHOP_U && a[(v * CHOP_U + u) * 4 + 3] > 40;
+    });
+  },
+  // a finger on the dessert picks up the topping under it (the front one first; failing that one
+  // whose middle is near), or else the scoop
+  grab(p) {
+    const n = this.tops.length;
+    for (let j = 2 * n - 1; j >= 0; j--) {
+      const i = j % n, t = this.tops[i];
+      if (!this.touches(t, p.x, p.y, j < n)) continue;
+      const [x, y] = this.topPos(t);
+      this.tops.splice(i, 1); this.tops.push(t);   // in front of the others from now on
+      t.held = true; this.moving = { t, ptr: p.id, x, y, dx: x - p.x, dy: y - p.y };
+      SFX.play('pop', { f: 800 }); Say.say(FOODS[t.id].name);
+      return;
     }
-    this.fall = { id, y: -G.H * 0.6, vy: 0 };
+    for (let i = this.scoops.length - 1; i >= 0; i--) {
+      const s = this.scoops[i], [x, y] = this.scoopAt(s), sh = this.scoopH(s.id), ex = (p.x - x) / (this.dw * 0.41), ey = (p.y - y + sh * 0.5) / (sh * 0.5);
+      if (ex * ex + ey * ey > 1) continue;
+      this.scoops.splice(i, 1); s.x = x; s.y = y;
+      this.moving = { s, ptr: p.id, dx: x - p.x, dy: y - p.y };
+      SFX.play('pop', { f: 600 }); Say.say(FOODS[s.id].name);
+      return;
+    }
+  },
+  // let go of what the finger was moving: a topping sticks where it is; a scoop goes back into the
+  // pile where it is nearest in height, leaning the way it was moved (not so far it falls off)
+  drop() {
+    const M = this.moving; this.moving = null;
+    if (M.t) { M.t.held = false; this.stick(M.t, M.x, M.y); M.t.pop = 1; this.landSound(M.t.id); return; }
+    const s = M.s, up = this.floor - s.y + this.scoopH(s.id) * 0.12;
+    let h = this.seat(), at = 0, best = Infinity;
+    for (let i = 0; i <= this.scoops.length; i++) {
+      if (Math.abs(h - up) < best) { best = Math.abs(h - up); at = i; }
+      if (i < this.scoops.length) h += this.scoopH(this.scoops[i].id) * 0.6;
+    }
+    const lean = this.scoops.slice(0, at).reduce((a, q) => a + q.dx, 0);
+    s.dx = clamp(lean + clamp((s.x - this.cx) / this.dw - lean, -0.3, 0.3), -0.6, 0.6) - lean;
+    const was = this.scoops[this.scoops.length - 1] || null;
+    this.scoops.splice(at, 0, s);
+    if (at === this.scoops.length - 1) this.rideUp(was, s);
+    this.squash = 1; this.landSound(s.id);
   },
   serve() {
     if (!this.base) return;
-    const ids = [this.base].concat(this.scoops, this.tops.map(t => t.id));
-    const spr = dishSprite((g, px) => { const h = this.rim() + this.dw * 0.6, k = Math.min(px * 0.9 / (this.dw * 1.1), px * 0.92 / h); g.translate(px / 2, px * 0.97); g.scale(k, k); this.drawDessert(g, 0, 0); });
+    if (this.moving) this.drop();
+    const at = this.slots(); this.scoops.forEach((s, i) => { s.x = at[i][0]; s.y = at[i][1]; });   // none still gliding into place
+    const ids = [this.base].concat(this.scoops.map(s => s.id), this.tops.map(t => t.id));
+    // fit the whole dessert, however it leans, in the picture
+    let x0 = this.cx - this.dw * 0.5, x1 = this.cx + this.dw * 0.5, y0 = this.floor - this.baseH();
+    this.scoops.forEach(s => { const [x, y] = this.scoopAt(s); x0 = Math.min(x0, x - this.dw * 0.41); x1 = Math.max(x1, x + this.dw * 0.41); y0 = Math.min(y0, y - this.scoopH(s.id)); });
+    this.tops.forEach(t => { const [x, y] = this.topPos(t), r = this.topW(t.id) * 0.6; x0 = Math.min(x0, x - r); x1 = Math.max(x1, x + r); y0 = Math.min(y0, y - r); });
+    x0 -= this.dw * 0.05; x1 += this.dw * 0.05;
+    const spr = dishSprite((g, px) => { const k = Math.min(px * 0.9 / (x1 - x0), px * 0.92 / (this.floor - y0)); g.translate(px / 2, px * 0.97); g.scale(k, k); g.translate(-(x0 + x1) / 2, -this.floor); this.drawDessert(g); });
     const S = servingOfParts(ids, 'dessert', spr, { name: this.base === 'd_cone' ? 'ice cream' : 'pudding' });
     sendDish(this, S);
   },
-  down(p) { pickerDown(this, p); },
-  move(p) { pickerMove(this, p); },
-  up(p) { const H = this.held; if (H && H.ptr === p.id) { this.held = null; this.add(H.id); } },
+  down(p) {
+    if (pickerDown(this, p)) return;
+    if (!this.moving && !this.held) this.grab(p);
+  },
+  move(p) {
+    if (pickerMove(this, p)) return;
+    const M = this.moving;
+    if (!M || M.ptr !== p.id) return;
+    if (M.s) { M.s.x = p.x + M.dx; M.s.y = p.y + M.dy; } else { M.x = p.x + M.dx; M.y = p.y + M.dy; }
+  },
+  up(p) {
+    const H = this.held;
+    if (H && H.ptr === p.id) {
+      this.held = null;
+      if (H.moved && DESSERT_TOPS.indexOf(H.id) >= 0 && !this.pantry.hit(p.x, p.y)) this.put(H.id, p.x, p.y);
+      else this.add(H.id);
+      return;
+    }
+    if (this.moving && this.moving.ptr === p.id) this.drop();
+  },
   update(dt) {
     this.pantry.update(dt);
     this.squash = Math.max(0, this.squash - dt * 4);
+    // scoops glide to where they belong, after one is taken out or put back
+    const slots = this.slots(), e = Math.min(1, dt * 14);
+    this.scoops.forEach((s, i) => { s.x += (slots[i][0] - s.x) * e; s.y += (slots[i][1] - s.y) * e; });
+    this.tops.forEach(t => { if (t.pop) t.pop = Math.max(0, t.pop - dt * 3); });
     const F = this.fall;
     if (F) {
-      const target = -this.rim();
+      const scoop = DESSERT_SCOOPS.indexOf(F.id) >= 0, target = -(this.rim() - (scoop ? 0 : TOPPING[F.id][1] * this.dw));
       F.vy += 2600 * dt; F.y += F.vy * dt;
       if (F.y >= target) {
         this.fall = null; this.squash = 1;
-        if (DESSERT_SCOOPS.indexOf(F.id) >= 0) { this.scoops.push(F.id); SFX.play('plop'); }
-        else { this.tops.push({ id: F.id, rot: F.id === 'd_wafer' || F.id === 'd_flake' ? rand(-0.5, 0.5) : 0, dx: rand(-0.15, 0.15) }); SFX.play(F.id === 'd_sauce' ? 'squish' : F.id === 'd_cherry' ? 'boing' : 'plop', { f: 500 }); }
-        if (F.id === 'd_cherry') SFX.play('jingle');
+        if (scoop) {
+          const was = this.scoops[this.scoops.length - 1] || null, s = { id: F.id, dx: 0 };
+          this.scoops.push(s);
+          const at = this.slots()[this.scoops.length - 1]; s.x = at[0]; s.y = at[1];
+          this.rideUp(was, s);
+        } else {
+          const t = { id: F.id, rot: F.id === 'd_wafer' || F.id === 'd_flake' ? rand(-0.5, 0.5) : 0 };
+          this.stick(t, this.topX() + F.dx * this.dw, this.floor + target - this.topW(F.id) / Art.aspect(F.id) / 2);
+          this.tops.push(t);
+        }
+        this.landSound(F.id);
       }
     }
   },
-  drawDessert(ctx, x, y) {
+  drawDessert(ctx) {
     if (!this.base) return;
-    const dw = this.dw, b = this.base, bh = this.baseH(), sq = 1 - this.squash * 0.06;
-    const drawBase = () => Art.drawBase(ctx, b, x, y, dw * (b === 'd_cone' ? 0.72 : 1));
+    const b = this.base, drawBase = () => Art.drawBase(ctx, b, this.cx, this.floor, this.baseW());
     if (b !== 'd_glass') drawBase();
-    let h = b === 'd_cone' ? bh * 0.86 : b === 'd_glass' ? bh * 0.72 : b === 'd_cupcake' ? bh * 0.75 : bh * 0.85;
-    this.scoops.forEach((id, i) => { const sh = this.scoopH(id); Art.drawBase(ctx, id, x + Math.sin(G.t * 2 + i) * i * 0.8, y - h * sq + sh * 0.12, dw * 0.82); h += sh * 0.6; });
+    this.scoops.forEach(s => { const [x, y] = this.scoopAt(s); Art.drawBase(ctx, s.id, x, y, this.dw * 0.82); });
     if (b === 'd_glass') { ctx.save(); ctx.globalAlpha = 0.85; drawBase(); ctx.restore(); }
-    const top = h;
-    this.tops.forEach(t => {
-      if (t.id === 'd_sauce') Art.drawBase(ctx, 'd_sauce', x, y - top + dw * 0.3, dw * 0.78);
-      else if (t.id === 'd_sprinkles') Art.drawBase(ctx, 'd_sprinkles', x, y - top + dw * 0.18, dw * 0.55);
-      else if (t.id === 'd_cherry') Art.drawBase(ctx, 'd_cherry', x, y - top + dw * 0.08, dw * 0.3);
-      else { ctx.save(); ctx.translate(x + t.dx * dw, y - top + dw * 0.15); ctx.rotate(t.rot); Art.drawBase(ctx, t.id, 0, 0, dw * 0.3); ctx.restore(); }
-    });
+    // toppings on a scoop in a finger are drawn with it, over everything
+    this.tops.forEach(t => { if (t.held || (t.on && this.scoops.indexOf(t.on) < 0)) return; const [x, y] = this.topPos(t); this.drawTop(ctx, t, x, y); });
+  },
+  // a topping with its middle at (x, y); it swells for a moment when put down
+  drawTop(ctx, t, x, y) {
+    const w = this.topW(t.id), h = w / Art.aspect(t.id), k = 1 + Math.sin((t.pop || 0) * Math.PI) * 0.18;
+    ctx.save(); ctx.translate(x, y); if (t.rot) ctx.rotate(t.rot); if (k !== 1) ctx.scale(k, k);
+    Art.drawBase(ctx, t.id, 0, h / 2, w);
+    ctx.restore();
   },
   draw(ctx) {
     const { W, H } = G;
     Backdrops.draw(ctx, 'bg_kitchen', W, H, this.floor);
     ctx.fillStyle = 'rgba(70,35,15,0.2)'; ctx.beginPath(); ctx.ellipse(this.cx, this.floor + 4, this.dw * 0.5, this.dw * 0.08, 0, 0, TAU); ctx.fill();
-    this.drawDessert(ctx, this.cx, this.floor);
-    if (this.fall) Art.drawBase(ctx, this.fall.id, this.cx, this.floor + this.fall.y + (DESSERT_SCOOPS.indexOf(this.fall.id) >= 0 ? this.scoopH(this.fall.id) * 0.12 : 0), this.fall.id === 'd_cherry' ? this.dw * 0.3 : this.dw * 0.8);
+    this.drawDessert(ctx);
+    const F = this.fall;
+    if (F) { const scoop = DESSERT_SCOOPS.indexOf(F.id) >= 0; Art.drawBase(ctx, F.id, this.topX() + F.dx * this.dw, this.floor + F.y + (scoop ? this.scoopH(F.id) * 0.12 : 0), scoop ? this.dw * 0.82 : this.topW(F.id)); }
     if (!this.base) { ctx.save(); ctx.globalAlpha = 0.3 + Math.sin(G.t * 4) * 0.1; Art.draw(ctx, 'sundae', this.cx, this.floor - this.dw * 0.7, this.dw * 1.2); ctx.restore(); }
     Parts.draw(ctx, 0); Parts.draw(ctx, 1);
     this.pantry.draw(ctx);
   },
-  drawOver(ctx) { drawPicked(this, ctx); },
+  drawOver(ctx) {
+    const M = this.moving;
+    if (M && M.s) {
+      Art.drawBase(ctx, M.s.id, M.s.x, M.s.y, this.dw * 0.82);
+      this.tops.forEach(t => { if (t.on !== M.s) return; const [x, y] = this.topPos(t); this.drawTop(ctx, t, x, y); });
+    } else if (M) this.drawTop(ctx, M.t, M.x, M.y);
+    drawPicked(this, ctx);
+  },
 };
 
 /* ---------- src/main.js ---------- */
