@@ -23,7 +23,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#8fd3f4;overscroll-beh
 <canvas id="bgc"></canvas>
 <canvas id="cc"></canvas>
 <div id="safe"></div>
-<!-- built from src/ by build.js (b93d32834d) — edit the sources, not this file -->
+<!-- built from src/ by build.js (19e33aad97) — edit the sources, not this file -->
 <script>
 /* ---------- src/util.js ---------- */
 /* util.js — numbers, easing, seeded randomness, colours and path helpers shared by every module. */
@@ -2422,7 +2422,7 @@ const food = id => FOODS[id];
 /* art_index.js — written by tools/atlas.py; do not edit. Each picture: [sheet, x, y, w, h]. */
 const ART_SHEETS = ["art/fruit_a.webp", "art/fruit_b_veg_a.webp", "art/veg_b.webp", "art/dinner_a.webp", "art/dinner_b.webp", "art/breakfast_sweets.webp", "art/sweets_b.webp", "art/drinks_sea.webp", "art/munchies.webp", "art/burger_layers.webp", "art/pizza_toppings.webp", "art/dessert_parts.webp", "art/appliances.webp", "art/ui_icons.webp"];
 const ART = {"apple":[0,16,3,351,378],"greenapple":[0,395,3,362,378],"banana":[0,783,3,354,378],"orange":[0,1177,3,334,378],"lemon":[0,3,401,378,350],"lime":[0,387,406,378,340],"strawberry":[0,803,387,313,378],"raspberries":[0,1155,403,378,345],"blueberries":[0,3,789,378,341],"grapes":[0,412,771,327,378],"cherries":[0,775,771,369,378],"watermelon":[0,1155,772,378,376],"melon":[0,3,1184,378,319],"pineapple":[0,463,1155,225,378],"mango":[0,774,1155,372,378],"peach":[0,1163,1155,362,378],"pear":[1,52,3,279,378],"kiwi":[1,387,8,378,367],"coconut":[1,771,7,378,370],"plum":[1,1187,3,313,378],"raisins":[1,3,432,378,288],"dragonfruit":[1,424,387,303,378],"carrot":[1,791,387,337,378],"broccoli":[1,1155,393,378,365],"peas":[1,16,771,352,378],"corn":[1,425,771,302,378],"cucumber":[1,771,776,378,367],"tomato":[1,1155,773,378,374],"potato":[1,3,1174,378,339],"sweetpotato":[1,387,1166,378,355],"pumpkin":[1,772,1155,375,378],"lettuce":[1,1155,1167,378,354],"spinach":[2,15,3,353,378],"cabbage":[2,387,7,378,370],"cauliflower":[2,771,17,378,349],"mushroom":[2,1155,11,378,361],"onion":[2,52,387,280,378],"garlic":[2,399,387,354,378],"chilli":[2,780,387,359,378],"pepper":[2,1180,387,327,378],"aubergine":[2,24,771,336,378],"celery":[2,414,771,323,378],"radish":[2,830,771,260,378],"beetroot":[2,1198,771,291,378],"greenbeans":[2,3,1183,378,321],"sprouts":[2,387,1187,378,314],"bakedbeans":[2,771,1183,378,321],"avocado":[2,1170,1155,348,378],"burger":[3,3,11,378,362],"chips":[3,413,3,326,378],"pizza":[3,771,6,378,372],"hotdog":[3,1155,23,378,338],"sandwich":[3,3,392,378,367],"spaghetti":[3,387,402,378,348],"maccheese":[3,771,401,378,349],"nuggets":[3,1155,403,378,346],"fishfingers":[3,3,795,378,330],"sausages":[3,387,795,378,330],"taco":[3,771,787,378,346],"burrito":[3,1155,773,378,374],"curry":[3,3,1172,378,343],"chillicarne":[3,387,1174,378,339],"noodles":[3,771,1172,378,343],"dumplings":[3,1155,1191,378,305],"drumstick":[4,3,10,378,363],"soup":[4,387,31,378,321],"jacketpotato":[4,771,24,378,336],"pie":[4,1155,29,378,326],"sausageroll":[4,3,413,378,326],"steak":[4,387,415,378,321],"salad":[4,771,398,378,355],"rice":[4,1155,401,378,350],"beanstoast":[4,3,791,378,337],"sushi":[4,387,811,378,298],"toast":[4,771,779,378,361],"pancakes":[4,1155,786,378,348],"waffle":[4,3,1176,378,336],"porridge":[4,387,1181,378,326],"cereal":[4,771,1181,378,325],"boiledegg":[4,1220,1155,247,378],"friedegg":[5,3,29,378,326],"bacon":[5,387,24,378,335],"croissant":[5,771,20,378,343],"yoghurt":[5,1179,3,330,378],"cheese":[5,3,390,378,371],"crackers":[5,387,401,378,350],"pretzel":[5,771,417,378,317],"honey":[5,1179,387,330,378],"peanutbutter":[5,37,771,310,378],"ham":[5,387,812,378,296],"icecream":[5,835,771,250,378],"icelolly":[5,1225,771,238,378],"cupcake":[5,29,1155,325,378],"birthdaycake":[5,407,1155,337,378],"chocolatecake":[5,771,1162,378,363],"doughnut":[5,1155,1160,378,367],"cookie":[6,3,7,378,369],"chocolate":[6,387,16,378,352],"lollipop":[6,824,3,271,378],"jellybeans":[6,1155,36,378,312],"jelly":[6,3,421,378,309],"pudding":[6,387,430,378,292],"marshmallows":[6,771,406,378,340],"gummybears":[6,1179,387,329,378],"candyfloss":[6,47,771,290,378],"bubblegum":[6,387,771,377,378],"applepie":[6,771,800,378,320],"sundae":[6,1221,771,245,378],"popcorn":[6,37,1155,309,378],"milk":[6,439,1155,273,378],"chocmilk":[6,839,1155,241,378],"juicebox":[6,1197,1155,294,378],"orangejuice":[7,36,3,312,378],"cola":[7,450,3,251,378],"lemonade":[7,812,3,295,378],"milkshake":[7,1240,3,208,378],"hotchoc":[7,3,395,378,362],"water":[7,434,387,284,378],"bubbletea":[7,837,387,246,378],"babybottle":[7,1244,387,199,378],"fish":[7,3,835,378,249],"prawn":[7,387,772,378,376],"crab":[7,771,798,378,324],"lobster":[7,1155,777,378,365],"squid":[7,40,1155,303,378],"oyster":[7,398,1155,355,378],"fruitsalad":[7,771,1175,378,337],"peanuts":[7,1155,1190,378,307],"sock":[8,28,3,328,378],"worm":[8,387,32,378,320],"caterpillar":[8,771,32,378,319],"snail":[8,1155,31,378,321],"bone":[8,3,403,378,345],"rock":[8,387,403,378,345],"sunflower":[8,771,391,378,369],"cactus":[8,1170,387,347,378],"leaf":[8,17,771,349,378],"mudpie":[8,387,821,378,277],"boot":[8,775,771,370,378],"slime":[8,1155,811,378,297],"tincan":[8,40,1155,303,378],"icecube":[8,391,1155,370,378],"hotsauce":[8,865,1155,190,378],"ketchup":[8,1235,1155,218,378],"b_bunbottom":[9,3,102,506,308],"b_buntop":[9,515,68,506,375],"b_patty":[9,1027,89,506,334],"b_cheese":[9,1539,86,506,340],"b_lettuce":[9,3,560,506,415],"b_tomato":[9,515,615,506,306],"b_onion":[9,1027,590,506,355],"b_pickles":[9,1539,609,506,317],"b_bacon":[9,3,1066,506,427],"b_egg":[9,515,1099,506,361],"b_ketchup":[9,1027,1132,506,295],"b_mustard":[9,1539,1126,506,307],"b_jalapeno":[9,3,1597,506,390],"b_pineapple":[9,515,1586,506,412],"b_avocado":[9,1027,1602,506,380],"b_chicken":[9,1539,1609,506,365],"p_pepperoni":[10,3,5,154,149],"p_mushroom":[10,163,11,154,138],"p_olive":[10,323,3,154,153],"p_pepper":[10,483,15,154,130],"p_pineapple":[10,3,168,154,143],"p_corn":[10,163,174,154,132],"p_ham":[10,323,163,154,153],"p_chilli":[10,483,165,154,150],"p_onion":[10,3,324,154,151],"p_tomato":[10,163,323,154,154],"p_basil":[10,327,323,145,154],"p_prawn":[10,492,323,136,154],"p_sausage":[10,4,483,152,154],"p_broccoli":[10,164,483,151,154],"p_chicken":[10,323,495,154,129],"p_spinach":[10,489,483,141,154],"d_cone":[11,71,3,305,442],"d_glass":[11,505,3,334,442],"d_cupcake":[11,899,30,442,387],"d_sponge":[11,1347,55,442,337],"d_strawberry":[11,3,459,442,425],"d_chocolate":[11,451,459,442,426],"d_vanilla":[11,899,463,442,417],"d_mint":[11,1347,458,442,427],"d_blueberry":[11,3,904,442,431],"d_mango":[11,451,909,442,422],"d_cream":[11,911,899,417,442],"d_sauce":[11,1347,943,442,353],"d_cherry":[11,71,1347,306,442],"d_wafer":[11,489,1347,366,442],"d_flake":[11,935,1347,370,442],"d_sprinkles":[11,1347,1411,442,313],"k_toaster":[12,3,28,442,392],"k_oven":[12,463,3,417,442],"k_airfryer":[12,923,3,393,442],"k_deepfryer":[12,1347,7,442,433],"k_waffle":[12,66,451,316,442],"k_microwave":[12,451,508,442,328],"k_pan":[12,899,510,442,324],"k_freezer":[12,1437,451,262,442],"k_blender":[12,77,899,293,442],"k_board":[12,470,899,404,442],"k_pot":[12,899,924,442,391],"k_pizzaoven":[12,1347,901,442,438],"k_chefhat":[12,3,1373,442,390],"k_plate":[12,451,1354,442,428],"k_cutlery":[12,918,1347,404,442],"k_bowl":[12,1347,1368,442,399],"i_home":[13,3,9,250,237],"i_back":[13,259,15,250,226],"i_tick":[13,515,6,250,244],"i_dice":[13,772,3,247,250],"i_brush":[13,13,259,229,250],"i_egg":[13,281,259,206,250],"i_bin":[13,534,259,212,250],"i_eye":[13,776,259,240,250],"i_mouth":[13,3,534,250,212],"i_horns":[13,259,545,250,189],"i_arm":[13,515,522,250,236],"i_foot":[13,771,519,250,242],"i_spots":[13,3,771,249,250],"i_blob":[13,259,787,250,218],"i_palette":[13,515,777,250,237],"i_wand":[13,780,771,231,250]};
-const BACKDROPS = {"bg_home": {"src": "art/bg_home.webp", "w": 2048, "h": 1158, "ground": 0.86}, "bg_feed": {"src": "art/bg_feed.webp", "w": 2048, "h": 1158, "ground": 0.87}, "bg_builder": {"src": "art/bg_builder.webp", "w": 2048, "h": 1158, "ground": 0.84}, "bg_kitchen": {"src": "art/bg_kitchen.webp", "w": 2048, "h": 1158, "ground": 0.6}};
+const BACKDROPS = {"bg_home": {"src": "art/bg_home.webp", "w": 2048, "h": 1158, "ground": 0.86}, "bg_feed": {"src": "art/bg_feed.webp", "w": 2048, "h": 1158, "ground": 0.87}, "bg_builder": {"src": "art/bg_builder.webp", "w": 2048, "h": 1158, "ground": 0.84}, "bg_kitchen": {"src": "art/bg_kitchen.webp", "w": 2048, "h": 1158, "ground": 0.6, "far": {"up": "art/bg_kitchen_up.webp", "uh": 1603, "top": 445, "wide": "art/bg_kitchen_wide.webp", "ww": 2752, "wh": 1536, "x": 608, "y": 0, "k": 0.75, "strip": 164, "tile": [155, 156], "counter": 762, "door": [776, 774]}}};
 
 /* ---------- src/art.js ---------- */
 /* art.js — the painted pictures: loading the sheets, drawing a picture fitted in a box, making a
@@ -5717,10 +5717,11 @@ function drawJaws(ctx, W, H, c) {   // c: 0 open .. 1 shut
 /* ---------- src/scenes.js ---------- */
 /* scenes.js — the painted backdrops. Each picture knows the height where feet (or the kitchen
    counter) stand; it is scaled so that line lands where the screen wants its ground, covering the
-   width and everything above. Below the picture, the floor colour carries on. */
+   width and everything above. Below the picture, the floor colour carries on. The kitchen also has a
+   bigger painting of itself (its `far`) for a camera to pull back from. */
 
 const Backdrops = {
-  img: {}, floor: {},
+  img: {}, floor: {}, pat: {},
   load(done) {
     const names = Object.keys(BACKDROPS);
     let left = names.length;
@@ -5730,7 +5731,44 @@ const Backdrops = {
       im.onerror = () => { if (--left === 0 && done) done(); };
       im.src = BACKDROPS[n].src;
       this.img[n] = im;
+      if (BACKDROPS[n].far) this.loadFar(n);
     });
+  },
+  // the bigger painting comes later, without holding up the game; until then a camera shows the
+  // ordinary picture getting smaller
+  loadFar(n) {
+    const X = BACKDROPS[n].far, up = new Image(), wide = new Image();
+    let left = 2;
+    const both = () => {
+      if (--left) return;
+      this.floor[n + '_wide'] = this.sampleFloor(wide);
+      this.pat[n] = this.patterns(wide, X);
+      const bg = document.getElementById('bgc'); if (bg) bg._key = null;
+    };
+    up.onload = both; wide.onload = both;
+    up.src = X.up; wide.src = X.wide;
+    this.img[n + '_up'] = up; this.img[n + '_wide'] = wide;
+  },
+  // past the wide painting the wall and the counter carry on in its own pattern: its top band of
+  // tiles over and over above it (and above either side, the ends of that band, so the rows meet),
+  // and at each side its own end of wall, top to counter, and its counter and cupboards, over and
+  // over outwards. (The painted tiles get shorter down the wall, so a cell repeated upwards would
+  // drift out of line with them.)
+  // Each cell comes at full size and at a half, a quarter and an eighth: a pattern shrunk a long way
+  // on the screen comes out paler than the painting beside it (the browser does not average it as it
+  // does a picture), so drawFar takes the size nearest what the screen needs.
+  patterns(wide, X) {
+    const cell = (x, y, w, h) => [1, 2, 4, 8].map(d => {
+      const cw = Math.max(1, Math.round(w / d)), ch = Math.max(1, Math.round(h / d)), c = makeCanvas(cw, ch), g = c.getContext('2d');
+      g.imageSmoothingQuality = 'high'; g.drawImage(wide, x, y, w, h, 0, 0, cw, ch);
+      return { pat: g.createPattern(c, 'repeat'), sx: w / cw, sy: h / ch };
+    });
+    const [tl, tr] = X.tile, [dl, dr] = X.door, low = X.wh - X.counter;
+    return {
+      strip: cell(0, 0, X.ww, X.strip), cornerL: cell(0, 0, tl, X.strip), cornerR: cell(X.ww - tr, 0, tr, X.strip),
+      wallL: cell(0, 0, tl, X.counter), wallR: cell(X.ww - tr, 0, tr, X.counter),
+      lowL: cell(0, X.counter, dl, low), lowR: cell(X.ww - dr, X.counter, dr, low),
+    };
   },
   // the average colour of the picture's bottom edge
   sampleFloor(im) {
@@ -5747,23 +5785,70 @@ const Backdrops = {
     const B = BACKDROPS[name], s = Math.max(W / B.w, gy / (B.ground * B.h));
     return { s, x: (W - B.w * s) / 2, y: gy - B.ground * B.h * s, w: B.w * s, h: B.h * s };
   },
-  // the backdrop lives on its own canvas behind the game, painted only when the screen, its size or
-  // its ground line change; every frame the game canvas is cleared and only what moves is drawn
-  draw(ctx, name, W, H, gy) {
+  // the backdrop lives on its own canvas behind the game, painted only when the screen, its size, its
+  // ground line or its camera change; every frame the game canvas is cleared and only what moves is
+  // drawn. A camera (see Camera) pulled back to z < 1 about its point shows more of the kitchen. While
+  // it glides, the last painting is scaled up on the screen instead of painted again every frame:
+  // going out it is painted as far out as the glide goes (or a quarter past the camera), coming in
+  // it is painted where the camera is, and again whenever it would be scaled up by more than a
+  // quarter; once the camera stops it is painted exactly.
+  draw(ctx, name, W, H, gy, cam) {
     const im = this.img[name], bg = document.getElementById('bgc');
     if (!bg || !im || !im.complete || !im.naturalWidth) return;
-    const dpr = G.dpr, key = name + ':' + W + 'x' + H + '@' + Math.round(gy) + '*' + dpr;
+    let z = 1;
+    if (cam) {
+      const p = bg._z, still = cam.z === cam.goal;
+      z = !still && p && cam.z >= p && cam.z <= p * 1.25 ? p : !still && cam.goal < cam.z ? Math.max(cam.goal, cam.z / 1.25) : cam.z;
+    }
+    this.scaleTo(bg, cam ? cam.z / z : 1, cam);
+    const dpr = G.dpr, key = name + ':' + W + 'x' + H + '@' + Math.round(gy) + '*' + dpr + (z < 1 ? ' ' + Math.round(cam.x) + ',' + Math.round(cam.y) + 'z' + z.toFixed(4) : '');
     if (bg._key === key) return;
-    bg._key = key;
-    bg.width = Math.round(W * dpr); bg.height = Math.round(H * dpr);
+    bg._key = key; bg._z = z;
+    const bw = Math.round(W * dpr), bh = Math.round(H * dpr);
+    if (bg.width !== bw || bg.height !== bh) { bg.width = bw; bg.height = bh; }
     const g = bg.getContext('2d'), F = this.fit(name, W, H, gy);
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.fillStyle = this.floor[name] || '#c89a60'; g.fillRect(0, 0, W, H);
     g.imageSmoothingQuality = 'high';
+    if (z < 1 && this.pat[name]) { this.drawFar(g, name, W, H, F, cam, z); return; }
+    g.fillStyle = this.floor[name] || '#c89a60'; g.fillRect(0, 0, W, H);
+    if (z < 1) { g.translate(cam.x, cam.y); g.scale(z, z); g.translate(-cam.x, -cam.y); }
     g.drawImage(im, F.x, F.y, F.w, F.h);
   },
+  // the kitchen seen by a camera pulled back: the wide painting, the tall one over it (it holds the
+  // ordinary picture and the wall above it, its sides fading into the wide one), and round them
+  // the patterns; under it all the wide painting's floor colour
+  drawFar(g, name, W, H, F, cam, z) {
+    const X = BACKDROPS[name].far, P = this.pat[name], s = F.s, k = s / X.k;   // screen units per pixel of the ordinary and wide paintings
+    const uy = F.y - X.top * s, wx = F.x - X.x * k, wy = uy - X.y * k, ww = X.ww * k, wh = X.wh * k, cy = wy + X.counter * k, by = wy + wh;
+    const v0 = cam.x - cam.x / z, v1 = cam.x + (W - cam.x) / z, t0 = cam.y - cam.y / z;   // the edges of what the camera sees
+    g.fillStyle = this.floor[name + '_wide'] || this.floor[name] || '#c89a60'; g.fillRect(0, 0, W, H);
+    g.translate(cam.x, cam.y); g.scale(z, z); g.translate(-cam.x, -cam.y);
+    // a pattern whose cell starts at (ax, ay), over the box x0..x1, y0..y1, in the size whose pixels
+    // come nearest one to one on the screen
+    const e = k * z * G.dpr, lv = e >= 0.75 ? 0 : e >= 0.375 ? 1 : e >= 0.1875 ? 2 : 3;
+    const fill = (cells, ax, ay, x0, y0, x1, y1) => {
+      if (x1 <= x0 || y1 <= y0) return;
+      const C = cells[lv], kx = k * C.sx, ky = k * C.sy;
+      g.save(); g.translate(ax, ay); g.scale(kx, ky); g.fillStyle = C.pat;
+      g.fillRect((x0 - ax) / kx, (y0 - ay) / ky, (x1 - x0) / kx, (y1 - y0) / ky);
+      g.restore();
+    };
+    // each reaches two pixels under its neighbour, so no line of floor colour shows between their soft edges
+    const tr = X.tile[1], dr = X.door[1], o = 2 / (z * G.dpr), rx = wx + ww - tr * k;
+    fill(P.strip, wx, wy, wx, t0, wx + ww, wy + o);
+    fill(P.cornerL, wx, wy, v0, t0, wx + o, wy + o); fill(P.wallL, wx, wy, v0, wy, wx + o, cy + o); fill(P.lowL, wx, cy, v0, cy, wx + o, by);
+    fill(P.cornerR, rx, wy, wx + ww - o, t0, v1, wy + o); fill(P.wallR, rx, wy, wx + ww - o, wy, v1, cy + o); fill(P.lowR, wx + ww - dr * k, cy, wx + ww - o, cy, v1, by);
+    g.drawImage(this.img[name + '_wide'], wx, wy, ww, wh);
+    g.drawImage(this.img[name + '_up'], F.x, uy, F.w, X.uh * s);
+  },
+  // the backdrop's canvas shown f times its size about the camera's point (1: as painted)
+  scaleTo(bg, f, cam) {
+    const t = f === 1 ? '' : 'scale(' + f + ')', o = f === 1 ? '' : cam.x + 'px ' + cam.y + 'px';
+    if (bg._t !== t) { bg._t = t; bg.style.transform = t; }
+    if (bg._o !== o) { bg._o = o; bg.style.transformOrigin = o; }
+  },
   // nothing behind the game (the loading picture paints its own ground)
-  clear() { const bg = document.getElementById('bgc'); if (bg) { bg._key = null; bg.width = 1; bg.height = 1; } },
+  clear() { const bg = document.getElementById('bgc'); if (bg) { bg._key = null; bg._z = 1; this.scaleTo(bg, 1); bg.width = 1; bg.height = 1; } },
 };
 
 /* ---------- src/store.js ---------- */
@@ -7030,6 +7115,18 @@ function prepLayout(st, o = {}) {
   return work;
 }
 function setReady(st, on) { st.ready = on; if (st.serveBtn) st.serveBtn.hidden = !on; }
+// The burger and dessert bars' camera: when the food grows too tall for the room it pulls back (z
+// below 1) about a point on the counter, so the kitchen, the plate and the food all get smaller
+// together and the food looks bigger, not shrunk. z eases to its goal. A screen draws the kitchen
+// with apply(ctx) and turns a finger into kitchen units with world(p); particles stay in screen units.
+class Camera {
+  constructor() { this.x = 0; this.y = 0; this.z = 1; this.goal = 1; }
+  at(x, y) { this.x = x; this.y = y; }
+  update(dt) { this.z += (this.goal - this.z) * (1 - Math.exp(-dt * 5)); if (Math.abs(this.goal - this.z) < 1e-4) this.z = this.goal; }
+  apply(ctx) { ctx.translate(this.x, this.y); ctx.scale(this.z, this.z); ctx.translate(-this.x, -this.y); }
+  world(p) { return Object.assign({}, p, { x: this.x + (p.x - this.x) / this.z, y: this.y + (p.y - this.y) / this.z }); }
+  screen(x, y) { return [this.x + (x - this.x) * this.z, this.y + (y - this.y) * this.z]; }
+}
 // a picker tap or drag, shared by every prep station: returns true when the finger was in the picker
 function pickerDown(st, p) {
   const h = st.pantry.hit(p.x, p.y);
@@ -7574,7 +7671,8 @@ function drawSoupBowl(g, cx, cy, r, col, ids) {
 /* stations_build.js — building food: the burger bar (layers dropped onto a wobbly stack), the
    pizza (sauce, then cheese and toppings in any order, into the oven, then the cutter) and the
    dessert bar (a cone, a sundae glass, a cupcake or a cake, piled with scoops and toppings that a
-   finger can move about). */
+   finger can move about). A burger or a dessert too tall for the room makes the bar's camera (see
+   Camera) pull back, kitchen and all. */
 
 /* =================== burger bar =================== */
 const BURGER_LAYERS = ['b_patty', 'b_cheese', 'b_lettuce', 'b_tomato', 'b_onion', 'b_pickles', 'b_bacon', 'b_egg', 'b_ketchup', 'b_mustard', 'b_jalapeno', 'b_pineapple', 'b_avocado', 'b_chicken', 'b_buntop'];
@@ -7587,12 +7685,13 @@ SCREENS.burger = {
   enter(p) {
     this.rec = Store.get(p.id) || Store.data.monsters[0];
     this.pantry = this.pantry || new Pantry({ lists: [{ icon: 'burger', ids: BURGER_LAYERS }] });
-    this.stack = ['b_bunbottom']; this.fall = null; this.squash = 0; this.ready = false; this.held = null; this.flag = 0;
+    this.stack = ['b_bunbottom']; this.fall = null; this.squash = 0; this.ready = false; this.held = null; this.flag = 0; this.cam = new Camera();
   },
   layout() {
     const w = prepLayout(this, { bin: true });
     this.bw = Math.min(w.w * 0.62, 340);
     this.base = { x: w.cx, y: w.y1 - w.h * 0.08 };
+    this.cam.at(this.base.x, this.base.y);
   },
   // heights of each layer, bottom up, and the y of each one's bottom edge (at scale 1)
   geometry() {
@@ -7602,19 +7701,22 @@ SCREENS.burger = {
   },
   add(id) {
     if (this.fall) return;
-    this.fall = { id, y: -G.H, vy: 0 };
+    // it drops in from the top of the screen however far the camera has pulled back, and from above the stack
+    const z = this.cam.z, lw = this.bw * 0.05;
+    this.fall = { id, y: Math.min((-lw - G.H) / z + lw, -this.geometry().top - layerH(id, this.bw)), vy: 0 };
     Say.say(FOODS[id].name);
   },
   clear() {
-    const G0 = this.geometry(), k = this.viewK(G0);
+    const G0 = this.geometry(), C = this.cam;
     G0.layers.forEach((L, i) => {
       if (!i) return;
-      const y = this.base.y - (L.y + L.h / 2) * k;
-      Parts.add('sprite', this.base.x, y, { img: Art.sprite(L.id, 192), size: this.bw * k * 0.9, vx: rand(-420, 420), vy: -rand(200, 500), g: 1600, vr: rand(-8, 8), bounce: 0.35, life: 1.8, floor: this.base.y + 10, fade: u => (u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3) });
+      const [x, y] = C.screen(this.base.x, this.base.y - this.bw * 0.05 - L.y - L.h / 2);
+      Parts.add('sprite', x, y, { img: Art.sprite(L.id, 192), size: this.bw * C.z * 0.9, vx: rand(-420, 420), vy: -rand(200, 500), g: 1600, vr: rand(-8, 8), bounce: 0.35, life: 1.8, floor: this.base.y + 10, fade: u => (u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3) });
     });
     SFX.play('clonk'); SFX.play('whoosh');
     this.stack = ['b_bunbottom']; this.flag = 0; setReady(this, false);
   },
+  // the camera's goal: pulled back far enough for the stack to fit the room
   viewK(G0) { const room = this.work.h * 0.8; return Math.min(1, room / Math.max(1, G0.top + 60)); },
   serve() {
     const ids = this.stack.slice(), G0 = this.geometry(), px = 256;
@@ -7636,16 +7738,17 @@ SCREENS.burger = {
     this.flag = Math.min(1, this.flag + (this.ready ? dt * 3 : 0));
     const F = this.fall;
     if (F) {
-      const G0 = this.geometry(), k = this.viewK(G0), landY = -G0.top;   // in stack units, upwards negative
-      F.vy += 3000 * dt / k; F.y += F.vy * dt / k;
+      const G0 = this.geometry(), landY = -G0.top;   // in stack units, upwards negative
+      F.vy += 3000 * dt / this.cam.z; F.y += F.vy * dt;
       if (F.y >= landY) {
         this.stack.push(F.id); this.fall = null; this.squash = 1;
         SFX.play(LAYER_SOUND[F.id] || 'plop');
-        const [x, y] = [this.base.x, this.base.y - G0.top * k];
+        const [x, y] = this.cam.screen(this.base.x, this.base.y - this.bw * 0.05 - G0.top);
         Parts.burst('crumb', x, y, 5, { ang: -Math.PI / 2, spread: 2, v0: 80, v1: 200, g: 1200, sizeR: [3, 5], lifeR: [0.4, 0.8], col: FOODS[F.id].rgb, bounce: 0.3, floor: this.base.y + 6 });
         if (F.id === 'b_buntop') { setReady(this, true); this.flag = 0; SFX.play('jingle'); Parts.burst('spark', x, y - 40, 10, { v0: 120, v1: 260, sizeR: [6, 11], lifeR: [0.5, 0.9], cols: ['#fff3a0', '#ffffff', '#ffd23f'] }); }
       }
     }
+    this.cam.goal = this.viewK(this.geometry()); this.cam.update(dt);
   },
   drawStack(ctx, x, y, G0, wob) {
     G0.layers.forEach((L, i) => {
@@ -7656,15 +7759,16 @@ SCREENS.burger = {
   },
   draw(ctx) {
     const { W, H } = G, b = this.base;
-    Backdrops.draw(ctx, 'bg_kitchen', W, H, b.y);
+    Backdrops.draw(ctx, 'bg_kitchen', W, H, b.y, this.cam);
+    ctx.save(); this.cam.apply(ctx);
     // the plate
     ctx.save(); ctx.translate(b.x, b.y);
     ctx.fillStyle = 'rgba(70,35,15,0.2)'; ctx.beginPath(); ctx.ellipse(6, 10, this.bw * 0.72, this.bw * 0.13, 0, 0, TAU); ctx.fill();
     ctx.beginPath(); ctx.ellipse(0, 0, this.bw * 0.7, this.bw * 0.14, 0, 0, TAU); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = '#3a2a4a'; ctx.stroke();
     ctx.beginPath(); ctx.ellipse(0, -2, this.bw * 0.5, this.bw * 0.09, 0, 0, TAU); ctx.strokeStyle = '#d8dce8'; ctx.lineWidth = 3; ctx.stroke();
     ctx.restore();
-    const G0 = this.geometry(), k = this.viewK(G0), wob = Math.min(3, this.stack.length * 0.18);
-    ctx.save(); ctx.translate(b.x, b.y - this.bw * 0.05); ctx.scale(k, k);
+    const G0 = this.geometry(), wob = Math.min(3, this.stack.length * 0.18);
+    ctx.save(); ctx.translate(b.x, b.y - this.bw * 0.05);
     this.drawStack(ctx, 0, 0, G0, wob);
     if (this.fall) Art.drawBase(ctx, this.fall.id, 0, this.fall.y, this.bw, FLAT_LAYER[this.fall.id] || 1);
     // a flag on a toothpick once the lid is on
@@ -7676,6 +7780,7 @@ SCREENS.burger = {
       ctx.fillStyle = PAL[this.rec.design.color].stops ? '#ff5f8f' : PAL[this.rec.design.color].base; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#3a2a4a'; ctx.stroke();
       ctx.restore();
     }
+    ctx.restore();
     ctx.restore();
     Parts.draw(ctx, 0); Parts.draw(ctx, 1);
     this.pantry.draw(ctx);
@@ -7862,12 +7967,13 @@ SCREENS.dessert = {
     this.pantry.tab = 0;
     // scoops: { id, dx: its lean on the one below (of the width), x, y: its bottom middle as it glides }
     // tops: { id, on: the scoop it sits on (null: the base), ox, oy: from that one's top middle, rot }
-    this.base = null; this.scoops = []; this.tops = []; this.fall = null; this.moving = null; this.ready = false; this.held = null; this.squash = 0;
+    this.base = null; this.scoops = []; this.tops = []; this.fall = null; this.moving = null; this.ready = false; this.held = null; this.squash = 0; this.cam = new Camera();
   },
   layout() {
     const w = prepLayout(this, { bin: true });
     this.dw = Math.min(w.w * 0.42, w.h * 0.34, 230);
     this.floor = w.y1 - w.h * 0.06; this.cx = w.cx;
+    this.cam.at(this.cx, this.floor);
   },
   clear() { this.base = null; this.scoops = []; this.tops = []; this.fall = null; this.moving = null; setReady(this, false); SFX.play('swish'); this.pantry.tab = 0; },
   baseW() { return this.dw * (this.base === 'd_cone' ? 0.72 : 1); },
@@ -7895,13 +8001,26 @@ SCREENS.dessert = {
     const i = this.scoops.indexOf(s);
     return i < 0 ? [s.x, s.y] : [s.x + Math.sin(G.t * 2 + i) * i * 0.8, this.floor - (this.floor - s.y) * (1 - this.squash * 0.06)];
   },
-  // the top middle of the scoop (or base) a topping sits on
-  anchor(on) {
+  // the top middle of the scoop (or base) a topping sits on; at(scoop), if given, says where scoops are
+  anchor(on, at) {
     if (!on) return [this.cx, this.floor - this.baseH()];
-    const [x, y] = this.scoopAt(on);
+    const [x, y] = at ? at(on) : this.scoopAt(on);
     return [x, y - this.scoopH(on.id)];
   },
-  topPos(t) { const [x, y] = this.anchor(t.on); return [x + t.ox * this.dw, y + t.oy * this.dw]; },
+  topPos(t, at) { const [x, y] = this.anchor(t.on, at); return [x + t.ox * this.dw, y + t.oy * this.dw]; },
+  // how far the dessert reaches (x0 to x1 across, y0 its top), each scoop where at(scoop) puts it
+  bounds(at) {
+    let x0 = this.cx - this.dw * 0.5, x1 = this.cx + this.dw * 0.5, y0 = this.floor - this.baseH();
+    this.scoops.forEach(s => { const [x, y] = at(s); x0 = Math.min(x0, x - this.dw * 0.41); x1 = Math.max(x1, x + this.dw * 0.41); y0 = Math.min(y0, y - this.scoopH(s.id)); });
+    this.tops.forEach(t => { const [x, y] = this.topPos(t, at), r = this.topW(t.id) * 0.6; x0 = Math.min(x0, x - r); x1 = Math.max(x1, x + r); y0 = Math.min(y0, y - r); });
+    return { x0, x1, y0 };
+  },
+  // the camera's goal: pulled back far enough for the whole dessert, every scoop where it belongs, to fit the room
+  viewK() {
+    const slots = this.slots(), at = s => { const i = this.scoops.indexOf(s); return i < 0 ? this.scoopAt(s) : slots[i]; };
+    const room = this.floor - this.work.y0 - this.work.h * 0.1;
+    return Math.min(1, room / Math.max(1, this.floor - this.bounds(at).y0));
+  },
   // the outlines of the dessert's parts, the top one first: each scoop an oval, then the base
   shapes() {
     const out = [];
@@ -7932,7 +8051,8 @@ SCREENS.dessert = {
     SFX.play(id === 'd_sauce' ? 'squish' : id === 'd_cherry' ? 'boing' : 'plop', DESSERT_SCOOPS.indexOf(id) >= 0 ? {} : { f: 500 });
     if (id === 'd_cherry') SFX.play('jingle');
   },
-  sprinkle(x, y) {
+  sprinkle(wx, wy) {
+    const [x, y] = this.cam.screen(wx, wy);
     Parts.burst('confetti', x, y, 30, { ang: Math.PI / 2, spread: 0.9, v0: 40, v1: 160, g: 500, sizeR: [5, 8], lifeR: [0.6, 1], cols: ['#ff5f8f', '#ffd84a', '#4aa7f2', '#69c95c', '#9a6be2', '#ffffff'] });
     SFX.play('crinkle');
   },
@@ -7943,7 +8063,9 @@ SCREENS.dessert = {
     if (DESSERT_BASES.indexOf(id) >= 0) { this.base = id; this.scoops = []; this.tops = []; this.moving = null; SFX.play('thud'); setReady(this, true); this.pantry.tab = 1; return; }
     if (!this.base) { this.base = 'd_cone'; setReady(this, true); }
     if (id === 'd_sprinkles') this.sprinkle(this.topX(), this.floor - this.rim() - 120);
-    this.fall = { id, y: -G.H * 0.6, vy: 0, dx: DESSERT_SCOOPS.indexOf(id) < 0 && id !== 'd_sauce' ? rand(-0.12, 0.12) : 0 };
+    // it drops from the same height on the screen however far the camera has pulled back, and from above the pile
+    const z = this.cam.z;
+    this.fall = { id, y: Math.min(-G.H * 0.6, -this.rim() * z - 150) / z, vy: 0, dx: DESSERT_SCOOPS.indexOf(id) < 0 && id !== 'd_sauce' ? rand(-0.12, 0.12) : 0 };
   },
   // a topping dragged out of the cupboard goes where it is let go
   put(id, x, y) {
@@ -7957,10 +8079,11 @@ SCREENS.dessert = {
   // cherry showing through the sauce's empty corner is the cherry's); or, loosely, near its middle
   touches(t, px, py, loose) {
     const [x, y] = this.topPos(t), c = Math.cos(t.rot), s = Math.sin(t.rot), lx = (px - x) * c + (py - y) * s, ly = (py - y) * c - (px - x) * s;
-    if (loose) return Math.hypot(lx, ly) < 26;
+    const f = 1 / this.cam.z;   // a finger is as big on the screen however far the camera has pulled back
+    if (loose) return Math.hypot(lx, ly) < 26 * f;
     const w = this.topW(t.id), r = ART[t.id], k = (CHOP_U * 0.96 / Math.max(r[3], r[4])) * r[3] / w, a = foodAlpha(t.id);
     if (!a) return Math.abs(lx) < w / 2 && Math.abs(ly) < w / Art.aspect(t.id) / 2;
-    return [[0, 0], [8, 0], [-8, 0], [0, 8], [0, -8]].some(([dx, dy]) => {
+    return [[0, 0], [8 * f, 0], [-8 * f, 0], [0, 8 * f], [0, -8 * f]].some(([dx, dy]) => {
       const u = Math.round(CHOP_U / 2 + (lx + dx) * k), v = Math.round(CHOP_U / 2 + (ly + dy) * k);
       return u >= 0 && v >= 0 && u < CHOP_U && v < CHOP_U && a[(v * CHOP_U + u) * 4 + 3] > 40;
     });
@@ -8011,9 +8134,7 @@ SCREENS.dessert = {
     const at = this.slots(); this.scoops.forEach((s, i) => { s.x = at[i][0]; s.y = at[i][1]; });   // none still gliding into place
     const ids = [this.base].concat(this.scoops.map(s => s.id), this.tops.map(t => t.id));
     // fit the whole dessert, however it leans, in the picture
-    let x0 = this.cx - this.dw * 0.5, x1 = this.cx + this.dw * 0.5, y0 = this.floor - this.baseH();
-    this.scoops.forEach(s => { const [x, y] = this.scoopAt(s); x0 = Math.min(x0, x - this.dw * 0.41); x1 = Math.max(x1, x + this.dw * 0.41); y0 = Math.min(y0, y - this.scoopH(s.id)); });
-    this.tops.forEach(t => { const [x, y] = this.topPos(t), r = this.topW(t.id) * 0.6; x0 = Math.min(x0, x - r); x1 = Math.max(x1, x + r); y0 = Math.min(y0, y - r); });
+    let { x0, x1, y0 } = this.bounds(s => this.scoopAt(s));
     x0 -= this.dw * 0.05; x1 += this.dw * 0.05;
     // as wide as the picture, and a pile taller than that makes a taller picture
     const px = 256, k = Math.min(px * 0.9 / (x1 - x0), px * (DISH_TALL - 0.08) / (this.floor - y0));
@@ -8021,21 +8142,23 @@ SCREENS.dessert = {
     const S = servingOfParts(ids, 'dessert', spr, { name: this.base === 'd_cone' ? 'ice cream' : 'pudding' });
     sendDish(this, S);
   },
+  // a finger on the dessert works in the kitchen's own units, wherever the camera is
   down(p) {
     if (pickerDown(this, p)) return;
-    if (!this.moving && !this.held) this.grab(p);
+    if (!this.moving && !this.held) this.grab(this.cam.world(p));
   },
   move(p) {
     if (pickerMove(this, p)) return;
     const M = this.moving;
     if (!M || M.ptr !== p.id) return;
-    if (M.s) { M.s.x = p.x + M.dx; M.s.y = p.y + M.dy; } else { M.x = p.x + M.dx; M.y = p.y + M.dy; }
+    const q = this.cam.world(p);
+    if (M.s) { M.s.x = q.x + M.dx; M.s.y = q.y + M.dy; } else { M.x = q.x + M.dx; M.y = q.y + M.dy; }
   },
   up(p) {
     const H = this.held;
     if (H && H.ptr === p.id) {
       this.held = null;
-      if (H.moved && DESSERT_TOPS.indexOf(H.id) >= 0 && !this.pantry.hit(p.x, p.y)) this.put(H.id, p.x, p.y);
+      if (H.moved && DESSERT_TOPS.indexOf(H.id) >= 0 && !this.pantry.hit(p.x, p.y)) { const q = this.cam.world(p); this.put(H.id, q.x, q.y); }
       else this.add(H.id);
       return;
     }
@@ -8051,7 +8174,7 @@ SCREENS.dessert = {
     const F = this.fall;
     if (F) {
       const scoop = DESSERT_SCOOPS.indexOf(F.id) >= 0, target = -(this.rim() - (scoop ? 0 : TOPPING[F.id][1] * this.dw));
-      F.vy += 2600 * dt; F.y += F.vy * dt;
+      F.vy += 2600 * dt / this.cam.z; F.y += F.vy * dt;
       if (F.y >= target) {
         this.fall = null; this.squash = 1;
         if (scoop) {
@@ -8067,6 +8190,9 @@ SCREENS.dessert = {
         this.landSound(F.id);
       }
     }
+    // the camera stops still while a finger is moving part of the dessert, so the part stays under it
+    this.cam.goal = this.moving ? this.cam.z : this.viewK();
+    this.cam.update(dt);
   },
   drawDessert(ctx) {
     if (!this.base) return;
@@ -8086,21 +8212,25 @@ SCREENS.dessert = {
   },
   draw(ctx) {
     const { W, H } = G;
-    Backdrops.draw(ctx, 'bg_kitchen', W, H, this.floor);
+    Backdrops.draw(ctx, 'bg_kitchen', W, H, this.floor, this.cam);
+    ctx.save(); this.cam.apply(ctx);
     ctx.fillStyle = 'rgba(70,35,15,0.2)'; ctx.beginPath(); ctx.ellipse(this.cx, this.floor + 4, this.dw * 0.5, this.dw * 0.08, 0, 0, TAU); ctx.fill();
     this.drawDessert(ctx);
     const F = this.fall;
     if (F) { const scoop = DESSERT_SCOOPS.indexOf(F.id) >= 0; Art.drawBase(ctx, F.id, this.topX() + F.dx * this.dw, this.floor + F.y + (scoop ? this.scoopH(F.id) * 0.12 : 0), scoop ? this.dw * 0.82 : this.topW(F.id)); }
     if (!this.base) { ctx.save(); ctx.globalAlpha = 0.3 + Math.sin(G.t * 4) * 0.1; Art.draw(ctx, 'sundae', this.cx, this.floor - this.dw * 0.7, this.dw * 1.2); ctx.restore(); }
+    ctx.restore();
     Parts.draw(ctx, 0); Parts.draw(ctx, 1);
     this.pantry.draw(ctx);
   },
   drawOver(ctx) {
     const M = this.moving;
+    ctx.save(); this.cam.apply(ctx);
     if (M && M.s) {
       Art.drawBase(ctx, M.s.id, M.s.x, M.s.y, this.dw * 0.82);
       this.tops.forEach(t => { if (t.on !== M.s) return; const [x, y] = this.topPos(t); this.drawTop(ctx, t, x, y); });
     } else if (M) this.drawTop(ctx, M.t, M.x, M.y);
+    ctx.restore();
     drawPicked(this, ctx);
   },
 };
