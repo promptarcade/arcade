@@ -23,7 +23,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#8fd3f4;overscroll-beh
 <canvas id="bgc"></canvas>
 <canvas id="cc"></canvas>
 <div id="safe"></div>
-<!-- built from src/ by build.js (459173c45f) — edit the sources, not this file -->
+<!-- built from src/ by build.js (4f6ce406b8) — edit the sources, not this file -->
 <script>
 /* ---------- src/util.js ---------- */
 /* util.js — numbers, easing, seeded randomness, colours and path helpers shared by every module. */
@@ -709,13 +709,15 @@ function drawEyes(ctx, A) {
     ctx.strokeStyle = pal.line; ctx.lineCap = 'round';
     g.eyes.forEach(e => {
       const s = e.side, y = e.y - e.r * 1.38, w = e.r * 0.75;
+      // cross: low and slanting down to the middle; worried: up in the middle (a single eye's brow bends instead)
       let a = 0, lift = 0;
-      if (b === 'angry') a = s * 0.38; else if (b === 'worried') a = -s * 0.36; else if (b === 'up') lift = -e.r * 0.25;
-      else if (b === 'fierce') { a = -s * 0.45; lift = e.r * 0.12; }    // low and slanting in to the middle: really cross
+      if (b === 'angry') { a = -s * 0.45; lift = e.r * 0.12; } else if (b === 'worried') a = s * 0.38; else if (b === 'up') lift = -e.r * 0.25;
       ctx.save(); ctx.translate(e.x, y + lift); ctx.rotate(a);
       ctx.beginPath();
-      if (b === 'fierce' && s === 0) { ctx.moveTo(-w * 1.1, -6); ctx.lineTo(0, 5); ctx.lineTo(w * 1.1, -6); } else { ctx.moveTo(-w, 2); ctx.quadraticCurveTo(0, -5, w, 2); }
-      ctx.lineWidth = Math.max(4, e.r * (b === 'fierce' ? 0.32 : 0.26)); ctx.stroke();
+      if (b === 'angry' && s === 0) { ctx.moveTo(-w * 1.1, -6); ctx.lineTo(0, 5); ctx.lineTo(w * 1.1, -6); }
+      else if (b === 'worried' && s === 0) { ctx.moveTo(-w * 1.1, 5); ctx.lineTo(0, -6); ctx.lineTo(w * 1.1, 5); }
+      else { ctx.moveTo(-w, 2); ctx.quadraticCurveTo(0, -5, w, 2); }
+      ctx.lineWidth = Math.max(4, e.r * (b === 'angry' ? 0.32 : 0.26)); ctx.stroke();
       ctx.restore();
     });
   }
@@ -802,15 +804,8 @@ function drawEye(ctx, A, e) {
     ctx.fillRect(x - rx - 3, y - ry - 3, rx * 2 + 6, ly - (y - ry) + 3);
     ctx.strokeStyle = L; ctx.lineWidth = lw * 1.1; ctx.beginPath(); ctx.moveTo(x - rx, ly); ctx.lineTo(x + rx, ly); ctx.stroke();
   }
+  // cross: the lid comes down low on the side nearest the middle (a single eye's dips in the middle)
   if (ex === 'angry') {
-    ctx.fillStyle = A.pal.stops ? rbc(A.pal, '#ffd84a', 'base') : A.pal.base;
-    ctx.beginPath();
-    if (s === 0) { ctx.rect(x - rx - 2, y - ry - 2, rx * 2 + 4, ry * 0.75); }
-    else { ctx.moveTo(x + s * rx * 1.1, y - ry * 1.1); ctx.lineTo(x - s * rx * 1.1, y - ry * 1.1); ctx.lineTo(x - s * rx * 1.1, y - ry * 0.85); ctx.lineTo(x + s * rx * 1.1, y - ry * 0.05); ctx.closePath(); }
-    ctx.fill();
-  }
-  // fierce: the lid comes down low on the side nearest the middle (a single eye dips in the middle)
-  if (ex === 'fierce') {
     ctx.fillStyle = A.pal.stops ? rbc(A.pal, '#ffd84a', 'base') : A.pal.base;
     ctx.beginPath();
     if (s === 0) { ctx.moveTo(x - rx * 1.1, y - ry * 1.1); ctx.lineTo(x + rx * 1.1, y - ry * 1.1); ctx.lineTo(x + rx * 1.1, y - ry * 0.62); ctx.lineTo(x, y - ry * 0.12); ctx.lineTo(x - rx * 1.1, y - ry * 0.62); ctx.closePath(); }
@@ -820,8 +815,7 @@ function drawEye(ctx, A, e) {
   ctx.restore();
   ctx.lineWidth = lw; ctx.strokeStyle = L;
   ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, TAU); ctx.stroke();
-  if (ex === 'angry' && s !== 0) { ctx.beginPath(); ctx.moveTo(x + s * rx * 0.95, y - ry * 0.15); ctx.lineTo(x - s * rx * 0.9, y - ry * 0.8); ctx.lineWidth = lw * 1.2; ctx.stroke(); }
-  if (ex === 'fierce') {
+  if (ex === 'angry') {
     ctx.beginPath();
     if (s === 0) { ctx.moveTo(x - rx * 0.98, y - ry * 0.62); ctx.lineTo(x, y - ry * 0.12); ctx.lineTo(x + rx * 0.98, y - ry * 0.62); }
     else { ctx.moveTo(x - s * rx * 0.95, y - ry * 0.12); ctx.lineTo(x + s * rx * 0.9, y - ry * 0.8); }
@@ -2038,12 +2032,12 @@ const SOUNDS = {
   },
   // rubber (or slime) pulled long: a creak that climbs
   stretch(c, t, o) {
-    const d = o.dur || 0.8, a = c.createOscillator(), bp = c.createBiquadFilter(), g = _gain(c);
+    const d = o.dur || 0.8, a = c.createOscillator(), bp = c.createBiquadFilter(), w = _gain(c, 1), g = _gain(c);
     a.type = 'sawtooth'; a.frequency.setValueAtTime(260, t); a.frequency.exponentialRampToValueAtTime(900, t + d);
     bp.type = 'bandpass'; bp.frequency.setValueAtTime(800, t); bp.frequency.exponentialRampToValueAtTime(2200, t + d); bp.Q.value = 5;
-    a.connect(bp); bp.connect(g); g.connect(SFX.out); _env(g, t, 0.05, d * 0.7, d * 0.25, 1.0);
-    _flutter(c, g, t, d, 24, 0.9);
-    a.start(t); a.stop(t + d + 0.02);   // stopped with its envelope, so the flutter leaves no buzz behind
+    a.connect(bp); bp.connect(w); w.connect(g); g.connect(SFX.out); _env(g, t, 0.05, d * 0.7, d * 0.25, 1.0);
+    _flutter(c, w, t, d, 24, 0.9);   // the creak wobbles before its envelope, so the fade takes the wobble down too
+    a.start(t); a.stop(t + d + 0.05);
   },
   smack(c, t) { _noise(c, t, 0.09, 'highpass', 1500, 700, 0.8, 1.0, null, 0.001); _osc(c, 'sine', 200, t, 0.1, 0.6, null, 80); },
   // teeth on stone: the whole monster rings like a tuning fork, boinnng
@@ -2708,7 +2702,9 @@ function servingVerdict(mon, s) {
   else if (nDis * 2 > n) v = 'dislike';
   else v = nLove ? 'love' : 'like';
   const P = mon.persona || {}, cook = s.cook || [];
-  if (cook.indexOf(P.cookLove) >= 0) v = v === 'dislike' ? 'like' : 'love';
+  // its favourite way of cooking wins a monster over, but not to a munchy it won't eat: cooked yucky is still yucky
+  const yucky = n === 1 && v === 'dislike' && FOODS[s.parts[0]] && FOODS[s.parts[0]].groups.indexOf('munch') >= 0;
+  if (cook.indexOf(P.cookLove) >= 0 && !yucky) v = v === 'dislike' ? 'like' : 'love';
   if (cook.indexOf(P.cookHate) >= 0) v = v === 'love' ? 'like' : 'dislike';
   const spit = n > 1 && v !== 'dislike' ? s.parts.filter((id, i) => prefs[i] === 'dislike').filter((id, i, a) => a.indexOf(id) === i) : [];
   return { verdict: v, spit };
@@ -3685,8 +3681,10 @@ function* feedScript(m, S, st, opts = {}) {
       if (c.verdict === 'dislike' && ON_DISLIKE.indexOf(k) < 0) continue;
       yield* AFTER[k](c);
     }
-    for (const id of V.spit) yield* spitPart(c, id);
-    yield* VERDICT[c.verdict](c);
+    // what it won't eat is picked out and spat away: munchies all together, with a big bleh (yuck.js)
+    for (const id of V.spit) if (!isMunchy(id)) yield* spitPart(c, id);
+    if (V.spit.some(isMunchy)) yield* spitMunchies(c, V.spit.filter(isMunchy));
+    yield* (yuckyEnd(c) || VERDICT[c.verdict])(c);
     if (fx.indexOf('gassy') >= 0) yield* AFTER.gassy(c);
   }
   yield* relax(m, 0.35);
@@ -3817,7 +3815,7 @@ AFTER.hulk = function* (c) {
     yield* tween(0.3, p => { const b = Math.sin(p * Math.PI); m.pose.sx = 1 + 0.06 * b; m.pose.sy = 1 + 0.05 * b; });
   }
   // it swells up in three surges and goes green from the toes up
-  setFace(m, 'fierce', 'teeth', 0); m.face.brows = 'fierce'; m.armPose = 'flex';
+  setFace(m, 'angry', 'teeth', 0); m.face.brows = 'angry'; m.armPose = 'flex';
   SFX.play('grow', { dur: 1.1 }); SFX.play('rumble', { dur: 1.1 });
   m.tint.col = HULK_PAL.base; m.tint.level = 0;
   yield* tween(1.1, p => {
@@ -3846,7 +3844,7 @@ AFTER.hulk = function* (c) {
   m.face.wide = 1; m.pose.rot = 0;
   // SMASH, SMASH
   for (let i = 0; i < 2; i++) {
-    m.armPose = 'up'; setFace(m, 'fierce', 'teeth', 0);
+    m.armPose = 'up'; setFace(m, 'angry', 'teeth', 0);
     yield* tween(0.22, p => { m.pose.lift = 16 * p; m.pose.sy = big * (1 + 0.05 * p); });
     m.armPose = 'slam';
     yield* tween(0.07, p => { m.pose.lift = 16 * (1 - p); });
@@ -3856,7 +3854,7 @@ AFTER.hulk = function* (c) {
     yield* wait(0.12);
   }
   // a fist at a time on its chest
-  setFace(m, 'fierce', angry ? 'teeth' : 'grin', angry ? 0 : 0.5); m.armPose = 'pound';
+  setFace(m, 'angry', angry ? 'teeth' : 'grin', angry ? 0 : 0.5); m.armPose = 'pound';
   yield* during(0.65, (e, dt) => { if (Math.floor(e * 5.1) !== Math.floor((e - dt) * 5.1)) SFX.play('thud'); m.pose.sy = big * (1 + Math.abs(Math.sin(e * 16)) * 0.02); });
   // and it lets go like a balloon
   m.armPose = 'idle'; setFace(m, 'wide', 'o', 0.5); m.face.brows = null;
@@ -3868,7 +3866,7 @@ AFTER.hulk = function* (c) {
   });
   setHulk(m, 0); m.pose.rot = 0; m.pose.sx = 1; m.pose.sy = 1; m.fx.muscle = 0;
   m.decor = m.decor.filter(d => deco.indexOf(d) < 0);
-  if (angry) { setFace(m, 'fierce', 'frown', 0); m.face.brows = 'fierce'; m.armPose = 'hug'; babble(m, 'sad', 2); }
+  if (angry) { setFace(m, 'angry', 'frown', 0); m.face.brows = 'angry'; m.armPose = 'hug'; babble(m, 'sad', 2); }
   else { setFace(m, 'happy', 'smile', 0.3); m.face.blush = 1; m.armPose = 'cover'; babble(m, 'giggle', 4); }
   yield* wait(0.4);
   m.face.brows = null; m.face.blush = 0; m.armPose = 'idle';
@@ -3881,7 +3879,9 @@ AFTER.hulk = function* (c) {
    One that loves it ends with hearts, a lick round its lips and a burp to be proud of; one that
    won't goes green, gets the taste out of its mouth (a raspberry, a tongue scrub, a gargle, a gag
    or a shake like a wet dog) and has a huff. A cooked one still comes through hot or cold.
-     YUCK[id] = { love(c), dislike(c), refuse: the ways it may get the taste out, or an ending of its own, burp: which burp } */
+     YUCK[id] = { love(c), dislike(c), refuse: the ways it may get the taste out, or an ending of its own, burp: which burp }
+   Chopped, blended or in a soup a munchy is still yucky: the dish ends the same way, and one picked out
+   of a dish that is otherwise eaten is spat across the room with a raspberry. */
 
 const SICK = '#8fd14a';   // the green a monster goes when something is too horrible
 const YUCK = {};
@@ -3908,6 +3908,36 @@ function cookedFx(S) {
   if (cook.indexOf('freeze') >= 0) fx = fx.filter(x => x !== 'hot');
   if (cook.some(k => k !== 'freeze')) fx = fx.filter(x => x !== 'cold');
   return fx;
+}
+
+/* ---------- munchies in a dish ---------- */
+const isMunchy = id => !!FOODS[id] && FOODS[id].groups.indexOf('munch') >= 0;
+// the ending a dish gets when a munchy in it decides things: hearts, a lick and a burp from a monster that
+// loves munchies; going green and getting the taste out from one that won't, refusing the dish
+function yuckyEnd(c) {
+  const p = c.S.parts.filter(isMunchy).map(id => prefOf(c.m.rec, id));
+  if (c.verdict === 'love' && p.indexOf('love') >= 0) return c => grossLove(c);
+  if (c.verdict === 'dislike' && p.indexOf('dislike') >= 0) return c => yuckRefuse(c, REFUSE_KINDS);
+  return null;
+}
+// munchies picked out of a dish it otherwise eats: spat out one after another, far, then a raspberry
+function* spitMunchies(c, ids) {
+  const m = c.m, dir = dirOf(c);
+  setFace(m, 'wide', 'flat', 0); m.face.brows = 'up';
+  yield* goGreen(m, 0.3, 0.55);
+  m.face.brows = null;
+  for (const id of ids) {
+    setFace(m, 'squeeze', 'o', 0.6); SFX.play('ptoo'); SFX.play('spit');
+    const [x, y] = m.mouthPos();
+    Parts.add('sprite', x, y, { img: Art.sprite(FOODS[id].pic, 128), size: 52 * K(m), vx: dir * rand(420, 560), vy: -rand(420, 560), g: 1500, vr: dir * rand(8, 12), bounce: 0.4, life: 2, floor: c.st.floor + 8, fade: u => (u < 0.75 ? 1 : 1 - (u - 0.75) / 0.25) });
+    yield* tween(0.2, p => { m.pose.x = -dir * 8 * Math.sin(p * Math.PI); m.face.open = 0.6 * (1 - p); });
+    yield* wait(0.08);
+  }
+  m.pose.x = 0;
+  yield* REFUSE.bleh(c);
+  const a = m.tint.amt;
+  yield* tween(0.3, p => { m.tint.amt = a * (1 - p); });
+  m.tint.amt = 0;
 }
 
 /* ---------- small helpers ---------- */
@@ -3979,7 +4009,7 @@ function* yuckRefuse(c, kinds) {
   yield* goGreen(m);
   yield* REFUSE[pick(kinds)](c);
   // a huff: arms folded, a cross look, no no no
-  setFace(m, 'fierce', 'frown', 0); m.face.brows = 'fierce'; m.armPose = 'hug';
+  setFace(m, 'angry', 'frown', 0); m.face.brows = 'angry'; m.armPose = 'hug';
   babble(m, 'sad', 2);
   yield* shakeHead(m, 0.55, 0.16);
   const a = m.tint.amt;
@@ -3990,7 +4020,7 @@ function* yuckRefuse(c, kinds) {
 function* ouchRefuse(c) {
   const m = c.m;
   if (m.held) spitHeld(c);
-  setFace(m, 'fierce', 'frown', 0); m.face.brows = 'fierce'; m.armPose = 'hug';
+  setFace(m, 'angry', 'frown', 0); m.face.brows = 'angry'; m.armPose = 'hug';
   babble(m, 'sad', 2);
   yield* shakeHead(m, 0.6, 0.16);
   yield* wait(0.25);
@@ -4668,7 +4698,7 @@ YUCK.rock = {
   *love(c) {
     yield* clonk(c);
     const m = c.m;
-    setFace(m, 'fierce', 'flat', 0); m.face.brows = 'fierce';
+    setFace(m, 'angry', 'flat', 0); m.face.brows = 'angry';
     babble(m, 'ow', 2, 0.8);
     yield* during(0.5, () => { if (m.held) { const [x, y] = heldAt(m); m.lookAt = { x, y }; } });
     m.lookAt = null;
@@ -4696,7 +4726,7 @@ YUCK.rock = {
   *dislike(c) {
     yield* clonk(c);
     const m = c.m, H = m.held, s = heldSize(m), dir = dirOf(c);
-    setFace(m, 'fierce', 'frown', 0); m.face.brows = 'fierce'; babble(m, 'ow', 2);
+    setFace(m, 'angry', 'frown', 0); m.face.brows = 'angry'; babble(m, 'ow', 2);
     m.armPose = 'up'; SFX.play('whoosh');
     const [, my] = m.mouthPos(), high = -((my - c.st.top) / m.scale + 90), top = m.g.bodyTop - m.g.mouth.y - H.size * 0.4, y0 = H.dy;
     yield* tween(0.45, p => { H.dy = lerp(y0, high, Ease.out(p)); H.rot = p * 2; });
@@ -4833,7 +4863,7 @@ YUCK.sunflower = {
     yield* tween(0.35, p => { F.k = Ease.back(p); });
     setFace(m, 'happy', 'grin', 0.4); babble(m, 'happy', 3);
     const spot = flowerSpot(m);
-    yield* during(0.5, () => { const [tx, ty] = m.toScreen(spot.x, spot.y - 34); m.lookAt = { x: tx, y: ty }; });
+    yield* during(0.5, () => { const [tx, ty] = m.toScreen(spot.x, spot.y - 34 * spot.s); m.lookAt = { x: tx, y: ty }; });
     m.lookAt = null;
   },
   // one sniff: choo! choo!! AAACHOOO!!! each sneeze bigger, blowing it further back; it ends up
@@ -4872,7 +4902,7 @@ YUCK.sunflower = {
     setFace(m, 'shut', 'o', 0.4); SFX.play('puff'); SFX.play('squeak', { f: 1500 });
     yield* tween(0.2, p => { m.pose.rot = -0.08 * Math.sin(p * Math.PI); });
     SFX.play('sniff');
-    setFace(m, 'fierce', 'frown', 0); m.face.brows = 'fierce'; m.armPose = 'hug';
+    setFace(m, 'angry', 'frown', 0); m.face.brows = 'angry'; m.armPose = 'hug';
     babble(m, 'sad', 2);
     yield* shakeHead(m, 0.5, 0.14);
     m.face.brows = null; m.armPose = 'idle';
@@ -5231,17 +5261,16 @@ function drawPrickles(ctx, m, P) {
 // a horn, a crown, a tuft, a sprout, spikes or a curl in the middle (body space; the flower's head is 34 above)
 function flowerSpot(m) {
   const g = m.g, B = g.B, busy = ['unicorn', 'crown', 'tuft', 'sprout', 'spikes'].indexOf(m.d.top) >= 0 || B.curl;
-  const at = x => ({ x, y: (g.F.topAt(x) || g.bodyTop) + 6 });
-  for (const x of busy ? [-0.4, 0.4, -0.72, 0.72] : [0, -0.4, 0.4, -0.72, 0.72]) {
-    const p = at(x * B.w);
-    if (g.eyes.every(e => dist(p.x, p.y - 34, e.x, e.y) > e.r + 22)) return p;
-  }
-  return at(-0.72 * B.w);
+  const pair = ['horns', 'bunny', 'cat', 'antennae'].indexOf(m.d.top) >= 0;
+  const at = (x, s) => ({ x, y: (g.F.topAt(x) || g.bodyTop) + 6, s });
+  const clear = p => g.eyes.every(e => dist(p.x, p.y - 34, e.x, e.y) > e.r + 22) && (!pair || g.tops.every(([tx, ty]) => dist(p.x, p.y - 34, tx, ty - 30) > 40));
+  for (const x of busy ? [-0.4, 0.4, -0.72, 0.72] : [0, -0.4, 0.4, -0.72, 0.72]) { const p = at(x * B.w, 1); if (clear(p)) return p; }
+  return at(busy ? -0.72 * B.w : 0, 0.7);   // nowhere quite clear: a smaller one, tucked in low
 }
 // a flower growing out of the top of its head
 function drawHeadFlower(ctx, m, F) {
   if (F.k < 0.02) return;
-  const { x, y } = flowerSpot(m), k = F.k, tx = x + Math.sin(m.t * 2.5) * 5 * k, ty = y - 34 * k;
+  const { x, y, s } = flowerSpot(m), k = F.k * s, tx = x + Math.sin(m.t * 2.5) * 5 * k, ty = y - 34 * k;
   ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(x, y + 8); ctx.quadraticCurveTo(x - 2, y - 16 * k, tx, ty);
   ctx.lineWidth = 8; ctx.strokeStyle = '#1f5a2a'; ctx.stroke(); ctx.lineWidth = 4; ctx.strokeStyle = '#4fb05a'; ctx.stroke();
