@@ -23,7 +23,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#8fd3f4;overscroll-beh
 <canvas id="bgc"></canvas>
 <canvas id="cc"></canvas>
 <div id="safe"></div>
-<!-- built from src/ by build.js (611403a526) — edit the sources, not this file -->
+<!-- built from src/ by build.js (b93d32834d) — edit the sources, not this file -->
 <script>
 /* ---------- src/util.js ---------- */
 /* util.js — numbers, easing, seeded randomness, colours and path helpers shared by every module. */
@@ -1359,7 +1359,7 @@ class Monster {
     ctx.rotate(H.rot || 0);
     if (H.sx) ctx.scale(H.sx, H.sy || 1);
     const sz = H.size * (H.k === undefined ? 1 : H.k);
-    ctx.drawImage(H.spr, -sz / 2, -sz / 2, sz, sz);
+    drawServing(ctx, H.spr, 0, 0, sz, false);
     ctx.restore();
   }
   // things in front of everything: a bubble-gum bubble, dizzy stars
@@ -1431,6 +1431,7 @@ class Particles {
       if (p.age >= p.life) { if (p.onDie) p.onDie(p, this); L.splice(i, 1); continue; }
       if (p.type === 'fly') { this.flyStep(p, dt); continue; }
       if (p.type === 'crawler') { this.crawlStep(p, dt); continue; }
+      if (p.type === 'tower') { if (p.follow) p.follow(p); if (p.fall) this.topple(p, dt); continue; }
       if (p.type === 'butterfly') { p.vx += Math.sin(p.age * 3) * 40 * dt; p.vy += (Math.sin(p.age * 7) * 120 - 30) * dt; }
       p.vy += p.g * dt;
       if (p.drag) { const k = Math.exp(-p.drag * dt); p.vx *= k; p.vy *= k; }
@@ -1457,6 +1458,14 @@ class Particles {
       return;
     }
     p.x += p.dir * p.speed * Math.max(0, Math.sin((p.age - p.landed) * 7)) * dt;
+  }
+  // a tall dish knocked over: it tips on its foot faster and faster towards fall (+1 right, -1 left), lands
+  // flat (onLand), then fades away
+  topple(p, dt) {
+    if (p.down === undefined) {
+      p.vr += p.fall * 14 * dt; p.rot += p.vr * dt;
+      if (Math.abs(p.rot) >= Math.PI / 2) { p.rot = p.fall * Math.PI / 2; p.down = p.age; if (p.onLand) p.onLand(p); }
+    } else if ((p.alpha = 1 - (p.age - p.down - 0.2) / 0.35) <= 0) p.life = p.age;
   }
   draw(ctx, layer) {
     this.drawPuffs(ctx, layer);
@@ -1604,7 +1613,15 @@ class Particles {
         if (!p.img) break;
         ctx.translate(p.x, p.y); ctx.rotate(p.rot);
         if (p.flipX) ctx.scale(-1, 1);
-        ctx.drawImage(p.img, -s / 2, -s / 2, s, s);
+        drawServing(ctx, p.img, 0, 0, s, false);
+        break;
+      }
+      case 'tower': {     // a tall dish standing on the floor, its foot at (x, y): as wide as size, no higher than maxH; it tips over on its foot
+        if (!p.img) break;
+        const d = standSize(p.img, s, p.maxH);
+        if (!p.rot) { ctx.fillStyle = 'rgba(40,24,60,0.2)'; ctx.beginPath(); ctx.ellipse(p.x, p.y + 2, d.w * 0.5, d.w * 0.09, 0, 0, TAU); ctx.fill(); }
+        ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+        ctx.drawImage(p.img, -d.w / 2, -d.h, d.w, d.h);
         break;
       }
       case 'popcorn': {
@@ -2473,9 +2490,12 @@ const Art = {
 
 function makeCanvas(w, h) { const c = document.createElement('canvas'); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; }
 function copyCanvas(src) { const c = makeCanvas(src.width, src.height); c.getContext('2d').drawImage(src, 0, 0); return c; }
-// the painted part of a sprite: the box around its opaque pixels
+// the painted part of a sprite: the box around its opaque pixels (the whole of it where the host refuses
+// pixel reads, as the claude.ai copy's other-address pictures make it)
 function opaqueBox(c) {
-  const g = c.getContext('2d'), { width: w, height: h } = c, d = g.getImageData(0, 0, w, h).data;
+  const g = c.getContext('2d'), { width: w, height: h } = c;
+  let d;
+  try { d = g.getImageData(0, 0, w, h).data; } catch (e) { return { x: 0, y: 0, w, h }; }
   let x0 = w, y0 = h, x1 = -1, y1 = -1;
   for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) if (d[(y * w + x) * 4 + 3] > 40) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
   return x1 < 0 ? { x: 0, y: 0, w, h } : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
@@ -2494,6 +2514,41 @@ function bitten(src, n, seed) {
     }
     g.fillRect(b.x - 4, 0, b.w + 8, depth - R * 1.1);
   }
+  return c;
+}
+
+/* ---------- tall dishes ---------- */
+// A serving's picture is as wide as it is tall, or taller (a burger or a pudding built high). Where a
+// square one fills a box s across, a taller one stands as wide as the box on the box's bottom edge, no
+// higher than maxH (thinner if it must be), or is fitted inside the box.
+function standSize(spr, s, maxH) {
+  const r = spr.height / spr.width;
+  let w = s, h = s * r;
+  if (maxH && h > maxH) { h = Math.max(s, maxH); w = h / r; }
+  return { w, h };
+}
+// a serving's picture in the box s across centred on (x, y): standing in it, or fitted inside it
+function drawServing(ctx, spr, x, y, s, stand, maxH) {
+  if (spr.height <= spr.width) { ctx.drawImage(spr, x - s / 2, y - s / 2, s, s); return; }
+  const d = stand ? standSize(spr, s, maxH) : { w: s * spr.width / spr.height, h: s };
+  ctx.drawImage(spr, x - d.w / 2, y + s / 2 - d.h, d.w, d.h);
+}
+// a tall dish being eaten from the top: its picture with everything above y (its own pixels) bitten away,
+// edged like bitten's bites; drawn into one spare canvas each time, so a long meal makes no pile of them
+function biteDown(src, y, seed) {
+  const c = src._bit || (src._bit = makeCanvas(src.width, src.height)), g = c.getContext('2d'), b = src._box || (src._box = opaqueBox(src));
+  const f = seeded(seed || 3), R = b.w * 0.2;
+  g.clearRect(0, 0, c.width, c.height); g.drawImage(src, 0, 0);
+  g.globalCompositeOperation = 'destination-out';
+  for (let i = -2; i <= 2; i++) { g.beginPath(); g.arc(b.x + b.w / 2 + i * b.w * 0.2 + (f() - 0.5) * 8, y - R * 0.55 + Math.abs(i) * R * 0.12, R, 0, TAU); g.fill(); }
+  g.fillRect(0, 0, c.width, y - R * 1.1);
+  g.globalCompositeOperation = 'source-over';
+  return c;
+}
+// what is left of it, in a square picture w pixels across with its bottom where the tall one's was
+function stubOf(src, w) {
+  const c = makeCanvas(w, w);
+  c.getContext('2d').drawImage(src._bit || src, (w - src.width) / 2, w - src.height);
   return c;
 }
 
@@ -2733,6 +2788,18 @@ const K = m => m.scale;
 /* ---------- small helpers ---------- */
 function setFace(m, eyes, mouth, open) { if (eyes) m.face.eyes = eyes; if (mouth) m.face.mouth = mouth; if (open !== undefined) m.face.open = open; }
 function heldSize(m) { return clamp(m.g.B.w * 1.15, 92, 140); }
+// a dish built more than this much taller than it is wide is too tall to hold: it stands on the floor to be
+// eaten (a thick stack of fillings, a pile of scoops); smaller ones are held
+const TOWER_R = 2;
+function isTower(S) { return !!S.spr && S.spr.height > S.spr.width * TOWER_R; }
+// how tall a dish standing on the floor may be drawn: low enough for the monster to leap up to its top
+// and bite it with its head still on the screen
+function towerRoom(m, st) { return st.floor - G.safe.t - (m.g.mouth.y - m.g.bodyTop + 40) * K(m) - 10; }
+// where it stands: on the floor beside the monster, on the open side, in a box as big as a held one
+function towerSpot(m, st) {
+  const s = heldSize(m) * K(m), dir = m.x > st.mid ? -1 : 1;
+  return { x: m.x + dir * (m.g.B.w * 0.8 * K(m) + s * 0.2), y: st.floor, s, dir, maxH: towerRoom(m, st) };
+}
 function crumbs(c, n, big) {
   const m = c.m, [x, y] = m.mouthPos(), col = c.S.col || '#d8a050';
   Parts.burst('crumb', x, y + 6 * K(m), n, { ang: Math.PI / 2, spread: Math.PI * 1.3, v0: 80, v1: big ? 320 : 200, g: 1100, sizeR: [3 * K(m), (big ? 8 : 5) * K(m)], lifeR: [0.8, 1.5], col, bounce: 0.35, vr: 8, floor: c.st.floor, cols: [col, darken(col, 0.15), lighten(col, 0.2)] });
@@ -2860,6 +2927,98 @@ EAT.bigbite = function* (c) {
   m.pose.sx = 1; m.pose.sy = 1;
   yield* gulp(m, true);
 };
+// a dish built more than twice as high as it is wide (a burger, a pudding) is too tall to hold: it stands
+// on the floor beside the monster (keeping to its spot if the screen turns round), which looks up at it,
+// leaps to bite the top off until what is left fits in its hands, eats that the dish's own way and burps
+// the room down. One it won't eat gets a single bite, then a shove, and over it goes.
+EAT.tower = function* (c) {
+  const m = c.m, src = c.S.spr, b = src._box || (src._box = opaqueBox(src));
+  let T = towerSpot(m, c.st);
+  const D = () => standSize(src, T.s, T.maxH), PX = () => D().h / src.height;   // its size on screen; screen pixels to a picture pixel
+  const P = Parts.add('tower', T.x, T.y, { img: src, size: T.s, maxH: T.maxH, life: 1e9, age: 1, fade: () => 1, layer: 0,
+    follow: q => { T = towerSpot(m, c.st); q.x = T.x; q.y = T.y; q.size = T.s; q.maxH = T.maxH; } });
+  let cut = b.y;                                          // the picture is eaten above this
+  const top = () => T.y - D().h + cut * PX();             // the screen y of the top of what is left
+  // eaten down to what fits in its hands, in up to four leaps (only the first, to try it, if it won't eat it)
+  const d = D(), eat = Math.max((b.y + b.h - cut) * PX() - T.s * 0.85, d.w * 0.3), leaps = clamp(Math.ceil(eat / (d.w * 0.9)), 1, 4);
+  const bite = eat / leaps / PX(), n = c.verdict === 'dislike' ? 1 : leaps;   // a bite, in picture pixels
+  // whoa
+  m.lookAt = { x: T.x, y: top() };
+  setFace(m, 'wide', 'o', 0.6); m.face.brows = 'up';
+  SFX.play('gasp'); babble(m, 'ask', 2);
+  yield* tween(0.3, p => { m.pose.rot = -T.dir * 0.1 * Ease.out(p); m.pose.sy = 1 + 0.04 * p; });
+  yield* wait(0.3);
+  m.face.brows = null;
+  for (let i = 0; i < n; i++) {
+    yield* leapBite(c, T, top() + bite * PX() * 0.5, () => {
+      cut += bite; P.img = biteDown(src, cut, 5 + i);
+      crumbs(c, 12, true);
+      const [x, y] = m.mouthPos(), id = pick(c.S.parts);   // a bit of it falls off
+      Parts.add('sprite', x, y, { img: Art.sprite(FOODS[id].pic, 96), size: T.s * 0.32, vx: T.dir * rand(60, 220), vy: -rand(120, 260), g: 1400, vr: rand(-9, 9), bounce: 0.35, life: 1.6, floor: c.st.floor + 6, fade: u => (u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3) });
+    });
+  }
+  m.lookAt = null;
+  if (c.verdict === 'dislike') {
+    // won't eat it: a shove, and over it goes (it falls, lands and fades by itself)
+    setFace(m, 'squeeze', 'frown', 0); m.armPose = 'shake';
+    const X = (T.x - m.x) / K(m) * 0.25;
+    yield* tween(0.14, p => { m.pose.x = X * Ease.out(p); });
+    SFX.play('boing', { f: 180 });
+    P.fall = T.dir;
+    P.onLand = q => {
+      SFX.play('thud'); SFX.play('clonk'); c.st.shake = 8;
+      Parts.burst('crumb', q.x + T.dir * D().h * 0.5, q.y - 6, 14, { ang: -Math.PI / 2, spread: 2.4, v0: 80, v1: 260, g: 1200, sizeR: [3 * K(m), 6 * K(m)], lifeR: [0.6, 1.1], col: c.S.col, bounce: 0.3, floor: c.st.floor });
+    };
+    yield* tween(0.3, p => { m.pose.x = X * (1 - p); });
+    yield* wait(0.5);
+    m.armPose = 'idle';
+    return;
+  }
+  // what is left goes up into its hands, from just where it stood, and is eaten the dish's own way
+  const hs = heldSize(m), stub = stubOf(src, Math.round(src.width * T.s / D().w)), M = m.g.mouth, [ux, uy] = m.toBody(T.x, T.y - T.s / 2);
+  P.life = 0; P.follow = null;
+  const H = hold(m, stub, { dx: ux - M.x, dy: uy - M.y }), dx0 = H.dx, dy0 = H.dy;
+  // into the grip the way of eating it starts from: the big bite's, higher and bigger, or the usual one
+  const c2 = Object.assign({}, c, { S: Object.assign({}, c.S, { spr: stub }) }), style = eatStyle(c2, true), big = style === EAT.bigbite;
+  m.armPose = 'hold'; setFace(m, 'wide', 'smile', 0);
+  yield* tween(0.25, p => { const e = Ease.inOut(p); H.dx = lerp(dx0, 0, e); H.dy = lerp(dy0, hs * (big ? 0.55 : 0.42), e); H.k = lerp(1, big ? 1.15 : 1, e); });
+  yield* style(c2);
+  // so much food: a burp to rattle the room
+  setFace(m, 'happy', 'o', 0.2); m.armPose = 'pat';
+  yield* tween(0.2, p => { m.face.cheeks = 0.8 * p; m.pose.sx = 1 + 0.1 * p; m.pose.sy = 1 - 0.05 * p; });
+  SFX.play('burp', { dur: 1.1, f: 78 }); c.st.shake = 5;
+  const [bx, by] = m.mouthPos();
+  for (let i = 0; i < 5; i++) Parts.add('puff', bx, by, { size: rand(10, 16) * K(m), grow: 2.4, vx: rand(-80, 80), vy: -rand(60, 160), drag: 1.4, life: rand(0.9, 1.3), col: '#ffffff', alpha: 0.7 });
+  Parts.add('ring', bx, by, { size: 22 * K(m), grow: 5, life: 0.55, col: 'rgba(255,255,255,0.9)', width: 6 * K(m) });
+  yield* during(0.9, e => { m.face.open = 1 - e / 0.9 * 0.6; m.face.cheeks = 0.8 * (1 - e / 0.9); m.pose.rot = Math.sin(e * 30) * 0.03; });
+  m.pose.rot = 0; m.armPose = 'idle';
+  yield* tween(0.2, p => { m.pose.sx = 1.1 - 0.1 * p; m.pose.sy = 0.95 + 0.05 * p; });
+};
+// a leap beside the monster with its mouth wide open, up to screen height y at the dish (T), a chomp at
+// the top (bit takes the bite), and down again with a mouthful to chew
+function* leapBite(c, T, y, bit) {
+  const m = c.m, s = K(m), X = ((T.x - m.x) / s - m.g.mouth.x) * 0.8, lean = T.dir * 0.12;
+  // how high: where the mouth would be at the top of the leap, before lifting off; a top lower than the
+  // mouth (a tall monster) is ducked down to instead, the body squashing towards its feet
+  const P0 = Object.assign({}, m.pose);
+  Object.assign(m.pose, { x: X, rot: lean, lift: 0, sx: 0.97, sy: 1.05, shake: 0 }); m.computeMatrix();
+  const my = m.mouthPos()[1], L = Math.max(0, (my - y) / s);
+  const sy = my < y ? clamp(1.05 * (c.st.floor - y) / Math.max(1, c.st.floor - my), 0.6, 1.05) : 1.05, sx = sy < 1 ? 1 + (1 - sy) * 0.6 : 0.97;
+  Object.assign(m.pose, P0); m.computeMatrix();
+  m.lookAt = { x: T.x, y };
+  m.armPose = 'up'; setFace(m, 'wide', 'smile', 0);
+  yield* tween(0.1, p => { m.pose.sy = 1 - 0.12 * p; m.pose.sx = 1 + 0.08 * p; m.pose.rot = P0.rot * (1 - p); });
+  SFX.play('whoosh', { dur: 0.3 });
+  yield* tween(0.3, p => { const e = Ease.out(p); m.pose.lift = L * e; m.pose.x = X * e; m.pose.rot = lean * e; m.pose.sy = lerp(0.88, sy, p); m.pose.sx = lerp(1.08, sx, p); m.face.open = 1.3 * p; m.face.wide = 1 + 0.35 * p; });
+  SFX.play('chomp'); SFX.play('crunch', { big: true });
+  bit();
+  setFace(m, 'squeeze', 'smile', 0); m.face.wide = 1; m.face.cheeks = 1.1;
+  yield* tween(0.28, p => { const e = Ease.in(p); m.pose.lift = L * (1 - e); m.pose.x = X * (1 - e); m.pose.rot = lean * (1 - e); m.pose.sy = lerp(sy, 1, p); m.pose.sx = lerp(sx, 1, p); });
+  if (L > 0) { SFX.play('thud'); c.st.shake = Math.min(7, 2 + L * s / 90); }
+  m.armPose = 'idle';
+  yield* tween(0.1, p => { m.pose.sy = 1 - 0.1 * Math.sin(p * Math.PI); m.pose.sx = 1 + 0.07 * Math.sin(p * Math.PI); });
+  yield* chew(m, 0.3);
+}
 // peel it, throw the peel over a shoulder, then eat
 EAT.peel = function* (c) {
   const m = c.m;
@@ -3055,8 +3214,9 @@ EAT.sticky = function* (c) {
   yield* tween(0.25, p => { m.face.open = 1 - p * 0.6; });
   m.armPose = 'idle';
 };
-// how a cooked or plain mouthful goes in when it has no special way
-function eatStyle(c) {
+// how a cooked or plain mouthful goes in when it has no special way (held: what is left of a tall dish, in its hands)
+function eatStyle(c, held) {
+  if (!held && isTower(c.S)) return EAT.tower;
   const fx = c.fx;
   for (const k of ['bigbite', 'peel', 'typewriter', 'noodles', 'suck', 'vanish', 'rock', 'bones', 'slimy', 'cheesy', 'chewy', 'sticky']) if (fx.indexOf(k) >= 0) return EAT[k];
   if (c.S.drink) return EAT.drink;
@@ -6136,10 +6296,32 @@ SCREENS.feed = {
     } }));
   },
   mouth() { return this.mon.mouthPos(); },
+  // how tall a dish built high is drawn: the same on the plate, in a finger and standing beside the monster
+  room() { return towerRoom(this.mon, this.stage); },
+  // what a finger takes off the plate (the dish, or else the first food waiting there) and where it stands:
+  // its foot (x, y) and the box it is drawn in (s)
+  onPlate() {
+    const P = this.plate;
+    return this.dish ? { S: this.dish.S, x: P.x, y: P.y + P.r * 0.2, s: P.r * 1.8 } : { S: this.queue[0], x: P.x - P.r * 0.35, y: P.y + P.r * 0.05, s: P.r * 1.4 };
+  },
+  // a finger on the high part of a dish too tall to hold, standing on the plate
+  onTall(p) {
+    const O = this.onPlate();
+    if (!isTower(O.S)) return false;
+    const d = standSize(O.S.spr, O.s, this.room());
+    return Math.abs(p.x - O.x) < d.w * 0.55 && p.y < O.y && p.y > O.y - d.h;
+  },
   // the plate holds three and the mouth one (taken while the monster is busy): all full, counting what is on its way?
   full() { return this.flying.filter(F => !F.back).length + this.queue.length + (this.eating || this.mon.busy ? 1 : 0) >= 4; },
-  // send a food flying from (x, y) to the monster's mouth
-  fling(S, x, y) {
+  // send a food flying from (x, y) to the monster's mouth; a dish too tall to hold hops upright from where
+  // it stood (from: its foot and box) to stand beside the monster
+  fling(S, x, y, from) {
+    if (isTower(S)) {
+      const f = from || { x, y, s: this.pantry.tile || 90 };
+      this.flying.push({ S, t: 0, dur: 0.6, x: f.x, y: f.y, s: f.s, tower: { x0: f.x, y0: f.y, s0: f.s } });
+      SFX.play('whoosh', { dur: 0.45 });
+      return;
+    }
     const [mx, my] = this.mouth();
     this.flying.push({ S, x0: x, y0: y, x, y, t: 0, dur: clamp(dist(x, y, mx, my) / 900, 0.35, 0.7), size: this.pantry.tile || 90 });
     SFX.play('whoosh', { dur: 0.3 });
@@ -6155,10 +6337,13 @@ SCREENS.feed = {
     }
     // the dish or a waiting food on the plate (one food in the hand at a time: other fingers can't grab)
     const P = this.plate;
-    if (!this.held && (this.dish || this.queue.length) && dist(p.x, p.y, P.x, P.y - P.r * 0.6) < P.r * 1.3) {
-      const S = this.dish ? this.dish.S : this.queue.shift();
+    if (!this.held && (this.dish || this.queue.length) && (dist(p.x, p.y, P.x, P.y - P.r * 0.6) < P.r * 1.3 || this.onTall(p))) {
+      const O = this.onPlate(), S = this.dish ? this.dish.S : this.queue.shift();
       this.dish = null;
       this.held = { S, x: p.x, y: p.y, ptr: p.id, size: P.r * 1.6, t0: G.t, x0: p.x, y0: p.y, fromPlate: true };
+      // one too tall to hold is held where the finger took it: its foot stays as far from the finger as it
+      // was, and it stays the size it stood
+      if (isTower(S)) { this.held.foot = [O.x - p.x, O.y - p.y]; this.held.size = O.s / 1.25; }
       Say.say(S.name);
       return;
     }
@@ -6195,7 +6380,7 @@ SCREENS.feed = {
     this.held = null;
     const m = this.mon, [mx, my] = this.mouth();
     const near = dist(p.x, p.y, mx, my) < Math.max(150, 260 * m.scale) || m.hit(p.x, p.y, 40);
-    if (!cancel && (!H.moved || near)) { this.fling(H.S, H.x, H.y); m.face.open = 0; return; }
+    if (!cancel && (!H.moved || near)) { this.fling(H.S, H.x, H.y, H.foot && { x: H.x + H.foot[0], y: H.y + H.foot[1], s: H.size * 1.25 }); m.face.open = 0; return; }
     // dropped somewhere else: back to where it came from
     if (H.fromPlate) { if (H.S.kind !== 'food' && !this.dish) this.dish = { S: H.S, t: 0 }; else this.queue.unshift(H.S); return; }
     this.flying.push({ S: H.S, x0: H.x, y0: H.y, x: H.x, y: H.y, t: 0, dur: 0.3, size: H.size, back: H.tile });
@@ -6222,15 +6407,17 @@ SCREENS.feed = {
       const F = this.flying[i];
       F.t += dt;
       const u = Math.min(1, F.t / F.dur);
-      if (F.back) { F.x = lerp(F.x0, F.back[0], Ease.inOut(u)); F.y = lerp(F.y0, F.back[1], Ease.inOut(u)); F.k = 1 - u * 0.3; }
+      if (F.tower) { const T = F.tower, E = towerSpot(m, st); F.x = lerp(T.x0, E.x, u); F.y = lerp(T.y0, E.y, u) - Math.sin(u * Math.PI) * 90; F.s = lerp(T.s0, E.s, u); F.rot = E.dir * 0.14 * Math.sin(u * TAU); }
+      else if (F.back) { F.x = lerp(F.x0, F.back[0], Ease.inOut(u)); F.y = lerp(F.y0, F.back[1], Ease.inOut(u)); F.k = 1 - u * 0.3; }
       else { const [mx, my] = this.mouth(); F.x = lerp(F.x0, mx, u); F.y = lerp(F.y0, my, u) - Math.sin(u * Math.PI) * 120; F.k = lerp(1, 0.8, u); F.rot = u * 6; }
       if (u >= 1) { this.flying.splice(i, 1); if (!F.back) this.serve(F.S); }
     }
     // the next waiting food, once the monster is free and nothing is already on its way
     const inAir = this.flying.some(F => !F.back);
-    if (!m.busy && !this.eating && !inAir && this.queue.length && !this.held) { const S = this.queue.shift(); this.fling(S, this.plate.x, this.plate.y - this.plate.r * 0.5); }
+    const P = this.plate;
+    if (!m.busy && !this.eating && !inAir && this.queue.length && !this.held) { const S = this.queue.shift(); this.fling(S, P.x, P.y - P.r * 0.5, { x: P.x - P.r * 0.35, y: P.y + P.r * 0.05, s: P.r * 1.4 }); }
     // a dish nobody touches gets eaten anyway
-    if (this.dish && !m.busy && !this.eating && !inAir && !this.held) { this.dish.t += dt; if (this.dish.t > 5) { const S = this.dish.S; this.dish = null; this.fling(S, this.plate.x, this.plate.y - this.plate.r * 0.5); } }
+    if (this.dish && !m.busy && !this.eating && !inAir && !this.held) { this.dish.t += dt; if (this.dish.t > 5) { const S = this.dish.S; this.dish = null; this.fling(S, P.x, P.y - P.r * 0.5, { x: P.x, y: P.y + P.r * 0.2, s: P.r * 1.8 }); } }
     // thought bubble when nothing has happened for a while
     this.idle += dt;
     if (!this.bubble && this.idle > 7 && !m.busy && !this.held) {
@@ -6255,13 +6442,18 @@ SCREENS.feed = {
     const P = this.plate;
     if (this.dish || this.queue.length) {
       Art.blit(ctx, 'k_plate', P.x, P.y - P.r * 0.15, P.r * 2);
-      if (this.dish) { const b = Math.abs(Math.sin(G.t * 4)) * 8; ctx.drawImage(this.dish.S.spr, P.x - P.r * 0.9, P.y - P.r * 1.6 - b, P.r * 1.8, P.r * 1.8); }
-      this.queue.forEach((S, i) => ctx.drawImage(S.spr, P.x - P.r * 0.7 + (i - 1) * P.r * 0.35, P.y - P.r * 1.35 - i * 6, P.r * 1.4, P.r * 1.4));
+      if (this.dish) { const b = Math.abs(Math.sin(G.t * 4)) * 8; drawServing(ctx, this.dish.S.spr, P.x, P.y - P.r * 0.7 - b, P.r * 1.8, isTower(this.dish.S), this.room()); }
+      this.queue.forEach((S, i) => drawServing(ctx, S.spr, P.x + (i - 1) * P.r * 0.35, P.y - P.r * 0.65 - i * 6, P.r * 1.4, isTower(S), this.room()));
     }
     Parts.draw(ctx, 0);
     m.draw(ctx);
     Parts.draw(ctx, 1);
-    this.flying.forEach(F => { const s = F.size * (F.k || 1); ctx.save(); ctx.translate(F.x, F.y); ctx.rotate(F.rot || 0); ctx.drawImage(F.S.spr, -s / 2, -s / 2, s, s); ctx.restore(); });
+    this.flying.forEach(F => {
+      ctx.save(); ctx.translate(F.x, F.y); ctx.rotate(F.rot || 0);
+      if (F.tower) drawServing(ctx, F.S.spr, 0, -F.s / 2, F.s, true, this.room());   // upright on its foot
+      else { const s = F.size * (F.k || 1); drawServing(ctx, F.S.spr, 0, 0, s, false); }
+      ctx.restore();
+    });
     if (this.bubble && this.bubble.shown) { const [hx, hy] = m.headPos(); drawThought(ctx, this.bubble.x, this.bubble.y, this.bubble.r, FOODS[this.bubble.id].pic, G.t, hx + 10, hy - 10); }
     ctx.restore();
     this.pantry.draw(ctx);
@@ -6269,10 +6461,10 @@ SCREENS.feed = {
   drawOver(ctx) {
     const H = this.held;
     if (!H) return;
-    const s = H.size * 1.25, wob = Math.sin(G.t * 12) * 0.08;
+    const s = H.size * 1.25, wob = Math.sin(G.t * 12) * 0.08, [fx, fy] = H.foot || [0, s / 2];
     ctx.save(); ctx.translate(H.x, H.y); ctx.rotate(wob);
-    ctx.fillStyle = 'rgba(40,20,60,0.2)'; ctx.beginPath(); ctx.ellipse(6, s * 0.45, s * 0.35, s * 0.1, 0, 0, TAU); ctx.fill();
-    ctx.drawImage(H.S.spr, -s / 2, -s / 2, s, s);
+    ctx.fillStyle = 'rgba(40,20,60,0.2)'; ctx.beginPath(); ctx.ellipse(fx + 6, fy - s * 0.05, s * 0.35, s * 0.1, 0, 0, TAU); ctx.fill();
+    drawServing(ctx, H.S.spr, fx, fy - s / 2, s, !!H.foot, this.room());
     ctx.restore();
   },
 };
@@ -6853,8 +7045,11 @@ function drawPicked(st, ctx) {
   ctx.save(); ctx.translate(H.x, H.y); ctx.rotate(Math.sin(G.t * 12) * 0.08); Art.draw(ctx, FOODS[H.id].pic, 0, 0, H.s * 1.25); ctx.restore();
 }
 function sendDish(st, S) { SFX.play('sparkle'); go('feed', { id: st.rec.id, dish: S }); }
-// a picture of a finished dish, for the monster to eat: draw(ctx, size) fills a square canvas
-function dishSprite(draw, px = 256) { const c = makeCanvas(px, px); draw(c.getContext('2d'), px); return c; }
+// a picture of a finished dish, for the monster to eat: draw(ctx, width, height) fills a canvas px wide,
+// square unless the dish was built taller than it is wide (a burger or a pudding piled high)
+function dishSprite(draw, px = 256, h = px) { const c = makeCanvas(px, h); draw(c.getContext('2d'), px, h); return c; }
+// a tall dish's picture is at most this many times taller than it is wide (beyond that it gets thinner)
+const DISH_TALL = 6;
 
 /* =================== the chopping board: swipe to slice =================== */
 // A piece of food is the part of its picture inside a convex polygon, in the picture's own units (a
@@ -7422,12 +7617,13 @@ SCREENS.burger = {
   },
   viewK(G0) { const room = this.work.h * 0.8; return Math.min(1, room / Math.max(1, G0.top + 60)); },
   serve() {
-    const ids = this.stack.slice();
-    const spr = dishSprite((g, px) => {
-      const G0 = this.geometry(), hgt = G0.top + 80, k = Math.min(px * 0.9 / this.bw, px * 0.92 / hgt);
-      g.translate(px / 2, px * 0.96); g.scale(k, k);
+    const ids = this.stack.slice(), G0 = this.geometry(), px = 256;
+    // the burger keeps the shape it was built: 90% of its picture wide, and a taller stack a taller picture
+    const top = Math.max(...G0.layers.map(L => L.y + L.h)), k = Math.min(px * 0.9 / this.bw, px * (DISH_TALL - 0.08) / top);
+    const spr = dishSprite((g, w, h) => {
+      g.translate(w / 2, h - w * 0.04); g.scale(k, k);
       this.drawStack(g, 0, 0, G0, 0);
-    });
+    }, px, Math.max(px, top * k + px * 0.08));
     const S = servingOfParts(ids, 'burger', spr, { fx: ids.length >= 4 ? ['bigbite'] : [], name: 'burger' });
     sendDish(this, S);
   },
@@ -7819,7 +8015,9 @@ SCREENS.dessert = {
     this.scoops.forEach(s => { const [x, y] = this.scoopAt(s); x0 = Math.min(x0, x - this.dw * 0.41); x1 = Math.max(x1, x + this.dw * 0.41); y0 = Math.min(y0, y - this.scoopH(s.id)); });
     this.tops.forEach(t => { const [x, y] = this.topPos(t), r = this.topW(t.id) * 0.6; x0 = Math.min(x0, x - r); x1 = Math.max(x1, x + r); y0 = Math.min(y0, y - r); });
     x0 -= this.dw * 0.05; x1 += this.dw * 0.05;
-    const spr = dishSprite((g, px) => { const k = Math.min(px * 0.9 / (x1 - x0), px * 0.92 / (this.floor - y0)); g.translate(px / 2, px * 0.97); g.scale(k, k); g.translate(-(x0 + x1) / 2, -this.floor); this.drawDessert(g); });
+    // as wide as the picture, and a pile taller than that makes a taller picture
+    const px = 256, k = Math.min(px * 0.9 / (x1 - x0), px * (DISH_TALL - 0.08) / (this.floor - y0));
+    const spr = dishSprite((g, w, h) => { g.translate(w / 2, h - w * 0.03); g.scale(k, k); g.translate(-(x0 + x1) / 2, -this.floor); this.drawDessert(g); }, px, Math.max(px, (this.floor - y0) * k + px * 0.08));
     const S = servingOfParts(ids, 'dessert', spr, { name: this.base === 'd_cone' ? 'ice cream' : 'pudding' });
     sendDish(this, S);
   },
